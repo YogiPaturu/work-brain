@@ -1,16 +1,16 @@
-# Professional Second Brain — LLD-04: Interview Practice and Career Retrieval
+# Work Brain — LLD-04: Interview Practice and Career Retrieval
 
-**Document ID:** `PSB-LLD-004`  
-**Version:** `1`  
-**Status:** Draft for sibling cross-review  
-**Date:** `2026-09-30`  
-**Parent HLD:** `PSB-HLD-001` v2  
-**Sibling contracts:** `PSB-LLD-001` v2, `PSB-LLD-002` v2, `PSB-LLD-003` v2  
+**Document ID:** `WORK-BRAIN-LLD-004`
+**Version:** `1`
+**Status:** Draft for sibling cross-review
+**Date:** `2026-09-30`
+**Parent HLD:** `WORK-BRAIN-HLD-001` v2
+**Sibling contracts:** `WORK-BRAIN-LLD-001` v2, `WORK-BRAIN-LLD-002` v2, `WORK-BRAIN-LLD-003` v2
 **Implementation posture:** **Prescriptive with bounded local discretion**
 
 ## 1. Executive Summary
 
-This LLD defines the Career projection for the initial local Professional Second Brain: deterministic interview-question lookup, pageable retrieval of relevant professional evidence, user-led story/angle selection, interview preparation and mock-practice flows, evidence-grounded critique, and durable user-authored interview-candidate marks.
+This LLD defines the Career projection for the initial local Work Brain: deterministic interview-question lookup, pageable retrieval of relevant professional evidence, user-led story/angle selection, interview preparation and mock-practice flows, evidence-grounded critique, and durable user-authored interview-candidate marks.
 
 The core rule is:
 
@@ -40,10 +40,10 @@ A user may explicitly mark an entry as an interview candidate. That mark is dura
 
 This LLD is governed by:
 
-1. `PSB-HLD-001` v2.
-2. `PSB-LLD-001` v2 — Core Domain, Vault, and Persistence Contract.
-3. `PSB-LLD-002` v2 — Agent Runtime, Skills/SOPs, and Session Orchestration.
-4. `PSB-LLD-003` v2 — Retrieval, FTS, Embeddings, and Index Lifecycle.
+1. `WORK-BRAIN-HLD-001` v2.
+2. `WORK-BRAIN-LLD-001` v2 — Core Domain, Vault, and Persistence Contract.
+3. `WORK-BRAIN-LLD-002` v2 — Agent Runtime, Skills/SOPs, and Session Orchestration.
+4. `WORK-BRAIN-LLD-003` v2 — Retrieval, FTS, Embeddings, and Index Lifecycle.
 5. The supplied interview question bank as a representative v1 input shape: Markdown sections containing question lines prefixed by bracket tags for company, capability, employer signal, and provenance.
 6. `RANQ-LLD-PROMPT-01` v3 as the authoring discipline.
 
@@ -628,22 +628,22 @@ The JSONL event file is expected to remain tiny. V1 may scan it on process start
 Representative ownership:
 
 ```text
-src/professional_brain/career/
+src/work_brain/career/
   questions.*          # normalized types/query service
   marks.*              # mark event/domain service
   practice.*           # application workflow integration
 
-src/professional_brain/ports/
+src/work_brain/ports/
   question_bank.*
   career_mark_store.*
 
-src/professional_brain/adapters/questions/
+src/work_brain/adapters/questions/
   tagged_markdown.*
 
-src/professional_brain/adapters/career/
+src/work_brain/adapters/career/
   jsonl_marks.*
 
-skills/professional-brain/references/sops/
+skills/work-brain/references/sops/
   career.sop.md         # LLD-02-owned workflow instructions; updated to consume this contract
 
 resources/questions/
@@ -842,7 +842,7 @@ LLD-04 is implementation-ready when:
 
 ## 29. Documentation Drift
 
-The parent HLD v1 and earlier sibling drafts referred to a CLI LLD-04 and a Career/Projection LLD-05. `PSB-HLD-001 v2` deliberately removes the dedicated CLI LLD from the required v1 design set and assigns `PSB-LLD-004` to Interview Practice and Career Retrieval. Exact CLI mechanics are now a thin-adapter implementation concern.
+The parent HLD v1 and earlier sibling drafts referred to a CLI LLD-04 and a Career/Projection LLD-05. `WORK-BRAIN-HLD-001 v2` deliberately removes the dedicated CLI LLD from the required v1 design set and assigns `WORK-BRAIN-LLD-004` to Interview Practice and Career Retrieval. Exact CLI mechanics are now a thin-adapter implementation concern.
 
 The earlier sibling drafts also used a total `search_evidence.limit` max of 20. LLD-03 v2 replaces that with bounded page size plus opaque continuation, preserving token efficiency without silently hiding later candidates.
 
@@ -886,4 +886,4 @@ Before freezing this LLD, verify that another competent engineer or coding agent
 - when practice creates new professional evidence;
 - what critique may and may not invent.
 
-If those checks pass with the sibling cross-review, LLD-04 is ready to join `PSB-HLD-001 v2 + PSB-LLD-001/002/003 v2` as the local v1 implementation baseline.
+If those checks pass with the sibling cross-review, LLD-04 is ready to join `WORK-BRAIN-HLD-001 v2 + WORK-BRAIN-LLD-001/002/003 v2` as the local v1 implementation baseline.

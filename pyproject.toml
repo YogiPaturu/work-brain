@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "work-brain"
 version = "0.1.0"
-description = "Local-first Work Brain core persistence"
+description = "Local-first Work Brain runtime and persistence"
 requires-python = ">=3.11"
 dependencies = []
 

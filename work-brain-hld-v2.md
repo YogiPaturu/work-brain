@@ -1,14 +1,14 @@
-# Professional Second Brain — High-Level Design
+# Work Brain — High-Level Design
 
-**Document ID:** `PSB-HLD-001`  
-**Version:** `2`  
-**Status:** Draft for LLD cross-review  
-**Date:** `2026-09-30`  
-**Architecture posture:** Local-first, hexagonal, model-efficient, user-controlled  
+**Document ID:** `WORK-BRAIN-HLD-001`
+**Version:** `2`
+**Status:** Draft for LLD cross-review
+**Date:** `2026-09-30`
+**Architecture posture:** Local-first, hexagonal, model-efficient, user-controlled
 
 ## 1. Executive Summary
 
-This design defines a local-first professional second brain whose primary long-term payoff is interview and career preparation, while providing immediate day-to-day value as a thinking partner, lightweight work-operations assistant, and communication aid.
+This design defines a local-first Work Brain whose primary long-term payoff is interview and career preparation, while providing immediate day-to-day value as a thinking partner, lightweight work-operations assistant, and communication aid.
 
 The system is built around continuous conversational use throughout the workday. Each conversation is captured verbatim, probed by an LLM using reusable SOPs, transformed into structured professional evidence, and indexed for later exact, lexical, and semantic retrieval. A daily journal is a human-readable projection over those conversations rather than the sole source of truth.
 
@@ -95,7 +95,7 @@ Key approved decisions from discovery include:
 - Hexagonal architecture is preferred.
 - Local CLI is the first implementation target.
 - Future cloud/AWS hosting is a portability concern, not a current infrastructure requirement.
-- The product is a professional second brain, not a generic second brain.
+- The product is a Work Brain, not a generic second brain.
 - Interview/career preparation is the primary long-term payoff.
 - Thinking partnership and day-to-day operations provide immediate recurring value.
 - Raw conversations are preserved verbatim.
@@ -382,7 +382,7 @@ A reusable Skill package acts as the agent workflow entry point/control plane. S
 Conceptually:
 
 ```text
-professional-brain Skill
+work-brain Skill
   |
   +-- core conversation SOP
   +-- think SOP
@@ -503,7 +503,7 @@ career-vault/
   context/
   questions/
   artifacts/
-  index/professional-brain.sqlite
+  index/work-brain.sqlite
 ```
 
 Exact filenames and formats are delegated to the data/persistence LLD.
@@ -705,7 +705,7 @@ Selected approach: high-level application retrieval tools implemented determinis
 Representative structure:
 
 ```text
-professional-brain/
+work-brain/
   README.md
   pyproject.toml or equivalent
   src/
@@ -714,7 +714,7 @@ professional-brain/
       application/
       adapters/
   skills/
-    professional-brain/
+    work-brain/
       SKILL.md
       agents/
       references/
@@ -821,7 +821,7 @@ Define the concrete domain types and durable local data contract for raw session
 
 **Responsibility**
 
-Define how the local agent starts sessions, selects/loads the professional-brain Skill, applies core/mode/domain SOPs, retrieves context, probes, commits structured evidence, handles token budgets, performs safe communication drafting, and recovers incomplete sessions.
+Define how the local agent starts sessions, selects/loads the work-brain Skill, applies core/mode/domain SOPs, retrieves context, probes, commits structured evidence, handles token budgets, performs safe communication drafting, and recovers incomplete sessions.
 
 **Must settle**
 

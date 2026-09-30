@@ -1,11 +1,11 @@
-# Professional Second Brain — LLD-02: Agent Runtime, Skills/SOPs, and Session Orchestration
+# Work Brain — LLD-02: Agent Runtime, Skills/SOPs, and Session Orchestration
 
-**Document ID:** `PSB-LLD-002`  
-**Version:** `2`  
-**Status:** Draft for sibling cross-review  
-**Date:** `2026-09-30`  
-**Parent HLD:** `PSB-HLD-001` v2  
-**Sibling dependencies:** `PSB-LLD-001` v2, `PSB-LLD-003` v2, `PSB-LLD-004` v1  
+**Document ID:** `WORK-BRAIN-LLD-002`
+**Version:** `2`
+**Status:** Draft for sibling cross-review
+**Date:** `2026-09-30`
+**Parent HLD:** `WORK-BRAIN-HLD-001` v2
+**Sibling dependencies:** `WORK-BRAIN-LLD-001` v2, `WORK-BRAIN-LLD-003` v2, `WORK-BRAIN-LLD-004` v1
 **Implementation posture:** **Prescriptive with bounded local discretion**
 
 ## 1. Executive Summary
@@ -24,8 +24,8 @@ No daemon, worker queue, or background agent is required. All correctness-sensit
 
 This LLD is governed by:
 
-1. `PSB-HLD-001` v2 — Professional Second Brain High-Level Design.
-2. `PSB-LLD-001` v2 — Core Domain, Vault, and Persistence Contract.
+1. `WORK-BRAIN-HLD-001` v2 — Work Brain High-Level Design.
+2. `WORK-BRAIN-LLD-001` v2 — Core Domain, Vault, and Persistence Contract.
 3. `RANQ-LLD-PROMPT-01` v3 — Low-Level Design Discovery and Authoring SOP used as the authoring process.
 4. The approved design decisions established in the current project conversation, including:
    - OpenAI-compatible Skills are the reusable workflow package/discovery mechanism;
@@ -177,11 +177,11 @@ The model receives only high-level tools. It MUST NOT receive raw database handl
 
 ### 7.1 Required public layout
 
-The public repository contains one initial professional-brain Skill:
+The public repository contains one initial work-brain Skill:
 
 ```text
 skills/
-└── professional-brain/
+└── work-brain/
     ├── SKILL.md
     ├── agents/
     │   └── openai.yaml
@@ -230,9 +230,9 @@ No user-specific question bank, transcript, professional facts, private example,
 Each SOP/probe resource MUST declare a stable resource ID and integer version in its body, for example:
 
 ```text
-PSB-SOP-CORE v1
-PSB-SOP-THINK v1
-PSB-PROBE-ENGINEERING v1
+WORK-BRAIN-SOP-CORE v1
+WORK-BRAIN-SOP-THINK v1
+WORK-BRAIN-PROBE-ENGINEERING v1
 ```
 
 The runtime records loaded resource identities in `session.json.runtime.sops` using:
@@ -245,9 +245,9 @@ Example:
 
 ```json
 [
-  "PSB-SOP-CORE@1",
-  "PSB-SOP-THINK@1",
-  "PSB-PROBE-ENGINEERING@1"
+  "WORK-BRAIN-SOP-CORE@1",
+  "WORK-BRAIN-SOP-THINK@1",
+  "WORK-BRAIN-PROBE-ENGINEERING@1"
 ]
 ```
 
@@ -255,7 +255,7 @@ Versioning is required here because prompt/SOP provenance is a current debugging
 
 ## 8. Core SOP Contract
 
-`core-conversation.sop.md` is loaded for every professional-brain session and MUST encode the common behavioral contract.
+`core-conversation.sop.md` is loaded for every work-brain session and MUST encode the common behavioral contract.
 
 Its required behavior is:
 
@@ -508,7 +508,7 @@ The model context may contain:
 
 ```text
 base runtime/system instructions
-+ professional-brain Skill control instructions
++ work-brain Skill control instructions
 + core conversation SOP
 + active workflow SOP
 + zero/one/two probe packs
@@ -1175,7 +1175,7 @@ Journal/state/index work may run immediately after commit in the same process. A
 Because the implementation language is not yet frozen, this LLD defines logical modules rather than language-specific filenames.
 
 ```text
-src/professional_brain/
+src/work_brain/
 ├── application/
 │   ├── session_orchestrator
 │   ├── context_planner
@@ -1196,7 +1196,7 @@ src/professional_brain/
     ├── model/
     └── skill_filesystem/
 
-skills/professional-brain/
+skills/work-brain/
 └── ... as defined in §7
 ```
 

@@ -141,6 +141,23 @@ class Vault:
             raise IntegrityError(f"session ID mismatch in metadata: {session_id}")
         return value
 
+    def update_session_metadata(self, session_id: str, metadata: Mapping[str, Any]) -> dict[str, Any]:
+        """Atomically update the mutable session snapshot after source work succeeds."""
+        with self._require_or_lock():
+            current = self.read_session(session_id)
+            candidate = dict(metadata)
+            if candidate.get("session_id") != current["session_id"] or candidate.get("entry_id") != current["entry_id"]:
+                raise IntegrityError("session identity cannot change")
+            candidate.setdefault("started_at", current["started_at"])
+            candidate.setdefault("local_date", current["local_date"])
+            candidate.setdefault("ended_at", current.get("ended_at"))
+            candidate.setdefault("modes", current.get("modes", []))
+            candidate.setdefault("domains", current.get("domains", []))
+            candidate.setdefault("runtime", current.get("runtime", {}))
+            validate_session(candidate)
+            atomic_replace_json(self.session_dir(session_id) / "session.json", candidate)
+            return candidate
+
     def _read_turns(self, session_id: str, *, repair: bool = False) -> list[dict[str, Any]]:
         path = self.session_dir(session_id) / "turns.jsonl"
         records, _ = read_jsonl_with_recovery(path)

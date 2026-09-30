@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+import json
+from pathlib import Path
+
+from work_brain import (
+    CommitDraftValidator,
+    RuntimeState,
+    ScriptedModel,
+    SessionOrchestrator,
+    SkillLoader,
+    ToolRegistry,
+    ValidationError,
+    Vault,
+    new_uuid7,
+    select_workflow,
+)
+
+
+def draft(*, workflow: str = "think", bad_runtime_field: bool = False) -> dict:
+    sections = {name: [] for name in (
+        "context", "observations", "significance", "contribution", "reasoning", "evidence",
+        "alternatives_tradeoffs", "decisions_actions", "expectations", "outcomes", "learning", "open_questions",
+    )}
+    sections["context"] = [{"text": "We examined the import boundary.", "basis": "stated", "source_turns": [1]}]
+    value = {
+        "title": "Import boundary decision",
+        "summary": "Clarified the trade-off and next experiment.",
+        "historical_occurrence": {
+            "start": "2026-09-29", "end": None, "precision": "day", "label": "historical"
+        } if workflow == "backfill" else None,
+        "domains": ["engineering"],
+        "sections": sections,
+        "state_changes": [], "entity_candidates": [], "artifact_candidates": [], "source_entry_refs": [],
+    }
+    if bad_runtime_field:
+        value["entry_id"] = new_uuid7()
+    return value
+
+
+class LLD2Tests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.vault = Vault(Path(self.tempdir.name) / "vault").initialize()
+
+    def tearDown(self) -> None:
+        self.tempdir.cleanup()
+
+    def test_skill_loader_is_progressive_and_versioned(self) -> None:
+        loaded = SkillLoader().load("think", ["engineering", "product", "leadership"])
+        self.assertEqual(["WORK-BRAIN-SKILL@1", "WORK-BRAIN-SOP-CORE@1", "WORK-BRAIN-SOP-THINK@1", "WORK-BRAIN-PROBE-ENGINEERING@1", "WORK-BRAIN-PROBE-PRODUCT@1"], loaded.identities)
+        self.assertNotIn("leadership", loaded.text)
+
+    def test_workflow_selection_is_deterministic(self) -> None:
+        self.assertEqual("think", select_workflow("think with me"))
+        self.assertEqual("close-day", select_workflow("close my day"))
+        self.assertEqual("operate", select_workflow(None, "operate"))
+        self.assertEqual("think", select_workflow("something ambiguous"))
+
+    def test_orchestrator_persists_turn_before_model_and_resolves_commit(self) -> None:
+        model = ScriptedModel(drafts=[draft()])
+        orchestrator = SessionOrchestrator(self.vault, model)
+        session = orchestrator.start("I am deciding how to isolate imports.", workflow="think", domains=["engineering"])
+        self.assertEqual(RuntimeState.ACTIVE, orchestrator.state)
+        self.assertEqual(2, len(self.vault.list_turns(session["session_id"])))
+        entry = orchestrator.close()
+        self.assertEqual(1, entry.revision)
+        self.assertEqual(RuntimeState.COMMITTED, orchestrator.state)
+        self.assertEqual(["respond", "commit_draft"], [call["kind"] for call in model.calls])
+        self.assertEqual(["WORK-BRAIN-SKILL@1", "WORK-BRAIN-SOP-CORE@1", "WORK-BRAIN-SOP-THINK@1", "WORK-BRAIN-PROBE-ENGINEERING@1"], self.vault.read_session(session["session_id"])["runtime"]["sops"])
+
+    def test_runtime_owned_fields_are_rejected_before_publication(self) -> None:
+        validator = CommitDraftValidator()
+        with self.assertRaises(ValidationError):
+            validator.validate(draft(bad_runtime_field=True), turn_count=1, workflow="think")
+
+    def test_commit_repair_is_bounded_and_raw_session_remains_recoverable(self) -> None:
+        model = ScriptedModel(drafts=[draft(bad_runtime_field=True)], repairs=[])
+        orchestrator = SessionOrchestrator(self.vault, model)
+        session = orchestrator.start("Keep this raw conversation.", workflow="think")
+        with self.assertRaises(ValidationError):
+            orchestrator.close()
+        self.assertEqual(RuntimeState.RECOVERABLE, orchestrator.state)
+        self.assertEqual(2, len(self.vault.list_turns(session["session_id"])))
+        self.assertEqual([], self.vault.all_current_entries())
+        self.assertEqual(2, len([call for call in model.calls if call["kind"] == "repair_commit_draft"]))
+
+    def test_backfill_requires_historical_occurrence_and_tools_are_high_level(self) -> None:
+        validator = CommitDraftValidator()
+        self.assertEqual("reconstructed", "reconstructed" if validator.validate(draft(workflow="backfill"), turn_count=1, workflow="backfill") else "")
+        registry = ToolRegistry(self.vault)
+        self.assertEqual({"get_current_state", "get_recent_work"}, {tool.name for tool in registry.definitions("open-day")})
+        self.assertFalse(any(tool.name in {"sql", "filesystem", "vector"} for tool in registry.definitions("think")))
+
+    def test_resolver_owns_catalog_and_state_ids(self) -> None:
+        model_draft = draft()
+        model_draft["entity_candidates"] = [{"kind": "project", "canonical_name": "Import Service", "aliases": []}]
+        model_draft["state_changes"] = [{"operation": "create", "kind": "task", "fields": {"title": "Run import experiment"}, "source_turns": [1]}]
+        model = ScriptedModel(drafts=[model_draft])
+        orchestrator = SessionOrchestrator(self.vault, model)
+        session = orchestrator.start("We need to run an import experiment.", workflow="operate")
+        orchestrator.close()
+        self.assertEqual(1, len(list((self.vault.root / "catalog/entities").glob("*.json"))))
+        state = json.loads((self.vault.root / "state/current.json").read_text(encoding="utf-8"))
+        self.assertEqual("Run import experiment", state["items"][0]["title"])
+        self.assertEqual("operate", self.vault.get_current_entry(session["entry_id"]).modes[0])
+
+    def test_context_pressure_rolls_to_a_new_session(self) -> None:
+        model = ScriptedModel(drafts=[draft(), draft()], context_window=2_200, output_reserve=300)
+        orchestrator = SessionOrchestrator(self.vault, model)
+        first = orchestrator.start("Short first topic.", workflow="think")
+        orchestrator.turn("x" * 2_000)
+        orchestrator.turn("y" * 1_000)
+        sessions = self.vault.all_sessions()
+        self.assertEqual(2, len(sessions))
+        self.assertEqual("Short first topic.", self.vault.list_turns(first["session_id"])[0]["content"])
+        self.assertEqual(1, len(self.vault.all_current_entries()))
+
+    def test_reextract_creates_revision_without_rewriting_turns(self) -> None:
+        model = ScriptedModel(drafts=[draft(), draft()])
+        orchestrator = SessionOrchestrator(self.vault, model)
+        session = orchestrator.start("Capture this once.", workflow="think")
+        orchestrator.close()
+        before = self.vault.list_turns(session["session_id"])
+        second = orchestrator.reextract(session["session_id"], workflow="think")
+        self.assertEqual(2, second.revision)
+        self.assertEqual(before, self.vault.list_turns(session["session_id"]))
+
+
+if __name__ == "__main__":
+    unittest.main()

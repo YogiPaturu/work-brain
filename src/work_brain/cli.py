@@ -5,6 +5,8 @@ import json
 import sys
 
 from .vault import Vault
+from .commit import CommitResolver
+from .instructions import SkillLoader
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -26,6 +28,14 @@ def main(argv: list[str] | None = None) -> int:
     commit = sub.add_parser("commit", help="publish a resolved LLD1 SessionEntry JSON payload")
     commit.add_argument("--session-id", required=True)
     commit.add_argument("--file", required=True, help="JSON file containing the resolved SessionEntry payload")
+    draft = sub.add_parser("commit-draft", help="validate and resolve an LLD2 CommitDraft")
+    draft.add_argument("--session-id", required=True)
+    draft.add_argument("--workflow", default="think")
+    draft.add_argument("--file", required=True, help="JSON file containing a model-produced CommitDraft")
+    skills = sub.add_parser("skills", help="show the progressively loaded Skill/SOP resources")
+    skills.add_argument("--workflow", default="think")
+    skills.add_argument("--domain", action="append", default=[])
+    sub.add_parser("recoverable", help="list unfinished sessions")
     args = parser.parse_args(argv)
     vault = Vault(args.vault)
     if args.command == "init":
@@ -49,6 +59,19 @@ def main(argv: list[str] | None = None) -> int:
             payload = json.load(handle)
         entry = vault.commit_entry(args.session_id, payload)
         print(json.dumps({"entry_id": entry.entry_id, "revision": entry.revision, "commit_id": entry.commit_id}, indent=2))
+        return 0
+    if args.command == "commit-draft":
+        with open(args.file, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        entry = CommitResolver(vault).publish(args.session_id, payload, workflow=args.workflow)
+        print(json.dumps({"entry_id": entry.entry_id, "revision": entry.revision, "commit_id": entry.commit_id}, indent=2))
+        return 0
+    if args.command == "skills":
+        loaded = SkillLoader().load(args.workflow, args.domain)
+        print(json.dumps({"resources": loaded.identities, "missing": list(loaded.missing)}, indent=2))
+        return 0
+    if args.command == "recoverable":
+        print(json.dumps([session for session in vault.all_sessions() if session.get("ended_at") is None], indent=2))
         return 0
     diagnostics = vault.doctor()
     if diagnostics:

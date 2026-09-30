@@ -1,6 +1,6 @@
-# Professional Second Brain — Future Considerations
+# Work Brain — Future Considerations
 
-**Status:** Non-normative design notes  
+**Status:** Non-normative design notes
 **Purpose:** Preserve deferred ideas, possible extensions, and future design questions without making them requirements for the current implementation baseline.
 
 These items are intentionally outside the current HLD/LLD contract unless a future revision explicitly promotes them into scope.

@@ -1,6 +1,6 @@
 # Work Brain
 
-Work Brain is a local-first professional second brain: a bounded CLI
+Work Brain is a local-first professional evidence system: a bounded CLI
 conversation experience that helps a person think through work today while
 preserving durable evidence for future context recovery, communication, and
 career preparation.
@@ -32,7 +32,7 @@ service, CRM, or generic personal-life knowledge base.
 |---|---|---|
 | HLD | Product boundaries, privacy model, shared evidence model, local-first architecture | Design source included |
 | LLD1 | Vault, raw turns, entry revisions, amendments, entities, artifacts, WorkState, journals, SQLite metadata, rebuilds, integrity checks | Implemented in `src/work_brain` |
-| LLD2 | Skills/SOPs, session orchestration, model adapter, probing, CommitDraft resolution, Think/Operate/Communicate workflows | Contract documented; adapter/runtime wiring is the next layer |
+| LLD2 | Skills/SOPs, session orchestration, model adapter port, probing, CommitDraft resolution, Think/Operate/Communicate workflows | Implemented in `src/work_brain`, `skills/work-brain`, and `tests/test_lld2.py` |
 | LLD3 | FTS5, local embeddings, vector index, hybrid retrieval, pagination, hydration, index lifecycle | Contract documented; retrieval backend is not yet in the runnable baseline |
 | LLD4 | Question-bank normalization/filtering, interview practice, human-led career retrieval, candidate marks | Contract documented; career projection is not yet in the runnable baseline |
 
@@ -60,6 +60,43 @@ Run the tests directly from a checkout:
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
+## Optional voice interface: Yap
+
+[Yap](https://github.com/latent-variable/Yap) is a useful conversational
+front end for Work Brain on macOS. It gives your terminal-based LLM ears and a
+voice: dictate into the active terminal, then select an answer and have Yap
+read it back. Yap is optional and separate from Work Brain; Work Brain remains
+responsible for durable turns, structured commits, and the private vault.
+
+Install Yap with Homebrew:
+
+```bash
+# Install Homebrew first if it is not already installed: https://brew.sh
+brew install --cask latent-variable/tap/yap
+```
+
+On first launch, open Yap's model settings and download its voice model, then
+grant Microphone and Accessibility permissions when macOS asks. The default
+shortcuts documented by Yap are `⌘⇧D` to dictate and `⌘⇧R` to read selected
+text aloud. You can change them in Yap's settings.
+
+A practical Work Brain loop is:
+
+1. Start your CLI LLM in the terminal and give it the Work Brain Skill/SOP
+   context described below.
+2. Press Yap's dictate shortcut, speak your thought, and press it again to
+   insert the text into the terminal prompt.
+3. Let the LLM ask questions and answer them conversationally. Persist each
+   visible user and assistant turn with `work-brain turn` before moving on.
+4. When the bounded session is complete, have the LLM emit an LLD2
+   `CommitDraft`, then publish it with `work-brain commit-draft`.
+5. Select the useful part of the LLM response and use Yap's read shortcut when
+   you want the terminal to brief you aloud.
+
+Yap's audio and models remain on your Mac according to its project
+documentation. Keep Work Brain's vault outside the public repository and do
+not put provider credentials into prompts, turns, or the vault.
+
 Create a publication-safe synthetic vault:
 
 ```bash
@@ -78,6 +115,10 @@ work-brain --vault "$WORK_BRAIN_VAULT" init
 work-brain --vault "$WORK_BRAIN_VAULT" doctor
 work-brain --vault "$WORK_BRAIN_VAULT" rebuild
 
+# Inspect the progressive Skill/SOP/probe set for a workflow.
+work-brain --vault "$WORK_BRAIN_VAULT" skills \
+  --workflow think --domain engineering
+
 # Start a bounded session and note the printed session_id.
 work-brain --vault "$WORK_BRAIN_VAULT" session-start \
   --mode think --domain engineering
@@ -91,11 +132,18 @@ work-brain --vault "$WORK_BRAIN_VAULT" turn \
 # Publish a validated, resolved LLD1 SessionEntry JSON payload.
 work-brain --vault "$WORK_BRAIN_VAULT" commit \
   --session-id <session-id> --file resolved-entry.json
+
+# Or validate and resolve an LLD2 model-produced CommitDraft.
+work-brain --vault "$WORK_BRAIN_VAULT" commit-draft \
+  --session-id <session-id> --workflow think --file commit-draft.json
+
+# Inspect unfinished sessions after an interrupted model/process.
+work-brain --vault "$WORK_BRAIN_VAULT" recoverable
 ```
 
-`commit` accepts the resolved LLD1 `SessionEntry` shape, not arbitrary model
-output. The adapter is responsible for validation, stable-ID resolution, and
-source references before publication.
+`commit` accepts the resolved LLD1 `SessionEntry` shape. `commit-draft` accepts
+the strict LLD2 model shape and performs validation, stable-ID resolution,
+source-reference checks, and source-first publication for you.
 
 ## Connecting a CLI LLM
 
@@ -111,11 +159,11 @@ thin Work Brain adapter
   - starts/resumes a session
   - appends every user/assistant turn
   - assembles bounded context
-  - asks the model for a CommitDraft
-  - validates and resolves the draft
+  - asks the model for a CommitDraft in the active context
+  - validates and resolves the draft through `CommitResolver`
           |
           v
-Vault.commit_entry() or `work-brain commit`
+Vault.commit_entry() or `work-brain commit-draft`
 ```
 
 The adapter should follow this lifecycle:
@@ -131,17 +179,17 @@ The adapter should follow this lifecycle:
 5. Resolve the draft into the LLD1 `SessionEntry` contract, including UUIDv7
    identities, revision metadata, provenance, entity/artifact references, and
    state mutations.
-6. Publish through the Work Brain persistence port or the `commit` command.
+6. Publish through the Work Brain persistence port or the `commit-draft` command.
    Source publication happens before journals, state, SQLite, FTS, or vector
    updates.
 
 For a provider-specific integration, replace `your-cli-llm` with the command
-that accepts a prompt on stdin and returns structured JSON on stdout:
+that accepts a prompt on stdin and returns the LLD2 CommitDraft JSON on stdout:
 
 ```bash
-your-cli-llm --json < bounded-commit-prompt.json > resolved-entry.json
-work-brain --vault "$WORK_BRAIN_VAULT" commit \
-  --session-id "$SESSION_ID" --file resolved-entry.json
+your-cli-llm --json < bounded-commit-prompt.json > commit-draft.json
+work-brain --vault "$WORK_BRAIN_VAULT" commit-draft \
+  --session-id "$SESSION_ID" --workflow think --file commit-draft.json
 ```
 
 The repository intentionally does not assume a particular CLI LLM, API key
@@ -185,10 +233,11 @@ Important invariants:
 ## Repository layout
 
 ```text
-src/work_brain/              LLD1 domain and persistence implementation
+src/work_brain/              LLD1 domain/persistence plus LLD2 runtime services
+skills/work-brain/           public Skill, SOPs, and domain probes
 migrations/                  persistence-owned SQLite migrations
 examples/                    synthetic vault and integration examples
-tests/                       LLD1 durability and rebuild tests
+tests/                       LLD1 durability and LLD2 runtime/contract tests
 work-brain-hld-v2.md         high-level architecture
 work-brain-lld-01-*.md       vault and persistence contract
 work-brain-lld-02-*.md       agent runtime and SOP contract
@@ -222,4 +271,3 @@ placement. It does not silently rewrite raw evidence.
 - [LLD2: Agent Runtime, Skills/SOPs, and Session Orchestration](work-brain-lld-02-agent-runtime-skills-session-orchestration-v2.md)
 - [LLD3: Retrieval, FTS, Embeddings, and Index Lifecycle](work-brain-lld-03-retrieval-fts-embeddings-index-lifecycle-v2.md)
 - [LLD4: Interview Practice and Career Retrieval](work-brain-lld-04-interview-practice-career-retrieval-v1.md)
-

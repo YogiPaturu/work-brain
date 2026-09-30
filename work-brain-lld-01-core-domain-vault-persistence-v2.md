@@ -1,15 +1,15 @@
-# Professional Second Brain — LLD-01: Core Domain, Vault, and Persistence Contract
+# Work Brain — LLD-01: Core Domain, Vault, and Persistence Contract
 
-**Document ID:** `PSB-LLD-001`  
-**Version:** `2`  
-**Status:** Draft for sibling cross-review  
-**Date:** `2026-09-30`  
-**Parent HLD:** `PSB-HLD-001` v2  
+**Document ID:** `WORK-BRAIN-LLD-001`
+**Version:** `2`
+**Status:** Draft for sibling cross-review
+**Date:** `2026-09-30`
+**Parent HLD:** `WORK-BRAIN-HLD-001` v2
 **Implementation posture:** Prescriptive with bounded local discretion
 
 ## 1. Executive Summary
 
-This LLD defines the durable local data contract for the Professional Second Brain. It translates the parent HLD's source-of-truth, journaling, privacy, and rebuildability decisions into concrete filesystem and SQLite persistence semantics.
+This LLD defines the durable local data contract for the Work Brain. It translates the parent HLD's source-of-truth, journaling, privacy, and rebuildability decisions into concrete filesystem and SQLite persistence semantics.
 
 The central persistence rule is:
 
@@ -31,7 +31,7 @@ This LLD deliberately does not define agent probing behavior, model routing, FTS
 
 This LLD is governed by:
 
-1. `PSB-HLD-001` v2 — Professional Second Brain High-Level Design.
+1. `WORK-BRAIN-HLD-001` v2 — Work Brain High-Level Design.
 2. The approved design decisions in the discovery conversation that produced that HLD.
 3. The Ranq Low-Level Design Discovery and Authoring SOP, used as the authoring discipline for this LLD.
 
@@ -264,7 +264,7 @@ career-vault/
 │   └── marks.jsonl          # LLD-04-owned user preference source
 ├── artifacts/
 └── index/
-    └── professional-brain.sqlite
+    └── work-brain.sqlite
 ```
 
 Authority by directory:
@@ -300,7 +300,7 @@ Each session directory contains one current metadata snapshot:
   "domains": ["engineering"],
   "runtime": {
     "model": "<runtime supplied model identifier>",
-    "skill": "professional-brain",
+    "skill": "work-brain",
     "sops": ["core-conversation@1", "think@1", "probe:engineering@1"],
     "app_revision": "<optional git revision>"
   }
@@ -1410,7 +1410,7 @@ LLD-01 is implementation-ready when all of the following are true:
 - contemporaneous and reconstructed entries are queryably distinct;
 - entity and artifact references resolve through stable IDs;
 - state mutations produce current lightweight WorkState and can be fully rebuilt;
-- deleting `journal/`, `state/`, and `index/professional-brain.sqlite` does not destroy source evidence and all can be rebuilt;
+- deleting `journal/`, `state/`, and `index/work-brain.sqlite` does not destroy source evidence and all can be rebuilt;
 - the affected day's journal updates after a new session without requiring close-day;
 - SQLite domain tables can be reconstructed from the vault;
 - failed SQLite/journal/index updates after a source commit leave the source valid and detectable as stale;

@@ -1,16 +1,16 @@
-# Professional Second Brain — LLD-03: Retrieval, FTS, Embeddings, and Index Lifecycle
+# Work Brain — LLD-03: Retrieval, FTS, Embeddings, and Index Lifecycle
 
-**Document ID:** `PSB-LLD-003`  
-**Version:** `2`  
-**Status:** Draft for sibling cross-review  
-**Date:** `2026-09-30`  
-**Parent HLD:** `PSB-HLD-001 v2`  
-**Sibling contracts:** `PSB-LLD-001 v2`, `PSB-LLD-002 v2`, `PSB-LLD-004 v1`  
+**Document ID:** `WORK-BRAIN-LLD-003`
+**Version:** `2`
+**Status:** Draft for sibling cross-review
+**Date:** `2026-09-30`
+**Parent HLD:** `WORK-BRAIN-HLD-001 v2`
+**Sibling contracts:** `WORK-BRAIN-LLD-001 v2`, `WORK-BRAIN-LLD-002 v2`, `WORK-BRAIN-LLD-004 v1`
 **Implementation posture:** Prescriptive with bounded local discretion
 
 ## 1. Executive Summary
 
-This LLD defines the searchable corpus, exact/lexical/semantic retrieval contracts, SQLite retrieval schema, local embedding implementation, deterministic candidate fusion, source hydration, staleness handling, incremental indexing, full reindex behavior, and retrieval evaluation framework for the local Professional Second Brain.
+This LLD defines the searchable corpus, exact/lexical/semantic retrieval contracts, SQLite retrieval schema, local embedding implementation, deterministic candidate fusion, source hydration, staleness handling, incremental indexing, full reindex behavior, and retrieval evaluation framework for the local Work Brain.
 
 The design keeps the retrieval subsystem deliberately small:
 
@@ -96,9 +96,9 @@ Retrieval should make the user's professional evidence easy to find with high us
 
 This LLD is governed by:
 
-1. `PSB-HLD-001 v2`.
-2. `PSB-LLD-001 v2` — Core Domain, Vault, and Persistence.
-3. `PSB-LLD-002 v2` — Agent Runtime, Skills/SOPs, and Session Orchestration.
+1. `WORK-BRAIN-HLD-001 v2`.
+2. `WORK-BRAIN-LLD-001 v2` — Core Domain, Vault, and Persistence.
+3. `WORK-BRAIN-LLD-002 v2` — Agent Runtime, Skills/SOPs, and Session Orchestration.
 4. The approved design conversation up to `2026-09-30` where it establishes that:
    - SQL, FTS5, and vectors are complementary;
    - the same evidence chunks should feed lexical and semantic search;
@@ -311,7 +311,7 @@ Internal filesystem paths, SQLite paths, hidden prompts, operational logs, embed
 The v1 retrieval recipe is:
 
 ```text
-PSB-RETRIEVAL-RECIPE@1
+WORK-BRAIN-RETRIEVAL-RECIPE@1
 ```
 
 The recipe identity exists because chunking/embedding/tokenization changes require deterministic staleness detection and a full reindex. This is a current operational requirement, not speculative source-versioning.
@@ -416,7 +416,7 @@ The canonical key string is UTF-8 encoded with `\0` separators and SHA-256 hashe
 Example conceptual input:
 
 ```text
-PSB-RETRIEVAL-RECIPE@1\0<entry_id>\01\0section\0reasoning\00
+WORK-BRAIN-RETRIEVAL-RECIPE@1\0<entry_id>\01\0section\0reasoning\00
 ```
 
 Chunk identity is an index identity, not a domain identity. It therefore does not use UUIDv7.
@@ -476,7 +476,7 @@ provider = local
 model_id = BAAI/bge-small-en-v1.5
 dimensions = 384
 normalization = l2
-adapter_recipe = PSB-BGE-QUERY-ADAPTER@1
+adapter_recipe = WORK-BRAIN-BGE-QUERY-ADAPTER@1
 ```
 
 A change to any of these values makes the semantic index globally stale until reindexed.
@@ -1318,7 +1318,7 @@ Embedding generation occurs **before** deleting the old retrieval rows so an emb
   "dependency_hash": "...",
   "status": "indexed",
   "chunk_count": 7,
-  "recipe_id": "PSB-RETRIEVAL-RECIPE@1",
+  "recipe_id": "WORK-BRAIN-RETRIEVAL-RECIPE@1",
   "embedding_model_id": "BAAI/bge-small-en-v1.5",
   "indexed_at": "2026-09-30T21:00:00+01:00"
 }
@@ -1880,7 +1880,7 @@ This is acceptable at one-user conversational write volume.
 Representative public implementation layout:
 
 ```text
-src/professional_brain/
+src/work_brain/
 ├── domain/
 │   └── retrieval_types.py
 ├── application/
@@ -1925,7 +1925,7 @@ Exact module names remain implementer discretion; ownership boundaries do not.
 | Contract | Consumers |
 |---|---|
 | searchable corpus = current SessionEntry revisions | LLD-01, LLD-02, LLD-04 |
-| `PSB-RETRIEVAL-RECIPE@1` chunk semantics | diagnostics, index lifecycle |
+| `WORK-BRAIN-RETRIEVAL-RECIPE@1` chunk semantics | diagnostics, index lifecycle |
 | `EvidenceRef {entry_id, revision}` | LLD-01, LLD-02, LLD-04 |
 | `EvidenceFilters` | LLD-02, LLD-04 |
 | `EvidenceCard` | LLD-02, LLD-04 |
@@ -1986,7 +1986,7 @@ The local adapter may display degraded/incomplete search, reindex progress, ambi
 
 Version 2 consolidates the previously pending LLD-01 dependency-invalidation hook and replaces the v1 `limit 1..20` total-result contract with bounded `page_size 1..20` plus opaque continuation. This changes retrieval traversal, not professional-evidence authority or the internal RRF algorithm.
 
-No genuine conflict remains among `PSB-HLD-001 v2`, `PSB-LLD-001 v2`, and `PSB-LLD-002 v2`. LLD-04 consumes these contracts without introducing a second evidence index.
+No genuine conflict remains among `WORK-BRAIN-HLD-001 v2`, `WORK-BRAIN-LLD-001 v2`, and `WORK-BRAIN-LLD-002 v2`. LLD-04 consumes these contracts without introducing a second evidence index.
 
 ## 40. Ordered Implementation Plan
 
@@ -2005,7 +2005,7 @@ Implement validators/value objects for:
 
 ### Step 2 — Implement deterministic chunker
 
-Implement `PSB-RETRIEVAL-RECIPE@1` over synthetic SessionEntry fixtures.
+Implement `WORK-BRAIN-RETRIEVAL-RECIPE@1` over synthetic SessionEntry fixtures.
 
 **Gate:** golden tests prove deterministic chunk IDs/text hashes and same output across repeated runs.
 
@@ -2160,4 +2160,4 @@ Before publication as the frozen implementation baseline, verify:
 - no example includes numeric career/story scoring;
 - no implementation agent must invent chunking, filter, fusion, hydration, staleness, or failure behavior.
 
-If these checks pass after sibling cross-review, `PSB-HLD-001 v2 + PSB-LLD-001 v2 + PSB-LLD-002 v2 + PSB-LLD-003 v2 + PSB-LLD-004 v1` form a coherent local v1 design set suitable for freezing the implementation baseline.
+If these checks pass after sibling cross-review, `WORK-BRAIN-HLD-001 v2 + WORK-BRAIN-LLD-001 v2 + WORK-BRAIN-LLD-002 v2 + WORK-BRAIN-LLD-003 v2 + WORK-BRAIN-LLD-004 v1` form a coherent local v1 design set suitable for freezing the implementation baseline.
