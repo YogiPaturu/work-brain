@@ -6,10 +6,11 @@ from .vault import Vault
 from .commit import CommitDraftValidator, CommitResolver
 from .instructions import InstructionResource, LoadedInstructions, SkillLoader
 from .model import ModelResponse, ScriptedModel
-from .orchestrator import ContextPlanner, RuntimeState, SessionOrchestrator, select_workflow
+from .orchestrator import ContextPlanner, PromptRoute, RuntimeState, SessionOrchestrator, normalize_routing_text, route_prompt, select_workflow
 from .tools import ToolDefinition, ToolRegistry, ToolResult
 from .capture import CaptureEvent, HarnessCaptureService, normalize_capture_event
 from .setup import HarnessSetup
+from .retrieval import EvidenceRetriever, EvidenceRef, LocalHashEmbeddingProvider
 
 __all__ = [
     "IntegrityError",
@@ -27,8 +28,11 @@ __all__ = [
     "ModelResponse",
     "ScriptedModel",
     "ContextPlanner",
+    "PromptRoute",
     "RuntimeState",
     "SessionOrchestrator",
+    "normalize_routing_text",
+    "route_prompt",
     "select_workflow",
     "ToolDefinition",
     "ToolRegistry",
@@ -37,4 +41,7 @@ __all__ = [
     "HarnessCaptureService",
     "normalize_capture_event",
     "HarnessSetup",
+    "EvidenceRetriever",
+    "EvidenceRef",
+    "LocalHashEmbeddingProvider",
 ]

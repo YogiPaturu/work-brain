@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from enum import Enum
+import re
+import unicodedata
 from typing import Any, Mapping
 
 from .commit import CommitResolver
@@ -21,28 +23,110 @@ class RuntimeState(str, Enum):
     RECOVERABLE = "recoverable"
 
 
-ALIASES = {
-    "think": "think", "think with me": "think", "reason": "think",
-    "operate": "operate", "plan my work": "operate", "what should i do": "operate",
-    "communicate": "communicate", "draft a message": "communicate",
-    "career": "career", "practice interview": "career",
-    "open day": "open-day", "start my day": "open-day",
-    "close day": "close-day", "close my day": "close-day",
-    "backfill": "backfill", "remember a past experience": "backfill",
-}
+@dataclass(frozen=True)
+class PromptRoute:
+    """Routing metadata derived from a prompt without changing its raw text."""
+
+    raw: str
+    activation: bool
+    routed_content: str
+    normalized_content: str
+    workflow: str
+    recognized: bool
+
+
+# Keep this table as the single conversational control vocabulary. Matching is
+# anchored at the beginning of normalized content, so ordinary sentences do
+# not become commands merely because they contain a related word.
+WORKFLOW_ALIASES: tuple[tuple[str, str], ...] = (
+    ("open my work journal", "open-day"),
+    ("start my day", "open-day"),
+    ("start work brain", "think"),
+    ("open day", "open-day"),
+    ("close my day", "close-day"),
+    ("finish my day", "close-day"),
+    ("wrap up my day", "close-day"),
+    ("close day", "close-day"),
+    ("help me think through", "think"),
+    ("challenge my thinking", "think"),
+    ("think with me", "think"),
+    ("capture this", "think"),
+    ("journal this", "think"),
+    ("think", "think"),
+    ("reason", "think"),
+    ("where did i leave off", "operate"),
+    ("where was i", "operate"),
+    ("what should i work on next", "operate"),
+    ("what should i work on", "operate"),
+    ("what am i working on", "operate"),
+    ("catch me up", "operate"),
+    ("give me a quick update", "operate"),
+    ("quick update", "operate"),
+    ("plan my work", "operate"),
+    ("what should i do", "operate"),
+    ("operate", "operate"),
+    ("draft a message", "communicate"),
+    ("communicate", "communicate"),
+    ("practice this interview question", "career"),
+    ("help me prepare for", "career"),
+    ("interview me", "career"),
+    ("practice interview", "career"),
+    ("career", "career"),
+    ("remember a past experience", "backfill"),
+    ("backfill", "backfill"),
+)
+
+# These are deliberately explicit activation aliases. Other recognized
+# workflow phrases route only after Work Brain is already active or after an
+# explicit `work brain` prefix.
+NATURAL_ACTIVATION_ALIASES = frozenset({"start my day", "open my work journal", "start work brain", "capture this", "journal this"})
+
+
+def normalize_routing_text(value: str) -> str:
+    """Normalize only command/routing text; never use this for persistence."""
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    normalized = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE)
+    return " ".join(normalized.strip().split())
+
+
+def _strip_work_brain_prefix(raw: str) -> tuple[bool, str]:
+    candidate = raw.strip()
+    match = re.match(r"(?:[/\$])?work(?:\s+|-)brain(?=$|[^\w])", candidate, flags=re.IGNORECASE)
+    if not match:
+        return False, raw
+    remainder = candidate[match.end():]
+    # Punctuation immediately after the spoken prefix is a delimiter, not
+    # content. Preserve all later punctuation and, importantly, preserve raw
+    # input separately for L0 evidence.
+    remainder = re.sub(r"^[\s,.:;!?/\\|_\-–—]+", "", remainder)
+    return True, remainder
+
+
+def _workflow_for_normalized(normalized: str, current: str | None = None) -> tuple[str, bool]:
+    for phrase, workflow in sorted(WORKFLOW_ALIASES, key=lambda item: len(item[0]), reverse=True):
+        if normalized == phrase or normalized.startswith(phrase + " "):
+            return workflow, True
+    if current in WORKFLOWS:
+        return current, False
+    return "think", False
+
+
+def route_prompt(intent: str | None, current: str | None = None) -> PromptRoute:
+    raw = intent if isinstance(intent, str) else ""
+    activation, routed = _strip_work_brain_prefix(raw)
+    normalized = normalize_routing_text(routed)
+    workflow, recognized = _workflow_for_normalized(normalized, current)
+    if not activation and normalized in NATURAL_ACTIVATION_ALIASES:
+        activation = True
+    return PromptRoute(raw=raw, activation=activation, routed_content=routed, normalized_content=normalized, workflow=workflow, recognized=recognized)
+
+
+# Backwards-compatible alias mapping for callers that imported the old table.
+ALIASES = dict(WORKFLOW_ALIASES)
 
 
 def select_workflow(intent: str | None, current: str | None = None) -> str:
-    if intent:
-        normalized = " ".join(intent.casefold().strip().split())
-        if normalized in ALIASES:
-            return ALIASES[normalized]
-        for phrase, workflow in sorted(ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
-            if phrase in normalized:
-                return workflow
-    if current in WORKFLOWS:
-        return current
-    return "think"
+    return route_prompt(intent, current).workflow
 
 
 @dataclass(frozen=True)
@@ -105,6 +189,19 @@ class SessionOrchestrator:
             raise ValidationError("session is not active")
         if not isinstance(user_text, str) or not user_text.strip():
             raise ValidationError("user_text must be non-empty")
+        route = route_prompt(user_text, self.workflow)
+        if route.recognized and route.workflow != self.workflow:
+            self.workflow = route.workflow
+            self.instructions = self.loader.load(self.workflow, self._domains)
+            self._modes = self._merge(self._modes, [self.workflow])
+            session = self.vault.read_session(self.session_id)
+            session["modes"] = self._merge(session.get("modes", []), [self.workflow])
+            session.setdefault("runtime", {}).update({
+                "workflow": self.workflow,
+                "sops": self.instructions.identities,
+                "missing_resources": list(self.instructions.missing),
+            })
+            self.vault.update_session_metadata(self.session_id, session)
         # Rollover happens before this user turn is appended so the new turn is
         # never split between the old and new bounded contexts.
         candidate_messages = self._messages + [{"role": "user", "content": user_text}]
@@ -116,7 +213,11 @@ class SessionOrchestrator:
         # This append is deliberately before any model invocation.
         self.vault.append_turn(self.session_id, "user", user_text)
         self._messages.append({"role": "user", "content": user_text})
-        if plan.rollover:
+        # A soft rollover threshold is useful once context exists, but a new
+        # session must be allowed to accept its first bounded user turn when
+        # the instructions alone put it near that threshold. Only a hard
+        # context overflow is rejected here.
+        if plan.estimated_input_tokens > plan.usable_input_tokens:
             raise PersistenceError("context budget reached; close and roll over before adding another turn")
         try:
             response = self._respond_with_tools()
@@ -136,7 +237,7 @@ class SessionOrchestrator:
         allowed = set(available)
         for _round in range(self.MAX_TOOL_ROUNDS):
             plan = self.context_planner.plan(self._messages, self.instructions.text, self.model)
-            if plan.rollover:
+            if plan.estimated_input_tokens > plan.usable_input_tokens:
                 raise PersistenceError("context budget reached during model/tool loop")
             response = self.model.respond(
                 self._messages, instructions=self.instructions.text, tools=available,
@@ -214,6 +315,22 @@ class SessionOrchestrator:
         except Exception:
             self.state = RuntimeState.RECOVERABLE
             raise
+
+    def complete_without_commit(self) -> None:
+        """Finish close-day when the gap check produced no new evidence.
+
+        Closing a Work Brain workflow and publishing a SessionEntry are
+        separate decisions.  The host capture adapter deactivates its mapping
+        independently; this method records the completed bounded session
+        without manufacturing a CommitDraft.
+        """
+        if self.state != RuntimeState.ACTIVE or self.session_id is None or self.workflow != "close-day":
+            raise ValidationError("only an active close-day session can complete without a commit")
+        session = self.vault.read_session(self.session_id)
+        session["ended_at"] = timestamp_now()
+        session.setdefault("runtime", {}).update({"workflow": "close-day", "commit_status": "no_new_evidence", "capture_status": "closed"})
+        self.vault.update_session_metadata(self.session_id, session)
+        self.state = RuntimeState.COMMITTED
 
     def recoverable_sessions(self) -> list[dict[str, Any]]:
         return [session for session in self.vault.all_sessions() if session.get("ended_at") is None]

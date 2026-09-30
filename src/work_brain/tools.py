@@ -51,7 +51,11 @@ class ToolRegistry:
 
     def __init__(self, vault: Any, retrieval: Mapping[str, Callable[..., Any]] | None = None):
         self.vault = vault
-        self.retrieval = dict(retrieval or {})
+        if retrieval is None:
+            from .retrieval import EvidenceRetriever
+            adapter = EvidenceRetriever(vault)
+            retrieval = {"search_evidence": adapter.search, "hydrate_evidence": adapter.hydrate}
+        self.retrieval = dict(retrieval)
 
     def definitions(self, workflow: str, *, committing: bool = False) -> tuple[ToolDefinition, ...]:
         if workflow not in PROFILES:

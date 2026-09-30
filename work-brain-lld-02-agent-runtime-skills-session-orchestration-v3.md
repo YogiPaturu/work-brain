@@ -1,6 +1,6 @@
 # Work Brain — LLD-002 v3: Harness Runtime, Skills, Capture, and CLI
 
-**Status:** implementation contract before LLD-03  
+**Status:** implemented contract consumed by LLD-03
 **Supersedes:** `work-brain-lld-02-agent-runtime-skills-session-orchestration-v2.md`  
 **Parent:** [`work-brain-hld-v3.md`](work-brain-hld-v3.md)  
 **Sibling contracts:** LLD-01 remains source authority; LLD-03 v3 consumes the
@@ -116,16 +116,19 @@ JSON output. Structured CommitDraft input can be read from stdin.
 
 Application services own validation, locks, and persistence; CLI handlers are
 thin. Retrieval commands do not expose SQL or vector primitives. `evidence
-search` delegates to LLD-03 once implemented and may report a stable
-`unavailable` result before then.
+search` delegates to the implemented LLD-03 retriever and may report stable
+degraded/incomplete results when an index component is unavailable.
 
 ## 5. Logical session lifecycle
 
 The host agent may begin an explicit Work Brain conversation by invoking the
-Skill or by sending a prompt beginning with `work brain:`. The capture adapter
-activates before the model responds and appends the exact initial user prompt.
-Subsequent visible user and assistant turns are captured by host lifecycle
-hooks. The model does not need to call a Work Brain model adapter.
+Skill, sending a prompt beginning with `work brain`, or using one of the narrow
+natural activation aliases `start my day`, `open my work journal`, `start work
+brain`, `capture this`, or `journal this`. The leading Work Brain phrase is
+case-insensitive and punctuation-tolerant for speech/dictation; routing uses
+the normalized remainder while the exact raw prompt is persisted. Subsequent
+visible user and assistant turns are captured by host lifecycle hooks. The
+model does not need to call a Work Brain model adapter.
 
 The logical state machine remains:
 
@@ -135,9 +138,13 @@ IDLE -> ACTIVE -> COMMITTING -> COMMITTED
 ```
 
 An ordinary coding-agent conversation with no explicit activation MUST remain
-outside Work Brain. `SessionEnd` or `Interrupt` removes the active mapping,
-does not fabricate an assistant turn, and leaves an unfinished session
-recoverable. Commit/close explicitly deactivates the host mapping.
+outside Work Brain; phrases such as `brainstorm this` or `think about this` do
+not activate it. `SessionEnd` or `Interrupt` removes the active mapping, does
+not fabricate an assistant turn, and leaves an unfinished session recoverable.
+`close my day` routes an active session to `close-day`; after the workflow
+finishes, the host mapping is explicitly deactivated even when the SOP says no
+new SessionEntry is needed. Commit/close explicitly deactivates the host
+mapping.
 
 Only one Work Brain writer may operate on a vault at a time. Existing LLD-01
 lock and source-first semantics remain authoritative.
@@ -155,6 +162,8 @@ CaptureEvent(
     host_model: str | None,
     recorded_at: str,
     explicit_activation: bool,
+    workflow_hint: str | None,
+    routed_content: str | None,
 )
 ```
 
@@ -194,6 +203,29 @@ Runtime provenance is stored in the existing LLD-01 session metadata:
 
 Operational host-to-Work-Brain mappings are private runtime state and are not
 a second evidence schema.
+
+### Speech-friendly routing contract
+
+Routing uses one normalization stage shared by the orchestrator and capture
+boundary:
+
+```text
+raw user prompt
+    -> case/punctuation/whitespace normalization for detection
+    -> optional leading Work Brain prefix removal
+    -> canonical workflow alias routing
+    -> original raw prompt persisted verbatim
+```
+
+The leading `work brain` phrase is case-insensitive and does not require a
+colon or punctuation. `work brain start my day`, `work brain: start my day`,
+`Work Brain, start my day`, and `WORK BRAIN START MY DAY` all route to
+`open-day`, while the stored turn remains byte-for-byte the observed prompt.
+The alias table is explicit and anchored; misspellings, `brainstorm this`, and
+other semantically similar phrases do not activate capture. Narrow natural
+activation aliases include `start my day`, `open my work journal`, `start work
+brain`, `capture this`, and `journal this`. Other workflow aliases route only
+inside an active session or after an explicit Work Brain prefix.
 
 ## 7. CommitDraft and recovery
 
@@ -260,9 +292,10 @@ Cursor hooks:        ~/.cursor/hooks.json
 The setup helper does not write the private vault path into Git or into the
 Skill package.
 
-## 10. Verification gates before LLD-03
+## 10. Verification gates passed before LLD-03
 
-The following must pass before LLD-03 implementation begins:
+The following gates were required before LLD-03 implementation began and are
+covered by the repository's fixture tests and manual smoke checklist:
 
 - portable frontmatter and internal resource provenance tests;
 - canonical Skill symlink/copy exposure without content divergence;
@@ -278,5 +311,5 @@ The following must pass before LLD-03 implementation begins:
 - manual smoke checklist exists for all three hosts and distinguishes fixture
   contract coverage from runtime-tested hosts.
 
-LLD-03 v3 must be cross-reviewed against this document and HLD-001 v3 before
-its implementation starts.
+LLD-03 v3 was cross-reviewed against this document and HLD-001 v3 before its
+implementation. Retrieval remains host-agnostic and uses the CLI boundary.

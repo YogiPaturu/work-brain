@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 from .errors import ValidationError
 from .fsutil import atomic_replace_json, ensure_private_file, read_json
-from .orchestrator import select_workflow
+from .orchestrator import PromptRoute, route_prompt, select_workflow
 from .timeutil import timestamp_now
 
 
@@ -23,6 +23,8 @@ class CaptureEvent:
     host_model: str | None = None
     recorded_at: str | None = None
     explicit_activation: bool = False
+    workflow_hint: str | None = None
+    routed_content: str | None = None
 
 
 def _value(payload: Mapping[str, Any], *keys: str) -> Any:
@@ -76,10 +78,8 @@ def _text(payload: Mapping[str, Any], *keys: str) -> str | None:
     return value
 
 
-def _prompt_activates(text: str | None) -> bool:
-    if not text:
-        return False
-    return bool(_ACTIVATION_RE.match(text) or re.match(r"^\s*(?:/|\$)work-brain(?:\s|$)", text, re.IGNORECASE))
+def _route_prompt(text: str | None) -> PromptRoute:
+    return route_prompt(text or "")
 
 
 def _normalize(host: str, payload: Mapping[str, Any], event_map: Mapping[str, str]) -> CaptureEvent:
@@ -98,6 +98,7 @@ def _normalize(host: str, payload: Mapping[str, Any], event_map: Mapping[str, st
         text = _text(payload, "last_assistant_message", "lastAssistantMessage", "text", "content")
         if text is None or not text:
             raise ValidationError("assistant capture event requires visible response text")
+    route = _route_prompt(text) if kind == "user_prompt" else None
     return CaptureEvent(
         host=host,
         kind=kind,
@@ -105,7 +106,9 @@ def _normalize(host: str, payload: Mapping[str, Any], event_map: Mapping[str, st
         text=text,
         host_model=_model(payload),
         recorded_at=_timestamp(payload),
-        explicit_activation=_explicit_skill(payload) or (kind == "user_prompt" and _prompt_activates(text)),
+        explicit_activation=_explicit_skill(payload) or bool(route and (route.activation or _ACTIVATION_RE.match(text or "") or re.match(r"^\s*(?:/|\$)work-brain(?:\s|$)", text or "", re.IGNORECASE))),
+        workflow_hint=route.workflow if route and (route.recognized or route.activation) else None,
+        routed_content=route.routed_content if route else None,
     )
 
 
@@ -192,7 +195,7 @@ class HarnessCaptureService:
                 if mapping is None and not event.explicit_activation:
                     return {"captured": False, "status": "inactive", "host": event.host, "host_session_id": event.host_session_id}
                 if mapping is None:
-                    workflow = select_workflow(event.text)
+                    workflow = event.workflow_hint or select_workflow(event.text)
                     session = self.vault.create_session(
                         started_at=event.recorded_at,
                         modes=[workflow],
@@ -202,22 +205,34 @@ class HarnessCaptureService:
                             "host_model": event.host_model,
                             "capture_fidelity": "verbatim",
                             "capture_activation": "explicit",
+                            "activation_trigger": event.text,
                             "capture_status": "active",
                             "workflow": workflow,
                         },
                     )
                     session_id = session["session_id"]
-                    mappings[key] = {"session_id": session_id, "host": event.host, "host_session_id": event.host_session_id}
+                    mappings[key] = {"session_id": session_id, "host": event.host, "host_session_id": event.host_session_id, "workflow": workflow}
+                    mapping = mappings[key]
                 else:
                     session_id = mapping["session_id"]
+                    workflow = mapping.get("workflow") or (self.vault.read_session(session_id).get("runtime") or {}).get("workflow")
                 self.vault.append_turn(session_id, "user", event.text or "", recorded_at=event.recorded_at)
+                requested_workflow = event.workflow_hint
+                if requested_workflow:
+                    session = self.vault.read_session(session_id)
+                    session.setdefault("runtime", {}).update({"workflow": requested_workflow, "lifecycle_request": event.text})
+                    self.vault.update_session_metadata(session_id, session)
+                    mapping["workflow"] = requested_workflow
                 self._write_mappings(mappings)
-                return {"captured": True, "status": "active", "session_id": session_id, "role": "user"}
+                return {"captured": True, "status": "active", "session_id": session_id, "role": "user", "workflow": requested_workflow or workflow}
             if mapping is None:
                 return {"captured": False, "status": "inactive", "host": event.host, "host_session_id": event.host_session_id}
             session_id = mapping["session_id"]
             if event.kind == "assistant_message":
                 self.vault.append_turn(session_id, "assistant", event.text or "", recorded_at=event.recorded_at)
+                if mapping.get("workflow") == "close-day":
+                    self._deactivate_mapping(mappings, key, session_id, status="closed")
+                    return {"captured": True, "status": "closed", "deactivated": True, "session_id": session_id, "role": "assistant", "workflow": "close-day"}
                 return {"captured": True, "status": "active", "session_id": session_id, "role": "assistant"}
             if event.kind in {"session_end", "interrupt"}:
                 self._deactivate_mapping(mappings, key, session_id, status="recoverable")
@@ -250,6 +265,8 @@ class HarnessCaptureService:
         try:
             session = self.vault.read_session(session_id)
             session.setdefault("runtime", {}).update({"capture_status": status})
+            if status == "closed" and session.get("ended_at") is None:
+                session["ended_at"] = timestamp_now()
             self.vault.update_session_metadata(session_id, session)
         finally:
             mappings.pop(key, None)

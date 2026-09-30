@@ -13,6 +13,7 @@ from .errors import FeatureUnavailable, IntegrityError, LockError, PersistenceEr
 from .fsutil import read_json
 from .instructions import SkillLoader
 from .setup import HarnessSetup
+from .retrieval import EvidenceRetriever
 from .vault import Vault
 
 
@@ -40,6 +41,7 @@ def _parser() -> argparse.ArgumentParser:
 
     sub.add_parser("init", help="create the private vault")
     sub.add_parser("rebuild", help="rebuild projections and SQLite")
+    sub.add_parser("reindex", help="rebuild the derived retrieval index")
     sub.add_parser("doctor", help="validate the vault")
 
     config = sub.add_parser("config", help="manage local user configuration")
@@ -83,6 +85,10 @@ def _parser() -> argparse.ArgumentParser:
     search = evidence_sub.add_parser("search")
     search.add_argument("--query", required=True)
     search.add_argument("--page-size", type=int, default=10)
+    search.add_argument("--filters", help="JSON object containing EvidenceFilters")
+    search.add_argument("--cursor")
+    hydrate = evidence_sub.add_parser("hydrate")
+    hydrate.add_argument("--file", help="JSON object with refs; omit or use - to read stdin")
     get = evidence_sub.add_parser("get")
     get.add_argument("--entry-id", required=True)
     get.add_argument("--revision", type=int)
@@ -145,7 +151,7 @@ def _hydrate(vault: Vault, entry_id: str, revision: int | None) -> dict[str, Any
 
 def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     command = args.command
-    machine = bool(args.json or command in {"state", "work", "evidence", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "turn", "commit", "commit-draft", "setup"})
+    machine = bool(args.json or command in {"state", "work", "evidence", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "turn", "commit", "commit-draft", "setup", "reindex"})
     if command == "config":
         if args.config_command == "set-vault":
             path = set_vault_path(args.path, args.config)
@@ -166,10 +172,13 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     vault = _vault(args)
     if command == "init":
         vault.initialize()
+        EvidenceRetriever(vault).reindex()
         return {"initialized": True, "vault": str(vault.root)}, machine
     if command == "rebuild":
         vault.rebuild_all()
         return {"rebuilt": True, "vault": str(vault.root)}, machine
+    if command == "reindex":
+        return EvidenceRetriever(vault).reindex(), True
     if command == "doctor":
         diagnostics = vault.doctor()
         return {"ok": not diagnostics, "diagnostics": diagnostics}, machine
@@ -200,7 +209,13 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     if command == "evidence" and args.evidence_command == "get":
         return _hydrate(vault, args.entry_id, args.revision), True
     if command == "evidence" and args.evidence_command == "search":
-        raise FeatureUnavailable("evidence search is an LLD-03 operation and is not available before retrieval is implemented")
+        filters = json.loads(args.filters) if args.filters else {}
+        if not isinstance(filters, dict):
+            raise ValidationError("--filters must be a JSON object")
+        return EvidenceRetriever(vault).search(args.query, filters=filters, page_size=args.page_size, cursor=args.cursor), True
+    if command == "evidence" and args.evidence_command == "hydrate":
+        payload = _read_payload(args.file)
+        return EvidenceRetriever(vault).hydrate(payload.get("refs", [])), True
     raise ValidationError(f"unsupported command: {command}")
 
 

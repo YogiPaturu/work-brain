@@ -30,12 +30,19 @@ data, internal vault files, or generated projections directly. Do not construct
 ad-hoc SQL or mutate the vault through arbitrary shell commands. The harness
 may use its normal shell to execute sanctioned `work-brain` commands.
 
+Activation is speech-friendly: a leading `work brain` is case-insensitive and
+does not require punctuation; the raw prompt remains unchanged. Explicit
+natural aliases include `start my day`, `open my work journal`, `start work
+brain`, `capture this`, and `journal this`; `close my day` routes active
+sessions to `close-day` and may finish without a CommitDraft.
+
 Work Brain v1 is hosted by the active local agent harness. The harness owns the
 conversation, model, context, and agent loop; Work Brain owns the private vault,
 evidence, projections, retrieval, and deterministic CLI. There is no second
 Work Brain LLM call and no MCP server in v1. At close, emit only the CommitDraft
-shape and let the application supply IDs, timestamps, revisions, provenance,
-and persistence.
+shape when durable new evidence exists and let the application supply IDs,
+timestamps, revisions, provenance, and persistence. A close-day gap check may
+complete without a commit; capture deactivation is a separate lifecycle action.
 
 Resources:
 

@@ -1,6 +1,6 @@
 # Work Brain — LLD-003 v3: Retrieval and Index Lifecycle
 
-**Status:** implementation contract; implementation has not started  
+**Status:** implemented; verification and benchmark work continue
 **Supersedes:** `work-brain-lld-03-retrieval-fts-embeddings-index-lifecycle-v2.md`  
 **Parent:** [`work-brain-hld-v3.md`](work-brain-hld-v3.md)  
 **Sibling:** [`work-brain-lld-02-agent-runtime-skills-session-orchestration-v3.md`](work-brain-lld-02-agent-runtime-skills-session-orchestration-v3.md)
@@ -79,10 +79,30 @@ host shell
        -> local embedding/vector search
 ```
 
-## 5. Readiness gate
+## 5. Verification gate
 
-This document is implementation-ready only after the HLD-001 v3 and LLD-002
-v3 references are accepted, the CLI/capture boundary tests pass, and the
-benchmark harness records cold and OS-cache-warm latency. LLD-03 implementation
-must not introduce MCP, a daemon, a provider-specific retriever, or host-aware
-logic.
+The HLD-001 v3 and LLD-002 v3 references are accepted and the CLI/capture
+boundary tests pass. Cold and OS-cache-warm benchmark measurements remain an
+operational verification follow-up. The implementation must not introduce MCP,
+a daemon, a provider-specific retriever, or host-aware logic.
+
+## 6. Implemented v1 profile
+
+The repository now implements the contract as a foreground, rebuildable local
+projection. It provides deterministic overview/section/state chunks, SQLite
+FTS5 lexical search, structured filters, exact entry-level fusion, opaque
+pagination, source hydration, staleness checks, and explicit `reindex`.
+
+The default public-install profile uses a dependency-free deterministic local
+hash embedding adapter so a fresh Python 3.11 checkout remains installable
+without downloading model weights. `EvidenceRetriever` accepts an injected
+local embedding provider with the documented `embed_documents` and
+`embed_query` contract; a transformer/BGE adapter can therefore be added later
+without changing the CLI or vault schema. This baseline is useful for local
+semantic signals and deterministic tests, but applications requiring stronger
+semantic recall should provide a higher-quality local adapter and benchmark it
+on their own corpus.
+
+The implementation deliberately does not add a resident daemon, MCP server,
+remote embedding fallback, retrieval LLM call, or host-specific retrieval
+logic. `work-brain evidence search` is safe to call as a separate OS process.

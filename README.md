@@ -56,8 +56,8 @@ transcriber, or generic personal-life knowledge base.
 |---|---|---|
 | HLD-001 v3 | Harness-hosted local architecture, trust boundaries, capture, and future decisions | Implemented as design contract |
 | LLD-01 | Vault, raw turns, revisions, amendments, entities, artifacts, WorkState, journals, SQLite, rebuilds, locking | Implemented |
-| LLD-02 v3 | Portable Skill/SOPs, workflow contracts, CommitDraft validation/recovery, CLI boundary, harness capture, setup | Implemented before LLD-03 |
-| LLD-03 v3 | FTS5, local embeddings, vector search, hybrid retrieval, pagination, hydration, index lifecycle | Contract revised; implementation intentionally not started |
+| LLD-02 v3 | Portable Skill/SOPs, workflow contracts, CommitDraft validation/recovery, CLI boundary, harness capture, setup | Implemented |
+| LLD-03 v3 | FTS5, local embeddings, vector search, hybrid retrieval, pagination, hydration, index lifecycle | Implemented as a rebuildable local projection |
 | LLD-04 | Question-bank normalization, interview practice, career retrieval, candidate marks | Contract documented; deferred |
 
 The four LLDs consume one LLD-01 evidence model. Journals, WorkState, SQLite,
@@ -122,19 +122,33 @@ work-brain recoverable
 work-brain commit-draft --session-id SESSION_ID --workflow think < commit-draft.json
 ```
 
-`evidence search` is the stable LLD-03 operation surface and will be backed by
-FTS/vector retrieval once LLD-03 is implemented:
+`evidence search` is the stable LLD-03 operation surface. It searches current
+structured entries with deterministic chunks, SQLite FTS5, a local vector
+adapter, and entry-level hybrid fusion:
 
 ```bash
 work-brain evidence search --query "import reliability" --page-size 10
+work-brain evidence search --query "changed direction after new evidence" \
+  --filters '{"domains":["engineering"],"has_outcome":true}'
 ```
 
-Before LLD-03, it returns a structured `unavailable` error rather than
-pretending that retrieval exists.
+Results are bounded EvidenceCards with stable `{entry_id, revision}` refs and
+an opaque continuation cursor. Hydrate at most four selected refs from the
+authoritative source entry:
+
+```bash
+printf '%s\n' '{"refs":[{"entry_id":"ENTRY_ID","revision":1}]}' \
+  | work-brain evidence hydrate
+```
+
+Use `work-brain reindex` after changing retrieval code or embedding settings.
+`work-brain rebuild` also rebuilds the retrieval projection. Search excludes
+superseded revisions and reports degraded or incomplete state instead of
+presenting a false empty result.
 
 For low-level/manual integration, the CLI also supports `init`, `rebuild`,
-`session-start`, `turn`, `commit`, `commit-draft`, `recoverable`, and
-`capture-hook`. Use `work-brain --help` for the complete syntax.
+`reindex`, `session-start`, `turn`, `commit`, `commit-draft`, `recoverable`,
+and `capture-hook`. Use `work-brain --help` for the complete syntax.
 
 ## Install the one canonical Skill
 
@@ -190,7 +204,18 @@ overwrite it. Review the reported warning and resolve it manually.
    work brain: think with me about whether we should move this process async
    ```
 
-7. Codex executes sanctioned `work-brain ...` commands through its existing
+   Natural lifecycle aliases also activate the boundary when they are the
+   first relevant prompt: `start my day` and `open my work journal` select
+   `open-day`; `start work brain` starts a general Work Brain session. The
+   explicit mid-conversation aliases `capture this` and `journal this` also
+   activate capture without requiring a colon. Speech
+   input may omit punctuation or change capitalization: `Work Brain, start my
+   day` routes exactly like `work brain: start my day`.
+8. During an active Work Brain session, ordinary follow-up prompts are captured
+   without a prefix. `close my day` routes to `close-day`; after its visible
+   response the host mapping is deactivated even when no new evidence needs a
+   CommitDraft.
+9. Codex executes sanctioned `work-brain ...` commands through its existing
    shell. Work Brain does not use MCP or start another LLM.
 
 Codex lifecycle hooks observe `SessionStart`, `UserPromptSubmit.prompt`,
@@ -207,7 +232,8 @@ Hooks do not make model calls.
 4. Verify the Skill is visible. Claude may select it from its description, or
    invoke it explicitly with `/work-brain`.
 5. For guaranteed exact capture, begin the durable conversation with the
-   documented `work brain:` activation prompt.
+   documented `work brain` activation prompt (punctuation is optional), or use
+   `start my day` / `open my work journal` for the narrow open-day aliases.
 6. Claude Code runs Work Brain operations through its normal Bash/shell
    capability; there is no MCP server in this v1 path.
 
@@ -228,7 +254,8 @@ architecture decision.
    available Skills.
 5. Let Cursor select it from the description or invoke it through the `/`
    Skill UI.
-6. For guaranteed exact capture, begin with the explicit `work brain:` prompt.
+6. For guaranteed exact capture, begin with the explicit `work brain` prompt,
+   `start my day`, or `open my work journal`.
 7. Cursor executes Work Brain through its existing shell tool.
 
 Cursor capture uses `sessionStart`, `beforeSubmitPrompt.prompt`,
@@ -249,13 +276,18 @@ FTS5, embeddings, journals, or vault internals.
 
 **Capture.** Host lifecycle hooks send visible Work Brain turns to one shared
 capture adapter. Ordinary coding chats remain inactive. Exact durable capture
-starts only after `work brain:` or an explicitly observed Work Brain Skill
-invocation. Implicit behavior that a hook did not observe is never labeled
-verbatim source.
+starts only after `work brain`, an explicitly observed Work Brain Skill
+invocation, or one of the exact activation aliases (`start my day`, `open my
+work journal`, `start work brain`, `capture this`, `journal this`) at the
+activation boundary. Ambiguous
+phrases such as `think about this` remain inactive. Implicit behavior that a
+hook did not observe is never labeled verbatim source.
 
 **Storage and retrieval.** The CLI delegates to application/domain services.
-LLD-03 will implement search behind the same `evidence search` boundary;
-harnesses and Skills do not choose FTS versus vectors.
+LLD-03 keeps the same chunk corpus in FTS5 and local vectors, applies explicit
+filters, fuses lexical and semantic candidates deterministically, and hydrates
+only from authoritative source files. Harnesses and Skills do not choose FTS
+versus vectors or receive raw scores, SQL, vectors, or internal paths.
 
 ## Optional voice interface: Yap
 
@@ -316,21 +348,28 @@ repair, or close it through the supported Work Brain workflow.
 
 ## Testing and manual smoke checklist
 
-Automated tests cover LLD-01 durability plus LLD-02 v3 contracts: frontmatter,
-resource provenance, configured vault precedence, setup idempotence and safe
-merging, Codex/Claude/Cursor payload normalization, inactive/active capture,
-recovery, hook non-LLM behavior, and JSON CLI operations.
+Automated tests cover LLD-01 durability, LLD-02 v3 contracts, and LLD-03
+retrieval: deterministic chunk/index generation, FTS/vector corpus alignment,
+current-revision search, filters, pagination, hydration, degraded behavior,
+reindexing, and no-score EvidenceCards. The default vector adapter is a
+dependency-free deterministic local baseline; a higher-quality local embedding
+provider can be injected behind the same adapter contract.
 
 Manual checks should be run separately for each available local harness:
 
 1. start a normal coding chat and confirm no Work Brain session is created;
 2. start with `work brain:` and confirm the exact prompt is the first turn;
-3. confirm a visible assistant response is appended exactly once;
-4. complete a CommitDraft and confirm the session is committed/deactivated;
-5. terminate the host and confirm the session is recoverable without a fake
+3. start a fresh host session with `start my day` and confirm it selects
+   `open-day` while preserving the exact first prompt;
+4. confirm a visible assistant response is appended exactly once;
+5. send an ordinary follow-up without a prefix and confirm it is captured;
+6. send `close my day` with no durable evidence and confirm the mapping closes
+   while existing evidence remains unchanged;
+7. complete a CommitDraft and confirm the session is committed/deactivated;
+8. terminate the host and confirm the session is recoverable without a fake
    assistant response;
-6. run `work-brain setup HOST` twice and confirm no duplicate hook entries;
-7. run `work-brain setup HOST --check` and inspect reported paths.
+9. run `work-brain setup HOST` twice and confirm no duplicate hook entries;
+10. run `work-brain setup HOST --check` and inspect reported paths.
 
 Fixture-based support for Claude Code or Cursor is not a claim of runtime
 testing on a machine where those hosts were not available.

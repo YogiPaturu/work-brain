@@ -12,6 +12,7 @@ from work_brain.cli import main
 from work_brain.config import resolve_vault_path, set_vault_path
 from work_brain.setup import HarnessSetup
 from work_brain.vault import Vault
+from work_brain.orchestrator import route_prompt
 
 
 class HarnessV3Tests(unittest.TestCase):
@@ -35,6 +36,49 @@ class HarnessV3Tests(unittest.TestCase):
         self.assertEqual(("cursor", "assistant_message", "c3"), (cursor.host, cursor.kind, cursor.host_session_id))
         self.assertTrue(normalize_capture_event("claude-code", {"hook_event_name": "UserPromptSubmit", "session_id": "c4", "prompt": "/work-brain"}).explicit_activation)
 
+    def test_speech_friendly_activation_is_table_driven_and_raw_safe(self) -> None:
+        prompts = (
+            "work brain start my day",
+            "work brain: start my day",
+            "work brain, start my day",
+            "WORK BRAIN START MY DAY",
+        )
+        for index, prompt in enumerate(prompts):
+            event = normalize_capture_event("codex", {"event": "UserPromptSubmit", "session_id": f"speech-{index}", "prompt": prompt})
+            self.assertTrue(event.explicit_activation, prompt)
+            self.assertEqual("open-day", event.workflow_hint, prompt)
+            self.assertEqual("start my day", event.routed_content.casefold().strip(" ,:!?"), prompt.casefold().replace("work brain", "").strip(" ,:!?"))
+            route = route_prompt(prompt)
+            self.assertTrue(route.activation)
+            self.assertEqual("start my day", route.routed_content.casefold().strip(" ,:!?"), prompt.casefold().replace("work brain", "").strip(" ,:!?"))
+        self.assertFalse(normalize_capture_event("codex", {"event": "UserPromptSubmit", "session_id": "speech-no", "prompt": "brainstorm this"}).explicit_activation)
+        self.assertFalse(normalize_capture_event("codex", {"event": "UserPromptSubmit", "session_id": "speech-no-2", "prompt": "think about this"}).explicit_activation)
+        raw = "Work Brain, help me think through whether we should move this async"
+        route = route_prompt(raw)
+        self.assertTrue(route.activation)
+        self.assertEqual("help me think through whether we should move this async", route.routed_content)
+        service = HarnessCaptureService(self.vault)
+        started = service.handle(normalize_capture_event("codex", {"event": "UserPromptSubmit", "session_id": "raw-safe", "prompt": raw}))
+        self.assertEqual(raw, self.vault.list_turns(started["session_id"])[0]["content"])
+
+    def test_general_workflow_routing_uses_one_normalization_stage(self) -> None:
+        cases = (
+            ("work brain what should I work on next", "operate"),
+            ("work brain what should I work on", "operate"),
+            ("Work Brain, where did I leave off?", "operate"),
+            ("work brain catch me up", "operate"),
+            ("work brain interview me", "career"),
+            ("work brain help me think through queues", "think"),
+            ("Start My Day.", "open-day"),
+            ("Close My Day.", "close-day"),
+        )
+        for prompt, workflow in cases:
+            route = route_prompt(prompt)
+            self.assertEqual(workflow, route.workflow, prompt)
+        self.assertFalse(route_prompt("brainstorm this").activation)
+        self.assertFalse(route_prompt("this is a brain teaser").activation)
+        self.assertEqual("think with me about queues.", route_prompt("WORK BRAIN, think with me about queues.").routed_content)
+
     def test_inactive_chat_is_not_captured_and_explicit_capture_is_exact(self) -> None:
         service = HarnessCaptureService(self.vault)
         inactive = service.handle(normalize_capture_event("codex", {"event": "UserPromptSubmit", "session_id": "ordinary", "prompt": "Fix the build"}))
@@ -49,6 +93,39 @@ class HarnessV3Tests(unittest.TestCase):
         self.assertEqual("codex", session["runtime"]["host"])
         self.assertEqual("verbatim", session["runtime"]["capture_fidelity"])
         self.assertEqual(["work brain: think with me about the migration", "What would success look like?"], [turn["content"] for turn in self.vault.list_turns(started["session_id"])])
+
+    def test_start_my_day_is_a_narrow_natural_activation_for_open_day(self) -> None:
+        service = HarnessCaptureService(self.vault)
+        started = service.handle(normalize_capture_event("codex", {"event": "UserPromptSubmit", "session_id": "day-1", "prompt": "Start My Day."}))
+        self.assertTrue(started["captured"])
+        self.assertEqual("open-day", started["workflow"])
+        session = self.vault.read_session(started["session_id"])
+        self.assertEqual("open-day", session["runtime"]["workflow"])
+        self.assertEqual(["Start My Day."], [turn["content"] for turn in self.vault.list_turns(started["session_id"])])
+        journal = service.handle(normalize_capture_event("codex", {"event": "UserPromptSubmit", "session_id": "day-2", "prompt": "Open My Work Journal!!!"}))
+        self.assertEqual("open-day", journal["workflow"])
+
+    def test_active_session_captures_follow_up_without_prefix(self) -> None:
+        service = HarnessCaptureService(self.vault)
+        started = service.handle(normalize_capture_event("codex", {"event": "UserPromptSubmit", "session_id": "follow-up", "prompt": "start work brain"}))
+        follow_up = service.handle(normalize_capture_event("codex", {"event": "UserPromptSubmit", "session_id": "follow-up", "prompt": "The ordinary next question is still in scope."}))
+        self.assertTrue(follow_up["captured"])
+        self.assertEqual(["start work brain", "The ordinary next question is still in scope."], [turn["content"] for turn in self.vault.list_turns(started["session_id"])])
+
+    def test_close_my_day_deactivates_without_creating_evidence(self) -> None:
+        service = HarnessCaptureService(self.vault)
+        started = service.handle(normalize_capture_event("codex", {"event": "UserPromptSubmit", "session_id": "close-day", "prompt": "work brain: think with me"}))
+        before = [entry.to_dict() for entry in self.vault.all_current_entries()]
+        requested = service.handle(normalize_capture_event("codex", {"event": "UserPromptSubmit", "session_id": "close-day", "prompt": "close my day"}))
+        self.assertEqual("close-day", requested["workflow"])
+        finished = service.handle(normalize_capture_event("codex", {"event": "Stop", "session_id": "close-day", "last_assistant_message": "No new durable evidence; your existing work remains unchanged."}))
+        self.assertEqual("closed", finished["status"])
+        self.assertTrue(finished["deactivated"])
+        self.assertEqual({}, json.loads((self.vault.root / "context/capture-mappings.json").read_text(encoding="utf-8")))
+        self.assertEqual(before, [entry.to_dict() for entry in self.vault.all_current_entries()])
+        closed_session = self.vault.read_session(started["session_id"])
+        self.assertEqual("closed", closed_session["runtime"]["capture_status"])
+        self.assertIsNotNone(closed_session["ended_at"])
 
     def test_session_end_deactivates_without_fabricating_text(self) -> None:
         service = HarnessCaptureService(self.vault)

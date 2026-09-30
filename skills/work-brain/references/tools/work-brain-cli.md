@@ -29,11 +29,15 @@ work-brain work recent --limit 8
 work-brain work loops --limit 20
 work-brain evidence get --entry-id ENTRY_ID
 work-brain evidence search --query "import reliability" --page-size 10
+work-brain evidence hydrate < refs.json
 work-brain recoverable
 ```
 
-`evidence search` is the LLD-03 application operation. Its CLI contract exists
-before the retrieval backend is enabled.
+`evidence search` is the LLD-03 application operation. It returns bounded
+EvidenceCards with stable entry/revision refs and an opaque continuation
+cursor. Use `evidence hydrate` for selected refs and `reindex` for explicit
+retrieval maintenance. Search may report degraded or incomplete state; never
+describe an unavailable search as proof that no history exists.
 
 ## Capture and mutation
 
@@ -53,7 +57,12 @@ data directly.
 ## Capture activation
 
 Hooks are passive for ordinary coding conversations. Exact durable capture is
-activated by a user prompt beginning with `work brain:` or by an explicit
-Work Brain Skill invocation observed by the hook. Once active, the adapters
-append the exact visible user and assistant text. Implicit Skill behavior that
-was not observed by a hook is never relabeled as verbatim capture.
+activated by a user prompt beginning with `work brain`, one of the exact
+activation aliases (`start my day`, `open my work journal`, `start work brain`,
+`capture this`, `journal this`),
+or an explicit Work Brain Skill invocation observed by the hook. Once active,
+the adapters append the exact visible user and assistant text. `close my day`
+routes an active mapping to close-day and deactivates it after the visible
+workflow response, even if no new CommitDraft is needed. Ambiguous phrases such
+as `think about this` remain inactive. Implicit Skill behavior that was not
+observed by a hook is never relabeled as verbatim capture.

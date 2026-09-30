@@ -83,6 +83,8 @@ class LLD2Tests(unittest.TestCase):
     def test_workflow_selection_is_deterministic(self) -> None:
         self.assertEqual("think", select_workflow("think with me"))
         self.assertEqual("close-day", select_workflow("close my day"))
+        self.assertEqual("open-day", select_workflow("open my work journal"))
+        self.assertEqual("think", select_workflow("start work brain"))
         self.assertEqual("operate", select_workflow(None, "operate"))
         self.assertEqual("think", select_workflow("something ambiguous"))
 
@@ -168,6 +170,25 @@ class LLD2Tests(unittest.TestCase):
         self.assertEqual(2, len(sessions))
         self.assertEqual("Short first topic.", self.vault.list_turns(first["session_id"])[0]["content"])
         self.assertEqual(1, len(self.vault.all_current_entries()))
+
+    def test_close_day_can_finish_without_publishing_new_evidence(self) -> None:
+        model = ScriptedModel(responses=["The day is already represented; nothing new needs recording."])
+        orchestrator = SessionOrchestrator(self.vault, model)
+        session = orchestrator.start("close my day")
+        orchestrator.complete_without_commit()
+        self.assertEqual(RuntimeState.COMMITTED, orchestrator.state)
+        self.assertEqual([], self.vault.all_current_entries())
+        self.assertIsNotNone(self.vault.read_session(session["session_id"])["ended_at"])
+        self.assertEqual("no_new_evidence", self.vault.read_session(session["session_id"])["runtime"]["commit_status"])
+
+    def test_active_turn_can_route_to_close_day_without_rewriting_raw_text(self) -> None:
+        model = ScriptedModel(responses=["The day is already represented; nothing new needs recording.", "The close-day check is complete."])
+        orchestrator = SessionOrchestrator(self.vault, model)
+        session = orchestrator.start("start my day")
+        orchestrator.turn("close my day")
+        self.assertEqual("close-day", orchestrator.workflow)
+        self.assertEqual("close my day", self.vault.list_turns(session["session_id"])[2]["content"])
+        self.assertEqual("close-day", self.vault.read_session(session["session_id"])["runtime"]["workflow"])
 
     def test_reextract_creates_revision_without_rewriting_turns(self) -> None:
         model = ScriptedModel(drafts=[draft(), draft()])

@@ -1,6 +1,6 @@
 # Work Brain — HLD-001 v3
 
-**Status:** v1 architecture baseline before LLD-03 implementation  
+**Status:** v1 architecture baseline with LLD-03 implementation
 **Supersedes:** `work-brain-hld-v2.md`  
 **Scope:** local Work Brain hosted by an existing coding-agent harness
 
@@ -279,6 +279,7 @@ must not be presented as v1-compatible.
 | process lifetime | CLI may be a separate process; no hot-model or daemon assumption | LLD-03 / README |
 | future standalone runtime | optional future consideration only | HLD / future-considerations.md |
 
-This matrix is the cross-review baseline for beginning LLD-03 implementation;
-the tests and benchmark gate above remain required evidence, not claims that
-LLD-03 itself is already implemented.
+This matrix remains the cross-review baseline for LLD-03. The repository now
+implements the retrieval contract as a foreground local projection; cold and
+OS-cache-warm benchmark measurements remain an operational follow-up rather
+than a reason to add a daemon or change the v1 process boundary.
