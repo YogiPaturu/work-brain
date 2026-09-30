@@ -150,9 +150,9 @@ presenting a false empty result.
 
 The base install has a deterministic hash-vector fallback so it remains
 offline-friendly and dependency-free. That fallback is useful for tests and
-small demos, but it is not a production-quality semantic model: the checked-in
-retrieval-quality corpus currently reaches 3/6 expected matches in the top
-three cards. For normal semantic use, install the optional local BGE profile:
+small demos, but it is not a production-quality semantic model. Its hit count
+is only a diagnostic baseline because it changes with the exact smoke wording.
+For normal semantic use, install the optional local BGE profile:
 
 ```bash
 python3 -m pip install -e '.[semantic]'
@@ -165,9 +165,11 @@ it is selected automatically. Set `WORK_BRAIN_EMBEDDING=hash` to force the
 deterministic fallback for offline tests or demos. The retrieval schema and
 `evidence search` CLI contract are the same for both providers.
 
-The semantic smoke cases use wording that does not repeat the stored story
-terms and check only whether the relevant experience appears in the first
-three cards. Run the same cases directly with:
+The semantic smoke cases use natural paraphrases and check only whether the
+expected experience appears in the first three cards. FastEmbed is expected to
+reach at least 5/6; that is a cheap regression signal, not evidence that
+retrieval is production-ready. The six-item fixture is intentionally too small
+and permissive to tune the model against. Run the smoke cases directly with:
 
 ```bash
 PYTHONPATH=src python3 -m unittest tests.test_retrieval_quality -v
@@ -188,6 +190,21 @@ PYTHONPATH=src python3 examples/benchmark_retrieval.py \
 
 The benchmark is diagnostic only. A resident daemon is intentionally not part
 of LLD-03; model startup should be justified by measured user-facing latency.
+
+For a broader, report-only evaluation, use the checked-in synthetic fixture:
+
+```bash
+PYTHONPATH=src python3 examples/evaluate_retrieval.py --embedding hash
+WORK_BRAIN_FASTEMBED_CACHE=/tmp/work-brain-fastembed-model \
+  PYTHONPATH=src python3 examples/evaluate_retrieval.py --embedding fastembed
+```
+
+That fixture contains 24 plausible evidence entries, overlapping distractors,
+and natural queries whose `relevant_titles` may contain multiple acceptable
+answers. It reports mean recall@3 and recall@5 plus each query's retrieved
+titles. It is deliberately not a pass/fail benchmark: its purpose is to make
+retrieval behavior inspectable before deciding whether a larger evaluation
+corpus or a quality threshold is warranted.
 
 For low-level/manual integration, the CLI also supports `init`, `rebuild`,
 `reindex`, `session-start`, `turn`, `commit`, `commit-draft`, `recoverable`,
