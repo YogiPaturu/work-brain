@@ -57,7 +57,7 @@ transcriber, or generic personal-life knowledge base.
 | HLD-001 v3 | Harness-hosted local architecture, trust boundaries, capture, and future decisions | Implemented as design contract |
 | LLD-01 | Vault, raw turns, revisions, amendments, entities, artifacts, WorkState, journals, SQLite, rebuilds, locking | Implemented |
 | LLD-02 v3 | Portable Skill/SOPs, workflow contracts, CommitDraft validation/recovery, CLI boundary, harness capture, setup | Implemented |
-| LLD-03 v3 | FTS5, local embeddings, vector search, hybrid retrieval, pagination, hydration, index lifecycle | Implemented as a rebuildable local projection |
+| LLD-03 v3 | FTS5, local embeddings, vector search, hybrid retrieval, pagination, hydration, index lifecycle | Implemented as a rebuildable local projection; optional BGE semantic profile |
 | LLD-04 | Question-bank normalization, interview practice, career retrieval, candidate marks | Contract documented; deferred |
 
 The four LLDs consume one LLD-01 evidence model. Journals, WorkState, SQLite,
@@ -145,6 +145,49 @@ Use `work-brain reindex` after changing retrieval code or embedding settings.
 `work-brain rebuild` also rebuilds the retrieval projection. Search excludes
 superseded revisions and reports degraded or incomplete state instead of
 presenting a false empty result.
+
+### Semantic retrieval profile
+
+The base install has a deterministic hash-vector fallback so it remains
+offline-friendly and dependency-free. That fallback is useful for tests and
+small demos, but it is not a production-quality semantic model: the checked-in
+retrieval-quality corpus currently reaches 4/6 expected matches in the top
+three cards. For normal semantic use, install the optional local BGE profile:
+
+```bash
+python3 -m pip install -e '.[semantic]'
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+```
+
+The profile uses FastEmbed with `BAAI/bge-small-en-v1.5`; its first embedding
+operation downloads and locally caches the model. When FastEmbed is installed,
+it is selected automatically. Set `WORK_BRAIN_EMBEDDING=hash` to force the
+deterministic fallback for offline tests or demos. The retrieval schema and
+`evidence search` CLI contract are the same for both providers.
+
+The semantic smoke cases use wording that does not repeat the stored story
+terms and check only whether the relevant experience appears in the first
+three cards. Run the same cases directly with:
+
+```bash
+PYTHONPATH=src python3 -m unittest tests.test_retrieval_quality -v
+```
+
+The FastEmbed case is skipped when the optional package is absent. Run cold
+process and cache-warm timings against a private or synthetic vault with:
+
+```bash
+PYTHONPATH=src python3 examples/benchmark_retrieval.py \
+  --vault /tmp/work-brain-synthetic --embedding hash
+# Build the temporary vault's index with the real provider before benchmarking it.
+WORK_BRAIN_EMBEDDING=fastembed work-brain \
+  --vault /tmp/work-brain-synthetic reindex
+PYTHONPATH=src python3 examples/benchmark_retrieval.py \
+  --vault /tmp/work-brain-synthetic --embedding fastembed
+```
+
+The benchmark is diagnostic only. A resident daemon is intentionally not part
+of LLD-03; model startup should be justified by measured user-facing latency.
 
 For low-level/manual integration, the CLI also supports `init`, `rebuild`,
 `reindex`, `session-start`, `turn`, `commit`, `commit-draft`, `recoverable`,

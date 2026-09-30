@@ -11,8 +11,11 @@ injected without changing chunking, filtering, fusion, or CLI contracts.
 
 import base64
 import hashlib
+import importlib
+import importlib.util
 import json
 import math
+import os
 import re
 import struct
 import unicodedata
@@ -21,7 +24,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping, Protocol
 
 from .domain import ENTRY_SECTIONS, SessionEntry, normalize_alias
-from .errors import IntegrityError, PersistenceError, ValidationError
+from .errors import FeatureUnavailable, IntegrityError, PersistenceError, ValidationError
 from .fsutil import canonical_json_bytes, content_hash, read_json
 from .ids import validate_uuid7
 from .timeutil import parse_timestamp, timestamp_now, validate_calendar_date
@@ -88,6 +91,79 @@ class LocalHashEmbeddingProvider:
 
     def embed_query(self, text: str) -> list[float]:
         return self._vector(text)
+
+
+class FastEmbedEmbeddingProvider:
+    """Optional local BGE adapter for production-quality semantic recall.
+
+    FastEmbed is deliberately imported lazily. The public zero-dependency
+    install remains usable with :class:`LocalHashEmbeddingProvider`, while a
+    user who installs the ``semantic`` extra gets a real local model without
+    changing the retrieval schema or search API.
+
+    The model is loaded on the first embedding call. FastEmbed caches its
+    model files locally; the first call may therefore download the model.
+    """
+
+    model_id = "BAAI/bge-small-en-v1.5"
+    adapter_recipe = "WORK-BRAIN-FASTEMBED-BGE@1"
+    dimensions = 384
+
+    def __init__(self, *, cache_dir: str | None = None) -> None:
+        self.cache_dir = cache_dir
+        self._model: Any | None = None
+
+    def _load(self) -> Any:
+        if self._model is not None:
+            return self._model
+        try:
+            module = importlib.import_module("fastembed")
+            text_embedding = module.TextEmbedding
+        except (ImportError, AttributeError) as exc:
+            raise FeatureUnavailable(
+                "FastEmbed is not installed; install work-brain[semantic] or use the hash fallback"
+            ) from exc
+        kwargs: dict[str, Any] = {"model_name": self.model_id}
+        if self.cache_dir:
+            kwargs["cache_dir"] = self.cache_dir
+        self._model = text_embedding(**kwargs)
+        size = getattr(self._model, "embedding_size", self.dimensions)
+        if size != self.dimensions:
+            raise IntegrityError(
+                f"{self.model_id} returned {size} dimensions; expected {self.dimensions}"
+            )
+        return self._model
+
+    @staticmethod
+    def _as_normalized_vector(value: Any) -> list[float]:
+        values = value.tolist() if hasattr(value, "tolist") else list(value)
+        norm = math.sqrt(sum(float(item) * float(item) for item in values))
+        if not norm:
+            raise IntegrityError("FastEmbed returned a zero vector")
+        return [float(item) / norm for item in values]
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        model = self._load()
+        return [self._as_normalized_vector(vector) for vector in model.embed([f"passage: {text}" for text in texts])]
+
+    def embed_query(self, text: str) -> list[float]:
+        model = self._load()
+        return self._as_normalized_vector(next(iter(model.embed([f"query: {text}"]))))
+
+
+def default_embedding_provider() -> EmbeddingProvider:
+    """Select the normal local profile without breaking zero-dependency use.
+
+    Installing the optional semantic extra makes BGE/FastEmbed the normal
+    provider. ``WORK_BRAIN_EMBEDDING=hash`` explicitly selects the
+    deterministic fallback for tests, demos, and offline environments.
+    """
+
+    if os.environ.get("WORK_BRAIN_EMBEDDING", "").casefold() == "hash":
+        return LocalHashEmbeddingProvider()
+    if importlib.util.find_spec("fastembed") is not None:
+        return FastEmbedEmbeddingProvider()
+    return LocalHashEmbeddingProvider()
 
 
 @dataclass(frozen=True)
@@ -226,7 +302,7 @@ class EvidenceRetriever:
 
     def __init__(self, vault: Any, embedding_provider: EmbeddingProvider | None = None):
         self.vault = vault
-        self.embedding_provider = embedding_provider or LocalHashEmbeddingProvider()
+        self.embedding_provider = embedding_provider or default_embedding_provider()
 
     def _db(self):
         return self.vault._database()

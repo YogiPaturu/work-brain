@@ -9,6 +9,9 @@ description = "Local-first Work Brain runtime and persistence"
 requires-python = ">=3.11"
 dependencies = []
 
+[project.optional-dependencies]
+semantic = ["fastembed"]
+
 [project.scripts]
 work-brain = "work_brain.cli:main"
 

@@ -10,7 +10,7 @@ from .orchestrator import ContextPlanner, PromptRoute, RuntimeState, SessionOrch
 from .tools import ToolDefinition, ToolRegistry, ToolResult
 from .capture import CaptureEvent, HarnessCaptureService, normalize_capture_event
 from .setup import HarnessSetup
-from .retrieval import EvidenceRetriever, EvidenceRef, LocalHashEmbeddingProvider
+from .retrieval import EvidenceRetriever, EvidenceRef, FastEmbedEmbeddingProvider, LocalHashEmbeddingProvider
 
 __all__ = [
     "IntegrityError",
@@ -43,5 +43,6 @@ __all__ = [
     "HarnessSetup",
     "EvidenceRetriever",
     "EvidenceRef",
+    "FastEmbedEmbeddingProvider",
     "LocalHashEmbeddingProvider",
 ]

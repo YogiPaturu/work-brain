@@ -93,16 +93,26 @@ projection. It provides deterministic overview/section/state chunks, SQLite
 FTS5 lexical search, structured filters, exact entry-level fusion, opaque
 pagination, source hydration, staleness checks, and explicit `reindex`.
 
-The default public-install profile uses a dependency-free deterministic local
-hash embedding adapter so a fresh Python 3.11 checkout remains installable
-without downloading model weights. `EvidenceRetriever` accepts an injected
-local embedding provider with the documented `embed_documents` and
-`embed_query` contract; a transformer/BGE adapter can therefore be added later
-without changing the CLI or vault schema. This baseline is useful for local
-semantic signals and deterministic tests, but applications requiring stronger
-semantic recall should provide a higher-quality local adapter and benchmark it
-on their own corpus.
+The base public install uses a dependency-free deterministic local hash
+embedding adapter so a fresh Python 3.11 checkout remains installable without
+downloading model weights. The checked-in semantic smoke corpus measures this
+fallback at 4/6 expected top-three matches, so it is explicitly not treated as
+a production-quality semantic default. `EvidenceRetriever` accepts an
+injected local embedding provider with the documented `embed_documents` and
+`embed_query` contract, and the repository includes an optional FastEmbed
+adapter for `BAAI/bge-small-en-v1.5`. Installing the `semantic` extra makes
+that real local model the normal provider while retaining the hash adapter for
+offline tests and zero-dependency fallback. The [FastEmbed project](https://github.com/qdrant/fastembed)
+downloads model files on first use and caches them locally.
+
+The retrieval-quality smoke tests use six small experiences and semantically
+related queries with intentionally different wording. They define only
+relevance expectations (the expected experience in the first three cards),
+never story scores or a best-story decision. The same cases can be run against
+the hash baseline and, when installed, the FastEmbed adapter. The benchmark
+script reports cold-process and cache-warm timings for either provider.
 
 The implementation deliberately does not add a resident daemon, MCP server,
 remote embedding fallback, retrieval LLM call, or host-specific retrieval
-logic. `work-brain evidence search` is safe to call as a separate OS process.
+logic. `work-brain evidence search` is safe to call as a separate OS process;
+whether model startup is acceptable remains a measured deployment decision.
