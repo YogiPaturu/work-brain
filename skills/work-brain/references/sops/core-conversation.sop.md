@@ -1,23 +1,120 @@
-WORK-BRAIN-SOP-CORE v1
+WORK-BRAIN-SOP-CORE v2
 
-# Overview
+# Work Brain Core Conversation
+
+## Overview
 
 Run a bounded, adaptive conversation that captures durable professional
-evidence without turning the interaction into a questionnaire.
+evidence without turning the interaction into a questionnaire. This SOP is the
+shared behavioral contract for every Work Brain workflow; the selected workflow
+SOP adds domain-specific emphasis.
+
+## Parameters
+
+- **user_message** (required): The latest user contribution.
+- **workflow** (required): The active Work Brain workflow.
+- **current_session_context** (optional): The bounded conversation context already available.
+- **current_state** (optional): Compact active-work state supplied by the application.
+- **retrieved_evidence** (optional): Bounded evidence cards or hydrated records returned by configured tools.
+- **domain_probes** (optional): One or two relevant public probe references.
+
+**Constraints for parameter acquisition:**
+
+- The application MUST provide `user_message` and `workflow`.
+- The agent MUST treat omitted context as unknown rather than reconstructing it from memory.
+- The agent MUST use the documented Work Brain CLI operations for private evidence, state, retrieval, and maintenance. It MUST NOT access SQLite, vector data, internal vault files, generated projections, or construct ad-hoc SQL. The host harness may execute sanctioned `work-brain` commands through its normal shell.
+- The agent MUST NOT treat Skill instructions as a security boundary: the host agent may have independent access to files permitted by the host.
+- The agent SHOULD ask one high-value question at a time unless a small set of questions is required to unblock a clear decision.
 
 ## Steps
 
-1. Understand the user's actual intent and the decision, work item, or experience.
-2. Ask the highest-value next question about evidence, reasoning, alternatives,
-   ownership, outcomes, changed beliefs, or open loops.
-3. Distinguish what the user said from model inference. Never invent dates,
-   metrics, outcomes, ownership, or certainty.
-4. Follow a valuable unexpected branch and stop when the user says skip, enough,
-   or move on, or when further questions would repeat.
-5. Before close, ask what important information may be forgotten, distorted by
-   hindsight, or impossible to reconstruct from artifacts later.
+### 1. Establish the Session Target
 
-Maintain a lightweight internal coverage map: context, observations,
-significance, contribution, reasoning, evidence, alternatives/trade-offs,
-decisions/actions, expectations, outcomes, learning, open questions, state,
-and artifacts. Do not persist hidden chain-of-thought.
+Identify what the user is trying to do now: reason through a problem, update
+work state, draft communication, practise, orient the day, close a day, or
+reconstruct a historical experience. Name the coherent decision, work item, or
+experience that should bound this session.
+
+**Constraints:**
+
+- You MUST follow the selected `workflow` when it is explicit.
+- You MUST ask for clarification if two materially different topics are mixed and the boundary affects what should be committed.
+- You MUST NOT turn a natural conversation into a mandatory form.
+
+### 2. Assemble Bounded Context
+
+Use the supplied session context, compact state, relevant probes, and bounded
+retrieved evidence to orient the next turn. Treat retrieved material as
+context, not as a replacement for what the user says now.
+
+**Constraints:**
+
+- You SHOULD retrieve only evidence relevant to the current target.
+- You MUST distinguish retrieved evidence from current user statements.
+- You MUST surface a retrieval outage or unavailable tool instead of claiming that no matching history exists.
+- You MUST NOT load the entire private vault or all SOPs into the conversation.
+
+### 3. Choose the Highest-Value Question or Response
+
+Maintain a lightweight coverage map covering context, observations,
+significance, contribution, reasoning, evidence, alternatives and trade-offs,
+decisions and actions, expectations, outcomes, learning, open questions, state,
+and artifacts. Choose the smallest next question or response that materially
+improves the user’s understanding or the eventual evidence.
+
+**Constraints:**
+
+- You MUST prefer questions about evidence, reasoning, ownership, outcomes, changed beliefs, or open loops over generic requests to “tell me more.”
+- You SHOULD follow a valuable unexpected branch when it remains part of the same coherent target.
+- You MUST NOT ask a question whose answer is already clearly established in the available context.
+- You MUST NOT persist hidden chain-of-thought; persist only user-grounded statements, explicit inferences where supported, and concise decisions or next actions.
+
+### 4. Track Basis and Uncertainty
+
+Separate what the user stated, what an artifact or retrieved record supports, and
+what the agent is inferring. Preserve uncertainty when dates, metrics,
+ownership, causality, or outcomes are incomplete.
+
+**Constraints:**
+
+- You MUST label or phrase uncertainty so it cannot be mistaken for a fact.
+- You MUST NOT invent dates, metrics, outcomes, ownership, quotes, or confidence.
+- You SHOULD ask the user to correct an interpretation before treating it as durable evidence.
+- You MUST treat an explicit user correction as authoritative source material.
+
+### 5. Close Without Pressure
+
+Stop when the user says skip, enough, move on, or equivalent, or when further
+questions would repeat without improving the result. Before a normal close, ask:
+“What important information is likely to be forgotten, distorted by hindsight,
+or impossible to reconstruct from artifacts later?”
+
+**Constraints:**
+
+- You MUST respect a stop signal immediately and move to the next requested action.
+- You MUST ask the closing memory-gap question at most once per coherent session.
+- You SHOULD summarize the decision, evidence, open questions, and next action in user-visible language.
+- You MUST emit only the configured CommitDraft shape when the application requests a commit; the application owns IDs, timestamps, revisions, provenance, and persistence.
+
+## Examples
+
+### Example Input
+
+`I think we should split the import worker, but I am not sure the extra operational cost is worth it.`
+
+### Example Response
+
+`Let’s bound this to the import-worker decision. What evidence makes the failure-isolation benefit more important than the added operational cost?`
+
+## Troubleshooting
+
+### The User Changes Topic
+
+Name the topic switch. If it is a related branch, continue and update the
+coverage map; if it is materially different, recommend closing or rolling over
+the current session before starting the new target.
+
+### Retrieval Is Unavailable
+
+Say that historical evidence could not be checked, continue from the current
+conversation, and avoid claiming that no prior evidence exists.

@@ -1,273 +1,345 @@
 # Work Brain
 
-Work Brain is a local-first professional evidence system: a bounded CLI
-conversation experience that helps a person think through work today while
-preserving durable evidence for future context recovery, communication, and
-career preparation.
+Work Brain is a local-first professional thinking and durable work-memory tool.
+It helps you reason through decisions, recover current work state, prepare
+communication, and practice interviews while preserving the underlying
+conversation and structured evidence in a private vault.
 
-The design is defined by the included HLD and four LLDs. The system is
-single-user, privacy-first, hexagonal, and source-first: raw conversations and
-explicit user corrections are durable source; journals, current state, SQLite,
-FTS, vectors, and career views are rebuildable projections.
+Work Brain v1 is hosted by an existing local coding-agent harness—Codex,
+Claude Code, or the local Cursor Agent. The harness owns the model,
+conversation, context, agent loop, and shell. Work Brain owns the private
+vault, evidence, retrieval, Skill/SOPs, deterministic CLI, and projections.
+There is no second Work Brain LLM call and no MCP server in v1.
 
-## What it is for
+```text
+User
+  |
+  v
+Codex / Claude Code / Cursor
+  |
+  +---- Work Brain Skill ------> SOPs / probes
+  |
+  +---- existing shell --------> work-brain CLI
+  |                                  |
+  |                                  v
+  |                          Work Brain application
+  |                            /      |       \
+  |                         vault    state   retrieval
+  |
+  +---- lifecycle hooks ------> capture adapter
+                                  |
+                                  v
+                               raw turns
+```
 
-Work Brain has four projections over one professional-evidence corpus:
+## What it is useful for
 
-- Think: challenge assumptions, reason through alternatives, and preserve how
-  beliefs changed.
-- Operate: recover current work state, open loops, commitments, blockers, and
-  next actions.
-- Communicate: turn private context into concise audience-appropriate drafts
-  without exposing the private vault.
-- Career: filter interview questions, retrieve multiple plausible experiences,
-  practice answers, and let the user choose the story or angle.
+- **Think:** challenge assumptions, explore alternatives, and preserve why a
+  decision was made.
+- **Operate:** recover tasks, blockers, open loops, commitments, and next
+  actions from current work state.
+- **Communicate:** turn private context into a concise audience-appropriate
+  draft without exposing unrelated private evidence.
+- **Career:** retrieve multiple plausible experiences for interview practice and
+  let the human choose the story or angle.
+- **Open/close day:** orient around current state and close a bounded day with
+  durable reflection.
+- **Backfill:** reconstruct an older experience while marking it as
+  `reconstructed`, not contemporaneous capture.
 
-It is not a team project-management system, hosted SaaS, meeting transcription
-service, CRM, or generic personal-life knowledge base.
+It is not a hosted SaaS product, team project-management system, CRM, meeting
+transcriber, or generic personal-life knowledge base.
 
-## HLD and LLD implementation map
+## Implementation status
 
-| Layer | Responsibility | This checkout |
+| Layer | Responsibility | Status |
 |---|---|---|
-| HLD | Product boundaries, privacy model, shared evidence model, local-first architecture | Design source included |
-| LLD1 | Vault, raw turns, entry revisions, amendments, entities, artifacts, WorkState, journals, SQLite metadata, rebuilds, integrity checks | Implemented in `src/work_brain` |
-| LLD2 | Skills/SOPs, session orchestration, model adapter port, probing, CommitDraft resolution, Think/Operate/Communicate workflows | Implemented in `src/work_brain`, `skills/work-brain`, and `tests/test_lld2.py` |
-| LLD3 | FTS5, local embeddings, vector index, hybrid retrieval, pagination, hydration, index lifecycle | Contract documented; retrieval backend is not yet in the runnable baseline |
-| LLD4 | Question-bank normalization/filtering, interview practice, human-led career retrieval, candidate marks | Contract documented; career projection is not yet in the runnable baseline |
+| HLD-001 v3 | Harness-hosted local architecture, trust boundaries, capture, and future decisions | Implemented as design contract |
+| LLD-01 | Vault, raw turns, revisions, amendments, entities, artifacts, WorkState, journals, SQLite, rebuilds, locking | Implemented |
+| LLD-02 v3 | Portable Skill/SOPs, workflow contracts, CommitDraft validation/recovery, CLI boundary, harness capture, setup | Implemented before LLD-03 |
+| LLD-03 v3 | FTS5, local embeddings, vector search, hybrid retrieval, pagination, hydration, index lifecycle | Contract revised; implementation intentionally not started |
+| LLD-04 | Question-bank normalization, interview practice, career retrieval, candidate marks | Contract documented; deferred |
 
-This distinction is deliberate. The README describes the complete HLD target
-and the LLD boundaries, while runnable commands below describe what is already
-safe to use. LLD2–LLD4 must consume the LLD1 contracts; they must not create a
-second evidence store.
+The four LLDs consume one LLD-01 evidence model. Journals, WorkState, SQLite,
+FTS, vectors, and career views are projections; raw turns and structured source
+entries remain authoritative.
 
-## Quick start
+## Install
 
-The project has no runtime dependencies beyond Python 3.11+ and SQLite.
+Work Brain requires Python 3.11+ and SQLite and has no runtime dependencies.
+From a checkout:
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e .
-
-export WORK_BRAIN_VAULT="$PWD/career-vault"
-work-brain --vault "$WORK_BRAIN_VAULT" init
-work-brain --vault "$WORK_BRAIN_VAULT" doctor
 ```
 
-Run the tests directly from a checkout:
+Choose a private vault outside this public repository. You can configure it
+once for future commands:
+
+```bash
+work-brain config set-vault "$HOME/work-brain-vault"
+work-brain init
+work-brain doctor
+```
+
+The CLI resolves the vault in this order:
+
+1. explicit `--vault PATH`;
+2. `WORK_BRAIN_VAULT`;
+3. local user configuration from `work-brain config set-vault PATH`;
+4. a clear error.
+
+The private path is never stored in this repository. A vault has one active
+writer; do not run Codex, Claude Code, and Cursor against the same vault
+simultaneously.
+
+Run the tests from the checkout:
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
+PYTHONPATH=src python3 -m compileall -q src examples
 ```
+
+## Use the CLI directly
+
+Agent-facing commands emit deterministic JSON. For legacy maintenance commands
+use `--json` when a machine-readable response is needed.
+
+```bash
+# Vault and Skill diagnostics.
+work-brain --json doctor
+work-brain skills --workflow think --domain engineering
+
+# Compact application operations for a host agent.
+work-brain state current
+work-brain work recent --limit 8
+work-brain work loops --limit 20
+work-brain evidence get --entry-id ENTRY_ID
+work-brain recoverable
+
+# CommitDraft may be read from stdin, avoiding shell quoting problems.
+work-brain commit-draft --session-id SESSION_ID --workflow think < commit-draft.json
+```
+
+`evidence search` is the stable LLD-03 operation surface and will be backed by
+FTS/vector retrieval once LLD-03 is implemented:
+
+```bash
+work-brain evidence search --query "import reliability" --page-size 10
+```
+
+Before LLD-03, it returns a structured `unavailable` error rather than
+pretending that retrieval exists.
+
+For low-level/manual integration, the CLI also supports `init`, `rebuild`,
+`session-start`, `turn`, `commit`, `commit-draft`, `recoverable`, and
+`capture-hook`. Use `work-brain --help` for the complete syntax.
+
+## Install the one canonical Skill
+
+There is one authored Skill in `skills/work-brain`. Do not maintain separate
+Codex, Claude, and Cursor copies. The setup helper exposes the canonical
+directory and adds capture hooks without replacing unrelated settings:
+
+```bash
+work-brain setup codex
+work-brain setup claude
+work-brain setup cursor
+```
+
+Pass `--vault PATH` before `setup` if setup should also select the default
+private vault in local user configuration:
+
+```bash
+work-brain --vault "$HOME/work-brain-vault" setup codex
+```
+
+Each command is idempotent. Use `--check` to inspect setup without changing it:
+
+```bash
+work-brain setup codex --check
+```
+
+The setup targets are:
+
+```text
+Codex + local Cursor Skill: ~/.agents/skills/work-brain
+Claude Code Skill:         ~/.claude/skills/work-brain
+Codex hooks:               ~/.codex/hooks.json
+Claude Code hooks:         ~/.claude/settings.json
+Cursor local hooks:        ~/.cursor/hooks.json
+```
+
+If an existing Skill path or settings file conflicts, setup refuses to
+overwrite it. Review the reported warning and resolve it manually.
+
+## Using Work Brain with Codex
+
+1. Install Work Brain, configure/init the private vault, and run
+   `work-brain setup codex`.
+2. The canonical Skill is exposed at `~/.agents/skills/work-brain` and hook
+   entries are added to `~/.codex/hooks.json`.
+3. Start Codex normally from any project.
+4. Verify that `work-brain` appears in Codex's available Skills UI/command.
+5. Invoke it explicitly through the Skill, or let the Skill description match
+   a request such as “help me think through this migration decision”.
+6. For guaranteed exact Work Brain transcript capture, begin with:
+
+   ```text
+   work brain: think with me about whether we should move this process async
+   ```
+
+7. Codex executes sanctioned `work-brain ...` commands through its existing
+   shell. Work Brain does not use MCP or start another LLM.
+
+Codex lifecycle hooks observe `SessionStart`, `UserPromptSubmit.prompt`,
+`Stop.last_assistant_message`, `SessionEnd`, and optional `Interrupt` events.
+Hooks do not make model calls.
+
+## Using Work Brain with Claude Code
+
+1. Install Work Brain, configure/init the private vault, and run
+   `work-brain setup claude`.
+2. The same canonical Skill is exposed at `~/.claude/skills/work-brain` and
+   hooks are added to `~/.claude/settings.json`.
+3. Start Claude Code with `claude`.
+4. Verify the Skill is visible. Claude may select it from its description, or
+   invoke it explicitly with `/work-brain`.
+5. For guaranteed exact capture, begin the durable conversation with the
+   documented `work brain:` activation prompt.
+6. Claude Code runs Work Brain operations through its normal Bash/shell
+   capability; there is no MCP server in this v1 path.
+
+Claude Code uses the same normalized start, user-prompt, assistant-stop, and
+session-end contract. The SOPs and probes are not duplicated for Claude.
+
+## Using Work Brain with Cursor
+
+Work Brain v1 supports the **local Cursor Agent**. It does not support Cursor
+cloud agents using a local `~/work-brain-vault`; remote vault access is a future
+architecture decision.
+
+1. Install Work Brain, configure/init the private vault, and run
+   `work-brain setup cursor`.
+2. Cursor reuses the canonical Skill at `~/.agents/skills/work-brain`.
+3. Hooks are added to `~/.cursor/hooks.json`.
+4. Open any project in Cursor Agent and verify Work Brain appears in the
+   available Skills.
+5. Let Cursor select it from the description or invoke it through the `/`
+   Skill UI.
+6. For guaranteed exact capture, begin with the explicit `work brain:` prompt.
+7. Cursor executes Work Brain through its existing shell tool.
+
+Cursor capture uses `sessionStart`, `beforeSubmitPrompt.prompt`,
+`afterAgentResponse.text`, and `sessionEnd`. It intentionally does not use a
+`stop` event for assistant text.
+
+## How discovery, execution, and capture work
+
+**Skill discovery.** A harness finds `SKILL.md` in its configured user Skill
+directory. It initially sees the Skill name and description, then loads the
+main instructions and relevant SOP/probe references progressively.
+
+**Tool execution.** The Skill tells the agent which sanctioned logical Work
+Brain operation to use. The harness already owns shell/terminal execution, so
+the agent calls `work-brain state ...`, `work-brain evidence ...`, or
+`work-brain commit-draft ...`. The agent never needs to understand SQLite,
+FTS5, embeddings, journals, or vault internals.
+
+**Capture.** Host lifecycle hooks send visible Work Brain turns to one shared
+capture adapter. Ordinary coding chats remain inactive. Exact durable capture
+starts only after `work brain:` or an explicitly observed Work Brain Skill
+invocation. Implicit behavior that a hook did not observe is never labeled
+verbatim source.
+
+**Storage and retrieval.** The CLI delegates to application/domain services.
+LLD-03 will implement search behind the same `evidence search` boundary;
+harnesses and Skills do not choose FTS versus vectors.
 
 ## Optional voice interface: Yap
 
-[Yap](https://github.com/latent-variable/Yap) is a useful conversational
-front end for Work Brain on macOS. It gives your terminal-based LLM ears and a
-voice: dictate into the active terminal, then select an answer and have Yap
-read it back. Yap is optional and separate from Work Brain; Work Brain remains
-responsible for durable turns, structured commits, and the private vault.
+[Yap](https://github.com/latent-variable/Yap) is optional dictation and
+read-aloud around whichever local harness you use. Work Brain itself does not
+own the conversational model; Yap simply makes the host terminal easier to
+use by voice.
 
-Install Yap with Homebrew:
+Install on macOS with Homebrew:
 
 ```bash
-# Install Homebrew first if it is not already installed: https://brew.sh
+# Install Homebrew first if needed: https://brew.sh
 brew install --cask latent-variable/tap/yap
 ```
 
-On first launch, open Yap's model settings and download its voice model, then
-grant Microphone and Accessibility permissions when macOS asks. The default
-shortcuts documented by Yap are `⌘⇧D` to dictate and `⌘⇧R` to read selected
-text aloud. You can change them in Yap's settings.
+On first launch, download Yap's voice model and grant microphone/accessibility
+permissions when macOS asks. Use Yap's configured dictate shortcut to enter the
+initial `work brain:` activation prompt into Codex, Claude Code, or Cursor.
+Use its read-aloud shortcut on the visible host response. Yap does not receive
+direct access to the private vault and is not a Work Brain evidence store.
 
-A practical Work Brain loop is:
-
-1. Start your CLI LLM in the terminal and give it the Work Brain Skill/SOP
-   context described below.
-2. Press Yap's dictate shortcut, speak your thought, and press it again to
-   insert the text into the terminal prompt.
-3. Let the LLM ask questions and answer them conversationally. Persist each
-   visible user and assistant turn with `work-brain turn` before moving on.
-4. When the bounded session is complete, have the LLM emit an LLD2
-   `CommitDraft`, then publish it with `work-brain commit-draft`.
-5. Select the useful part of the LLM response and use Yap's read shortcut when
-   you want the terminal to brief you aloud.
-
-Yap's audio and models remain on your Mac according to its project
-documentation. Keep Work Brain's vault outside the public repository and do
-not put provider credentials into prompts, turns, or the vault.
-
-Create a publication-safe synthetic vault:
-
-```bash
-PYTHONPATH=src python3 examples/create_synthetic_vault.py \
-  --vault /tmp/work-brain-synthetic
-work-brain --vault /tmp/work-brain-synthetic doctor
-```
-
-## CLI commands
-
-All commands require a private-vault path before the subcommand.
-
-```bash
-# Create or validate the vault structure.
-work-brain --vault "$WORK_BRAIN_VAULT" init
-work-brain --vault "$WORK_BRAIN_VAULT" doctor
-work-brain --vault "$WORK_BRAIN_VAULT" rebuild
-
-# Inspect the progressive Skill/SOP/probe set for a workflow.
-work-brain --vault "$WORK_BRAIN_VAULT" skills \
-  --workflow think --domain engineering
-
-# Start a bounded session and note the printed session_id.
-work-brain --vault "$WORK_BRAIN_VAULT" session-start \
-  --mode think --domain engineering
-
-# Persist each CLI-LLM/user turn immediately.
-work-brain --vault "$WORK_BRAIN_VAULT" turn \
-  --session-id <session-id> --role user --content "I am deciding whether to move this job async."
-work-brain --vault "$WORK_BRAIN_VAULT" turn \
-  --session-id <session-id> --role assistant --content "What problem would async processing solve?"
-
-# Publish a validated, resolved LLD1 SessionEntry JSON payload.
-work-brain --vault "$WORK_BRAIN_VAULT" commit \
-  --session-id <session-id> --file resolved-entry.json
-
-# Or validate and resolve an LLD2 model-produced CommitDraft.
-work-brain --vault "$WORK_BRAIN_VAULT" commit-draft \
-  --session-id <session-id> --workflow think --file commit-draft.json
-
-# Inspect unfinished sessions after an interrupted model/process.
-work-brain --vault "$WORK_BRAIN_VAULT" recoverable
-```
-
-`commit` accepts the resolved LLD1 `SessionEntry` shape. `commit-draft` accepts
-the strict LLD2 model shape and performs validation, stable-ID resolution,
-source-reference checks, and source-first publication for you.
-
-## Connecting a CLI LLM
-
-Work Brain does not hard-code a model provider or require a background agent.
-Connect any CLI LLM by placing a small adapter between the LLM process and the
-vault:
+## Private vault and durability
 
 ```text
-CLI LLM / voice-to-text
-          |
-          v
-thin Work Brain adapter
-  - starts/resumes a session
-  - appends every user/assistant turn
-  - assembles bounded context
-  - asks the model for a CommitDraft in the active context
-  - validates and resolves the draft through `CommitResolver`
-          |
-          v
-Vault.commit_entry() or `work-brain commit-draft`
-```
-
-The adapter should follow this lifecycle:
-
-1. Start one bounded session and persist its `session_id` and `entry_id`.
-2. Append every accepted user and assistant message immediately. Do not wait
-   for end-of-day closure.
-3. Give the model only the active conversation, compact current state, the
-   relevant SOP/probe guidance, and bounded retrieved evidence.
-4. Ask the model for an LLD2 `CommitDraft`, preserving statement basis and
-   source-turn references. A normal commit should use the active model context;
-   it should not reread the entire historical vault.
-5. Resolve the draft into the LLD1 `SessionEntry` contract, including UUIDv7
-   identities, revision metadata, provenance, entity/artifact references, and
-   state mutations.
-6. Publish through the Work Brain persistence port or the `commit-draft` command.
-   Source publication happens before journals, state, SQLite, FTS, or vector
-   updates.
-
-For a provider-specific integration, replace `your-cli-llm` with the command
-that accepts a prompt on stdin and returns the LLD2 CommitDraft JSON on stdout:
-
-```bash
-your-cli-llm --json < bounded-commit-prompt.json > commit-draft.json
-work-brain --vault "$WORK_BRAIN_VAULT" commit-draft \
-  --session-id "$SESSION_ID" --workflow think --file commit-draft.json
-```
-
-The repository intentionally does not assume a particular CLI LLM, API key
-scheme, prompt format, or voice-to-text utility. Keep provider credentials out
-of the vault, transcripts, artifact locators, and SQLite.
-
-## Durable data model
-
-The private vault is the trust boundary and uses this topology:
-
-```text
-career-vault/
+work-brain-vault/
   sessions/YYYY/MM/DD/<session-id>/
-    session.json              # mutable session metadata snapshot
-    turns.jsonl                # append-only verbatim conversation source
-    entries/0001.json          # immutable structured revision history
+    session.json              # metadata and host/capture provenance
+    turns.jsonl                # append-only visible Work Brain source
+    entries/0001.json          # immutable structured revisions
   amendments/YYYY/MM/DD/<amendment-id>.json
   catalog/entities/<entity-id>.json
   catalog/artifacts/<artifact-id>.json
-  journal/YYYY/MM/YYYY-MM-DD.md       # generated daily projection
+  journal/YYYY/MM/YYYY-MM-DD.md       # generated projection
   state/current.json                   # generated WorkState projection
-  career/marks.jsonl                   # LLD4-owned preference metadata
+  context/capture-mappings.json       # private operational host mapping
   questions/                            # private question banks
-  index/work-brain.sqlite              # rebuildable metadata/index database
+  career/marks.jsonl                   # future LLD-04 preference metadata
+  index/work-brain.sqlite              # rebuildable private index
 ```
 
-Important invariants:
-
-- Turns are appended and flushed before the next conversational step is
-  acknowledged. Only an incomplete trailing JSONL record may be recovered;
-  malformed middle data fails visibly.
-- Each session has one stable `entry_id`. Re-extraction and correction create
-  immutable revisions rather than rewriting history.
-- `contemporaneous` and `reconstructed` evidence remain distinguishable.
-- User amendments preserve the original transcript and create a
-  `user_correction` revision when applied.
-- WorkState and journals can be regenerated from source files.
-- SQLite is never the sole copy of professional evidence.
-- A vault has one active writer. A second writer fails clearly.
-
-## Repository layout
-
-```text
-src/work_brain/              LLD1 domain/persistence plus LLD2 runtime services
-skills/work-brain/           public Skill, SOPs, and domain probes
-migrations/                  persistence-owned SQLite migrations
-examples/                    synthetic vault and integration examples
-tests/                       LLD1 durability and LLD2 runtime/contract tests
-work-brain-hld-v2.md         high-level architecture
-work-brain-lld-01-*.md       vault and persistence contract
-work-brain-lld-02-*.md       agent runtime and SOP contract
-work-brain-lld-03-*.md       retrieval and index contract
-work-brain-lld-04-*.md       interview and career contract
-```
-
-Private vaults should live outside the repository or under an ignored path.
-The public tree must contain only reusable code, documentation, migrations,
-tests, and synthetic/publication-safe fixtures.
+Turns are flushed before the next step is acknowledged. A failed CommitDraft
+does not discard the raw transcript. Re-extraction and user correction create
+immutable revisions. Journals, state, SQLite, and future retrieval indexes can
+be rebuilt from source. A hook failure returns a structured error and does not
+fabricate an assistant turn.
 
 ## Recovery and maintenance
 
-If a model commit fails, the raw transcript remains available for retry. If a
-journal, WorkState, SQLite, or future retrieval index update fails after source
-publication, run:
-
 ```bash
-work-brain --vault "$WORK_BRAIN_VAULT" rebuild
-work-brain --vault "$WORK_BRAIN_VAULT" doctor
+work-brain recoverable
+work-brain rebuild
+work-brain doctor
 ```
 
-`doctor` reports malformed source, broken references, stale projections,
-missing SQLite rows, source-hash mismatches, and unsafe private-vault Git
-placement. It does not silently rewrite raw evidence.
+An interrupted host session remains recoverable. A session is not committed
+merely because the host process ended. The user or agent must explicitly resume,
+repair, or close it through the supported Work Brain workflow.
+
+## Testing and manual smoke checklist
+
+Automated tests cover LLD-01 durability plus LLD-02 v3 contracts: frontmatter,
+resource provenance, configured vault precedence, setup idempotence and safe
+merging, Codex/Claude/Cursor payload normalization, inactive/active capture,
+recovery, hook non-LLM behavior, and JSON CLI operations.
+
+Manual checks should be run separately for each available local harness:
+
+1. start a normal coding chat and confirm no Work Brain session is created;
+2. start with `work brain:` and confirm the exact prompt is the first turn;
+3. confirm a visible assistant response is appended exactly once;
+4. complete a CommitDraft and confirm the session is committed/deactivated;
+5. terminate the host and confirm the session is recoverable without a fake
+   assistant response;
+6. run `work-brain setup HOST` twice and confirm no duplicate hook entries;
+7. run `work-brain setup HOST --check` and inspect reported paths.
+
+Fixture-based support for Claude Code or Cursor is not a claim of runtime
+testing on a machine where those hosts were not available.
 
 ## Design references
 
-- [High-Level Design](work-brain-hld-v2.md)
-- [LLD1: Core Domain, Vault, and Persistence](work-brain-lld-01-core-domain-vault-persistence-v2.md)
-- [LLD2: Agent Runtime, Skills/SOPs, and Session Orchestration](work-brain-lld-02-agent-runtime-skills-session-orchestration-v2.md)
-- [LLD3: Retrieval, FTS, Embeddings, and Index Lifecycle](work-brain-lld-03-retrieval-fts-embeddings-index-lifecycle-v2.md)
-- [LLD4: Interview Practice and Career Retrieval](work-brain-lld-04-interview-practice-career-retrieval-v1.md)
+- [HLD-001 v3: Harness-hosted architecture](work-brain-hld-v3.md)
+- [LLD-01: Core domain, vault, and persistence](work-brain-lld-01-core-domain-vault-persistence-v2.md)
+- [LLD-002 v3: Runtime, Skill, capture, and CLI](work-brain-lld-02-agent-runtime-skills-session-orchestration-v3.md)
+- [LLD-003 v3: Retrieval and index lifecycle](work-brain-lld-03-retrieval-fts-embeddings-index-lifecycle-v3.md)
+- [LLD-04: Interview practice and career retrieval](work-brain-lld-04-interview-practice-career-retrieval-v1.md)
+- [Future considerations](work-brain-future-considerations.md)

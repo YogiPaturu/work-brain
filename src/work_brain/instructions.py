@@ -93,7 +93,11 @@ class SkillLoader:
         if not path.exists():
             raise ValidationError(f"instruction resource is missing: {path}")
         text = path.read_text(encoding="utf-8")
-        match = next((RESOURCE_RE.match(line.strip()) for line in text.splitlines()[:8] if line.strip()), None)
+        match = next(
+            (candidate for line in text.splitlines()[:8] if line.strip()
+             for candidate in (RESOURCE_RE.match(line.strip()),) if candidate),
+            None,
+        )
         if match is None:
             raise ValidationError(f"instruction resource has no '<ID> v<number>' header: {path}")
         return InstructionResource(match.group(1), int(match.group(2)), path, text)

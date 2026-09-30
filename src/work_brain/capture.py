@@ -1,0 +1,256 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import re
+from typing import Any, Mapping
+
+from .errors import ValidationError
+from .fsutil import atomic_replace_json, ensure_private_file, read_json
+from .orchestrator import select_workflow
+from .timeutil import timestamp_now
+
+
+HOSTS = {"codex", "claude-code", "cursor"}
+_ACTIVATION_RE = re.compile(r"^\s*work\s+brain\s*:", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class CaptureEvent:
+    host: str
+    kind: str
+    host_session_id: str
+    text: str | None = None
+    host_model: str | None = None
+    recorded_at: str | None = None
+    explicit_activation: bool = False
+
+
+def _value(payload: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = payload.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _host_session_id(payload: Mapping[str, Any]) -> str:
+    value = _value(payload, "session_id", "sessionId", "conversation_id", "conversationId")
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError("capture hook payload requires a host session ID")
+    return value.strip()
+
+
+def _event_name(payload: Mapping[str, Any]) -> str:
+    value = _value(payload, "event", "event_name", "hook_event_name", "hookEventName", "type")
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError("capture hook payload requires an event name")
+    return value.strip()
+
+
+def _model(payload: Mapping[str, Any]) -> str | None:
+    value = _value(payload, "model", "model_id", "modelId", "host_model")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _timestamp(payload: Mapping[str, Any]) -> str:
+    value = _value(payload, "recorded_at", "timestamp", "time")
+    return value if isinstance(value, str) and value.strip() else timestamp_now()
+
+
+def _explicit_skill(payload: Mapping[str, Any]) -> bool:
+    if payload.get("skill_invoked") is True or payload.get("skillInvoked") is True:
+        return True
+    for key in ("skill", "skill_name", "skillName", "invoked_skill", "invokedSkill", "invocation"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip().casefold().lstrip("/$") == "work-brain":
+            return True
+    return False
+
+
+def _text(payload: Mapping[str, Any], *keys: str) -> str | None:
+    value = _value(payload, *keys)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValidationError(f"capture event text field must be a string: {keys[0]}")
+    return value
+
+
+def _prompt_activates(text: str | None) -> bool:
+    if not text:
+        return False
+    return bool(_ACTIVATION_RE.match(text) or re.match(r"^\s*(?:/|\$)work-brain(?:\s|$)", text, re.IGNORECASE))
+
+
+def _normalize(host: str, payload: Mapping[str, Any], event_map: Mapping[str, str]) -> CaptureEvent:
+    if host not in HOSTS:
+        raise ValidationError(f"unsupported capture host: {host}")
+    name = _event_name(payload)
+    kind = event_map.get(name.casefold())
+    if kind is None:
+        raise ValidationError(f"unsupported {host} capture event: {name}")
+    text = None
+    if kind == "user_prompt":
+        text = _text(payload, "prompt", "text", "content")
+        if text is None or not text:
+            raise ValidationError("user prompt capture event requires prompt text")
+    elif kind == "assistant_message":
+        text = _text(payload, "last_assistant_message", "lastAssistantMessage", "text", "content")
+        if text is None or not text:
+            raise ValidationError("assistant capture event requires visible response text")
+    return CaptureEvent(
+        host=host,
+        kind=kind,
+        host_session_id=_host_session_id(payload),
+        text=text,
+        host_model=_model(payload),
+        recorded_at=_timestamp(payload),
+        explicit_activation=_explicit_skill(payload) or (kind == "user_prompt" and _prompt_activates(text)),
+    )
+
+
+class CodexCaptureAdapter:
+    EVENTS = {
+        "sessionstart": "session_start", "userpromptsubmit": "user_prompt",
+        "stop": "assistant_message", "sessionend": "session_end", "interrupt": "interrupt",
+    }
+
+    def normalize(self, payload: Mapping[str, Any]) -> CaptureEvent:
+        return _normalize("codex", payload, self.EVENTS)
+
+
+class ClaudeCodeCaptureAdapter:
+    EVENTS = {
+        "sessionstart": "session_start", "userpromptsubmit": "user_prompt",
+        "stop": "assistant_message", "sessionend": "session_end", "interrupt": "interrupt",
+    }
+
+    def normalize(self, payload: Mapping[str, Any]) -> CaptureEvent:
+        return _normalize("claude-code", payload, self.EVENTS)
+
+
+class CursorCaptureAdapter:
+    EVENTS = {
+        "sessionstart": "session_start", "beforesubmitprompt": "user_prompt",
+        "afteragentresponse": "assistant_message", "sessionend": "session_end",
+    }
+
+    def normalize(self, payload: Mapping[str, Any]) -> CaptureEvent:
+        return _normalize("cursor", payload, self.EVENTS)
+
+
+def normalize_capture_event(host: str, payload: Mapping[str, Any]) -> CaptureEvent:
+    if not isinstance(payload, Mapping):
+        raise ValidationError("capture hook input must be a JSON object")
+    adapters = {
+        "codex": CodexCaptureAdapter(),
+        "claude-code": ClaudeCodeCaptureAdapter(),
+        "cursor": CursorCaptureAdapter(),
+    }
+    try:
+        adapter = adapters[host]
+    except KeyError as exc:
+        raise ValidationError(f"unsupported capture host: {host}") from exc
+    return adapter.normalize(payload)
+
+
+class HarnessCaptureService:
+    """Normalizes host lifecycle events into the existing LLD-01 vault API."""
+
+    MAP_RELATIVE = "context/capture-mappings.json"
+
+    def __init__(self, vault: Any):
+        self.vault = vault
+        self.vault.initialize()
+        self.mapping_path = self.vault.root / self.MAP_RELATIVE
+        if not self.mapping_path.exists():
+            atomic_replace_json(self.mapping_path, {})
+        ensure_private_file(self.mapping_path)
+
+    def _read_mappings(self) -> dict[str, dict[str, Any]]:
+        value = read_json(self.mapping_path)
+        if not isinstance(value, dict):
+            raise ValidationError("capture mapping state must be a JSON object")
+        mappings: dict[str, dict[str, Any]] = {}
+        for key, item in value.items():
+            if not isinstance(item, Mapping) or not isinstance(item.get("session_id"), str):
+                raise ValidationError("capture mapping entries must contain a session_id object")
+            mappings[str(key)] = dict(item)
+        return mappings
+
+    def _write_mappings(self, value: Mapping[str, Any]) -> None:
+        atomic_replace_json(self.mapping_path, dict(value))
+
+    def handle(self, event: CaptureEvent) -> dict[str, Any]:
+        with self.vault.write_lock():
+            mappings = self._read_mappings()
+            key = f"{event.host}:{event.host_session_id}"
+            mapping = mappings.get(key)
+            if event.kind == "session_start":
+                return {"captured": False, "status": "ready", "host": event.host, "host_session_id": event.host_session_id}
+            if event.kind == "user_prompt":
+                if mapping is None and not event.explicit_activation:
+                    return {"captured": False, "status": "inactive", "host": event.host, "host_session_id": event.host_session_id}
+                if mapping is None:
+                    workflow = select_workflow(event.text)
+                    session = self.vault.create_session(
+                        started_at=event.recorded_at,
+                        modes=[workflow],
+                        runtime={
+                            "host": event.host,
+                            "host_session_id": event.host_session_id,
+                            "host_model": event.host_model,
+                            "capture_fidelity": "verbatim",
+                            "capture_activation": "explicit",
+                            "capture_status": "active",
+                            "workflow": workflow,
+                        },
+                    )
+                    session_id = session["session_id"]
+                    mappings[key] = {"session_id": session_id, "host": event.host, "host_session_id": event.host_session_id}
+                else:
+                    session_id = mapping["session_id"]
+                self.vault.append_turn(session_id, "user", event.text or "", recorded_at=event.recorded_at)
+                self._write_mappings(mappings)
+                return {"captured": True, "status": "active", "session_id": session_id, "role": "user"}
+            if mapping is None:
+                return {"captured": False, "status": "inactive", "host": event.host, "host_session_id": event.host_session_id}
+            session_id = mapping["session_id"]
+            if event.kind == "assistant_message":
+                self.vault.append_turn(session_id, "assistant", event.text or "", recorded_at=event.recorded_at)
+                return {"captured": True, "status": "active", "session_id": session_id, "role": "assistant"}
+            if event.kind in {"session_end", "interrupt"}:
+                self._deactivate_mapping(mappings, key, session_id, status="recoverable")
+                return {"captured": False, "status": "recoverable", "session_id": session_id, "event": event.kind}
+            raise ValidationError(f"unsupported normalized capture event: {event.kind}")
+
+    def stop(self, *, host: str, host_session_id: str, session_id: str | None = None) -> dict[str, Any]:
+        with self.vault.write_lock():
+            mappings = self._read_mappings()
+            key = f"{host}:{host_session_id}"
+            mapping = mappings.get(key)
+            if mapping is None:
+                return {"deactivated": False, "status": "inactive", "host": host, "host_session_id": host_session_id}
+            actual_session = mapping["session_id"]
+            if session_id is not None and session_id != actual_session:
+                raise ValidationError("session_id does not match active host capture mapping")
+            self._deactivate_mapping(mappings, key, actual_session, status="closed")
+            return {"deactivated": True, "status": "closed", "session_id": actual_session}
+
+    def stop_session(self, session_id: str) -> dict[str, Any]:
+        """Deactivate any host mapping for a session after an explicit commit."""
+        with self.vault.write_lock():
+            mappings = self._read_mappings()
+            matches = [key for key, mapping in mappings.items() if mapping.get("session_id") == session_id]
+            for key in matches:
+                self._deactivate_mapping(mappings, key, session_id, status="closed")
+            return {"deactivated": bool(matches), "status": "closed", "session_id": session_id}
+
+    def _deactivate_mapping(self, mappings: dict[str, dict[str, Any]], key: str, session_id: str, *, status: str) -> None:
+        try:
+            session = self.vault.read_session(session_id)
+            session.setdefault("runtime", {}).update({"capture_status": status})
+            self.vault.update_session_metadata(session_id, session)
+        finally:
+            mappings.pop(key, None)
+            self._write_mappings(mappings)

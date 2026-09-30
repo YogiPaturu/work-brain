@@ -7,6 +7,21 @@ These items are intentionally outside the current HLD/LLD contract unless a futu
 
 ## Future Projections and Use Cases
 
+## Standalone Work Brain LLM runtime
+
+The v1 production path is hosted by Codex, Claude Code, or the local Cursor
+Agent. Work Brain does not own a conversational provider, model selection,
+fallback routing, or a second LLM call behind the host harness. The existing
+provider-free model/orchestrator code may remain useful for tests and future
+experiments.
+
+A standalone direct-LLM runtime is deferred until there is a concrete need for
+an environment that cannot run the deterministic CLI through a local agent
+harness. If promoted, it must preserve the same Skill/SOP, CommitDraft,
+source-first, privacy, and recovery contracts rather than creating a second
+evidence model. MCP is a separate future adapter decision, not an implicit
+requirement of that runtime.
+
 ### Teach
 Use accumulated professional evidence to help explain concepts, decisions, trade-offs, and lessons to other people.
 

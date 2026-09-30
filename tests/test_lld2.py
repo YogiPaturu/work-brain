@@ -4,6 +4,7 @@ import tempfile
 import unittest
 import json
 from pathlib import Path
+import re
 
 from work_brain import (
     CommitDraftValidator,
@@ -17,6 +18,7 @@ from work_brain import (
     new_uuid7,
     select_workflow,
 )
+from work_brain.model import ModelResponse
 
 
 def draft(*, workflow: str = "think", bad_runtime_field: bool = False) -> dict:
@@ -50,8 +52,33 @@ class LLD2Tests(unittest.TestCase):
 
     def test_skill_loader_is_progressive_and_versioned(self) -> None:
         loaded = SkillLoader().load("think", ["engineering", "product", "leadership"])
-        self.assertEqual(["WORK-BRAIN-SKILL@1", "WORK-BRAIN-SOP-CORE@1", "WORK-BRAIN-SOP-THINK@1", "WORK-BRAIN-PROBE-ENGINEERING@1", "WORK-BRAIN-PROBE-PRODUCT@1"], loaded.identities)
+        self.assertEqual(["WORK-BRAIN-SKILL@2", "WORK-BRAIN-SOP-CORE@2", "WORK-BRAIN-SOP-THINK@2", "WORK-BRAIN-PROBE-ENGINEERING@1", "WORK-BRAIN-PROBE-PRODUCT@1"], loaded.identities)
         self.assertNotIn("leadership", loaded.text)
+
+    def test_skill_has_native_metadata(self) -> None:
+        skill = (Path(__file__).resolve().parents[1] / "skills/work-brain/SKILL.md").read_text(encoding="utf-8")
+        self.assertTrue(skill.startswith("---\nname: work-brain\ndescription: "))
+        self.assertIn("\n---\n\nWORK-BRAIN-SKILL v2\n", skill)
+        agent_yaml = (Path(__file__).resolve().parents[1] / "skills/work-brain/agents/openai.yaml").read_text(encoding="utf-8")
+        self.assertTrue(agent_yaml.startswith("interface:\n"))
+        self.assertIn("  display_name:", agent_yaml)
+        self.assertIn("  short_description:", agent_yaml)
+        self.assertIn("  default_prompt:", agent_yaml)
+
+    def test_sops_follow_agent_sop_structure_and_are_versioned(self) -> None:
+        sop_dir = Path(__file__).resolve().parents[1] / "skills/work-brain/references/sops"
+        sop_files = sorted(sop_dir.glob("*.sop.md"))
+        self.assertEqual(8, len(sop_files))
+        for path in sop_files:
+            text = path.read_text(encoding="utf-8")
+            self.assertRegex(text, r"(?m)^WORK-BRAIN-SOP-[A-Z0-9-]+ v2$")
+            self.assertRegex(text, r"(?m)^# (?!#).+$")
+            for section in ("Overview", "Parameters", "Steps", "Examples", "Troubleshooting"):
+                self.assertIn(f"## {section}", text, path.name)
+            step_names = re.findall(r"(?m)^### \d+\. .+$", text)
+            self.assertGreaterEqual(len(step_names), 2, path.name)
+            self.assertEqual(len(step_names), len(re.findall(r"(?m)^\*\*Constraints:\*\*$", text)), path.name)
+            self.assertRegex(text, r"(?m)^- \*\*[a-z][a-z0-9_]*\*\* \((required|optional)")
 
     def test_workflow_selection_is_deterministic(self) -> None:
         self.assertEqual("think", select_workflow("think with me"))
@@ -69,7 +96,31 @@ class LLD2Tests(unittest.TestCase):
         self.assertEqual(1, entry.revision)
         self.assertEqual(RuntimeState.COMMITTED, orchestrator.state)
         self.assertEqual(["respond", "commit_draft"], [call["kind"] for call in model.calls])
-        self.assertEqual(["WORK-BRAIN-SKILL@1", "WORK-BRAIN-SOP-CORE@1", "WORK-BRAIN-SOP-THINK@1", "WORK-BRAIN-PROBE-ENGINEERING@1"], self.vault.read_session(session["session_id"])["runtime"]["sops"])
+        self.assertEqual(["WORK-BRAIN-SKILL@2", "WORK-BRAIN-SOP-CORE@2", "WORK-BRAIN-SOP-THINK@2", "WORK-BRAIN-PROBE-ENGINEERING@1"], self.vault.read_session(session["session_id"])["runtime"]["sops"])
+
+    def test_model_tool_calls_execute_and_return_without_polluting_raw_turns(self) -> None:
+        model = ScriptedModel(responses=[
+            ModelResponse("", ({"id": "call-1", "name": "get_recent_work", "arguments": {"limit": 1}},)),
+            ModelResponse("There is no recent committed work yet."),
+        ])
+        orchestrator = SessionOrchestrator(self.vault, model)
+        session = orchestrator.start("What have I already captured?", workflow="operate")
+        self.assertEqual(2, len(self.vault.list_turns(session["session_id"])))
+        self.assertEqual("There is no recent committed work yet.", self.vault.list_turns(session["session_id"])[1]["content"])
+        self.assertEqual(["respond", "respond"], [call["kind"] for call in model.calls])
+        self.assertEqual(3, model.calls[1]["message_count"])
+        self.assertEqual("tool", orchestrator._messages[2]["role"])
+        self.assertEqual(4, len(orchestrator._messages))
+        self.assertEqual("There is no recent committed work yet.", orchestrator._messages[3]["content"])
+
+    def test_malformed_or_disallowed_tool_call_returns_structured_error(self) -> None:
+        model = ScriptedModel(responses=[
+            ModelResponse("", ({"id": "call-1", "name": "filesystem", "arguments": {}},)),
+            ModelResponse("I could not use that unavailable tool."),
+        ])
+        orchestrator = SessionOrchestrator(self.vault, model)
+        orchestrator.start("Inspect the current work.", workflow="operate")
+        self.assertIn("not available in workflow", orchestrator._messages[2]["content"])
 
     def test_runtime_owned_fields_are_rejected_before_publication(self) -> None:
         validator = CommitDraftValidator()
@@ -108,7 +159,7 @@ class LLD2Tests(unittest.TestCase):
         self.assertEqual("operate", self.vault.get_current_entry(session["entry_id"]).modes[0])
 
     def test_context_pressure_rolls_to_a_new_session(self) -> None:
-        model = ScriptedModel(drafts=[draft(), draft()], context_window=2_200, output_reserve=300)
+        model = ScriptedModel(drafts=[draft(), draft()], context_window=5_500, output_reserve=300)
         orchestrator = SessionOrchestrator(self.vault, model)
         first = orchestrator.start("Short first topic.", workflow="think")
         orchestrator.turn("x" * 2_000)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from enum import Enum
 from typing import Any, Mapping
 
@@ -9,7 +10,7 @@ from .errors import PersistenceError, ValidationError
 from .instructions import LoadedInstructions, SkillLoader, WORKFLOWS
 from .model import ConversationModel, ModelResponse
 from .timeutil import timestamp_now
-from .tools import ToolRegistry
+from .tools import ToolRegistry, ToolResult
 
 
 class RuntimeState(str, Enum):
@@ -52,7 +53,7 @@ class ContextPlan:
 
 
 class ContextPlanner:
-    def plan(self, messages: list[Mapping[str, str]], instructions: str, model: ConversationModel) -> ContextPlan:
+    def plan(self, messages: list[Mapping[str, Any]], instructions: str, model: ConversationModel) -> ContextPlan:
         estimated = (len(instructions) + sum(len(message.get("content", "")) for message in messages)) // 4
         usable = max(model.context_window - model.output_reserve, 1)
         return ContextPlan(estimated, usable, estimated >= int(usable * 0.70))
@@ -60,6 +61,8 @@ class ContextPlanner:
 
 class SessionOrchestrator:
     """Coordinates a bounded session without embedding provider-specific behavior."""
+
+    MAX_TOOL_ROUNDS = 8
 
     def __init__(self, vault: Any, model: ConversationModel, *, loader: SkillLoader | None = None,
                  tools: ToolRegistry | None = None, resolver: CommitResolver | None = None):
@@ -73,7 +76,7 @@ class SessionOrchestrator:
         self.session_id: str | None = None
         self.workflow: str | None = None
         self.instructions: LoadedInstructions | None = None
-        self._messages: list[dict[str, str]] = []
+        self._messages: list[dict[str, Any]] = []
         self._modes: list[str] = []
         self._domains: list[str] = []
 
@@ -116,10 +119,7 @@ class SessionOrchestrator:
         if plan.rollover:
             raise PersistenceError("context budget reached; close and roll over before adding another turn")
         try:
-            response = self.model.respond(
-                self._messages, instructions=self.instructions.text,
-                tools=[tool.name for tool in self.tools.definitions(self.workflow)],
-            )
+            response = self._respond_with_tools()
         except Exception:
             self.state = RuntimeState.RECOVERABLE
             raise
@@ -127,6 +127,64 @@ class SessionOrchestrator:
             self.vault.append_turn(self.session_id, "assistant", response.text)
             self._messages.append({"role": "assistant", "content": response.text})
         return response
+
+    def _respond_with_tools(self) -> ModelResponse:
+        """Run the bounded model/tool loop for one persisted user turn."""
+        if self.instructions is None or self.workflow is None:
+            raise ValidationError("session instructions are not loaded")
+        available = tuple(tool.name for tool in self.tools.definitions(self.workflow))
+        allowed = set(available)
+        for _round in range(self.MAX_TOOL_ROUNDS):
+            plan = self.context_planner.plan(self._messages, self.instructions.text, self.model)
+            if plan.rollover:
+                raise PersistenceError("context budget reached during model/tool loop")
+            response = self.model.respond(
+                self._messages, instructions=self.instructions.text, tools=available,
+            )
+            if not response.tool_calls:
+                return response
+
+            self._messages.append({
+                "role": "assistant", "content": response.text,
+                "tool_calls": [dict(call) if isinstance(call, Mapping) else {"raw": str(call)} for call in response.tool_calls],
+            })
+            for index, raw_call in enumerate(response.tool_calls):
+                call_id, name, arguments, validation_error = self._normalize_tool_call(raw_call, _round, index)
+                if validation_error:
+                    result = ToolResult(False, error=validation_error)
+                elif name not in allowed:
+                    result = ToolResult(False, error=f"tool is not available in workflow: {name}")
+                else:
+                    try:
+                        result = self.tools.call(name, **arguments)
+                    except Exception as exc:
+                        result = ToolResult(False, error=f"tool execution failed: {exc}")
+                self._messages.append({
+                    "role": "tool", "tool_call_id": call_id, "name": name or "unknown",
+                    "content": json.dumps(result.to_dict(), ensure_ascii=False, default=str),
+                })
+        raise ValidationError(f"model/tool loop exceeded {self.MAX_TOOL_ROUNDS} rounds")
+
+    @staticmethod
+    def _normalize_tool_call(raw_call: Any, round_number: int, index: int) -> tuple[str, str, dict[str, Any], str | None]:
+        """Normalize the provider-neutral tool-call shape used by the model port."""
+        if not isinstance(raw_call, Mapping):
+            return f"tool-call-{round_number}-{index}", "", {}, "tool call must be an object"
+        function = raw_call.get("function")
+        source = function if isinstance(function, Mapping) else raw_call
+        name = source.get("name")
+        arguments = source.get("arguments", {})
+        call_id = str(raw_call.get("id") or f"tool-call-{round_number}-{index}")
+        if not isinstance(name, str) or not name.strip():
+            return call_id, "", {}, "tool call name must be a non-empty string"
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                return call_id, name, {}, "tool call arguments must be valid JSON"
+        if not isinstance(arguments, Mapping):
+            return call_id, name, {}, "tool call arguments must be an object"
+        return call_id, name, dict(arguments), None
 
     def close(self) -> Any:
         if self.state != RuntimeState.ACTIVE or self.session_id is None or self.instructions is None or self.workflow is None:

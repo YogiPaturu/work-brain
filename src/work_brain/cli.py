@@ -3,19 +3,51 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
+from typing import Any
 
-from .vault import Vault
+from .capture import HarnessCaptureService, normalize_capture_event
 from .commit import CommitResolver
+from .config import default_config_path, read_config, resolve_vault_path, set_vault_path
+from .errors import FeatureUnavailable, IntegrityError, LockError, PersistenceError, ValidationError
+from .fsutil import read_json
 from .instructions import SkillLoader
+from .setup import HarnessSetup
+from .vault import Vault
 
 
-def main(argv: list[str] | None = None) -> int:
+EXIT_ERROR = 1
+EXIT_VALIDATION = 3
+EXIT_PERSISTENCE = 4
+EXIT_LOCK = 5
+EXIT_UNAVAILABLE = 6
+
+
+def _json_dump(value: Any) -> None:
+    print(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+
+
+def _error_payload(code: str, message: str) -> dict[str, Any]:
+    return {"ok": False, "error": {"code": code, "message": message}}
+
+
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="work-brain")
-    parser.add_argument("--vault", required=True, help="private vault path")
+    parser.add_argument("--vault", help="private vault path")
+    parser.add_argument("--config", help="optional local configuration path")
+    parser.add_argument("--json", action="store_true", help="emit deterministic machine-readable JSON")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("init")
-    sub.add_parser("rebuild")
-    sub.add_parser("doctor")
+
+    sub.add_parser("init", help="create the private vault")
+    sub.add_parser("rebuild", help="rebuild projections and SQLite")
+    sub.add_parser("doctor", help="validate the vault")
+
+    config = sub.add_parser("config", help="manage local user configuration")
+    config_sub = config.add_subparsers(dest="config_command", required=True)
+    set_vault = config_sub.add_parser("set-vault", help="set the default private vault path")
+    set_vault.add_argument("path")
+    config_sub.add_parser("show", help="show local configuration")
+
     start = sub.add_parser("session-start", help="create a bounded conversation session")
     start.add_argument("--started-at")
     start.add_argument("--mode", action="append", default=[])
@@ -23,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     turn = sub.add_parser("turn", help="append one durable user or assistant turn")
     turn.add_argument("--session-id", required=True)
     turn.add_argument("--role", required=True, choices=["user", "assistant"])
-    turn.add_argument("--content", required=True)
+    turn.add_argument("--content")
     turn.add_argument("--recorded-at")
     commit = sub.add_parser("commit", help="publish a resolved LLD1 SessionEntry JSON payload")
     commit.add_argument("--session-id", required=True)
@@ -31,54 +63,178 @@ def main(argv: list[str] | None = None) -> int:
     draft = sub.add_parser("commit-draft", help="validate and resolve an LLD2 CommitDraft")
     draft.add_argument("--session-id", required=True)
     draft.add_argument("--workflow", default="think")
-    draft.add_argument("--file", required=True, help="JSON file containing a model-produced CommitDraft")
-    skills = sub.add_parser("skills", help="show the progressively loaded Skill/SOP resources")
+    draft.add_argument("--file", help="JSON file; omit or use - to read CommitDraft from stdin")
+    skills = sub.add_parser("skills", help="show progressively loaded Skill/SOP resources")
     skills.add_argument("--workflow", default="think")
     skills.add_argument("--domain", action="append", default=[])
     sub.add_parser("recoverable", help="list unfinished sessions")
-    args = parser.parse_args(argv)
-    vault = Vault(args.vault)
-    if args.command == "init":
+
+    state = sub.add_parser("state", help="agent-facing Work Brain state operations")
+    state_sub = state.add_subparsers(dest="state_command", required=True)
+    state_sub.add_parser("current")
+    work = sub.add_parser("work", help="agent-facing work operations")
+    work_sub = work.add_subparsers(dest="work_command", required=True)
+    recent = work_sub.add_parser("recent")
+    recent.add_argument("--limit", type=int, default=8)
+    loops = work_sub.add_parser("loops")
+    loops.add_argument("--limit", type=int, default=20)
+    evidence = sub.add_parser("evidence", help="agent-facing evidence operations")
+    evidence_sub = evidence.add_subparsers(dest="evidence_command", required=True)
+    search = evidence_sub.add_parser("search")
+    search.add_argument("--query", required=True)
+    search.add_argument("--page-size", type=int, default=10)
+    get = evidence_sub.add_parser("get")
+    get.add_argument("--entry-id", required=True)
+    get.add_argument("--revision", type=int)
+
+    capture = sub.add_parser("capture-hook", help="normalize one host hook JSON object from stdin")
+    capture.add_argument("--host", required=True, choices=["codex", "claude-code", "cursor"])
+    stop = sub.add_parser("capture-stop", help="deactivate an explicitly captured host conversation")
+    stop.add_argument("--host", required=True, choices=["codex", "claude-code", "cursor"])
+    stop.add_argument("--host-session-id", required=True)
+    stop.add_argument("--session-id")
+    setup = sub.add_parser("setup", help="expose the canonical Skill and install additive host hooks")
+    setup.add_argument("host", choices=["codex", "claude", "claude-code", "cursor"])
+    setup.add_argument("--check", action="store_true")
+    return parser
+
+
+def _read_payload(path: str | None) -> dict[str, Any]:
+    value = json.load(sys.stdin) if path is None or path == "-" else read_json(Path(path))
+    if not isinstance(value, dict):
+        raise ValidationError("structured input must be a JSON object")
+    return value
+
+
+def _vault(args: argparse.Namespace) -> Vault:
+    return Vault(resolve_vault_path(args.vault, config_path=args.config))
+
+
+def _current_state(vault: Vault) -> dict[str, Any]:
+    return read_json(vault.root / "state/current.json")
+
+
+def _recent_work(vault: Vault, limit: int) -> list[dict[str, Any]]:
+    if not isinstance(limit, int) or not 0 < limit <= 50:
+        raise ValidationError("limit must be an integer between 1 and 50")
+    entries = sorted(vault.all_current_entries(), key=lambda item: item.created_at, reverse=True)
+    return [{"entry_id": e.entry_id, "revision": e.revision, "title": e.title, "summary": e.summary} for e in entries[:limit]]
+
+
+def _open_loops(vault: Vault, limit: int) -> list[dict[str, Any]]:
+    if not isinstance(limit, int) or not 0 < limit <= 100:
+        raise ValidationError("limit must be an integer between 1 and 100")
+    state = _current_state(vault)
+    return [item for item in state.get("items", []) if item.get("status") not in {"done", "dropped"}][:limit]
+
+
+def _hydrate(vault: Vault, entry_id: str, revision: int | None) -> dict[str, Any]:
+    candidates = [entry for entry, _ in vault.all_entry_revisions() if entry.entry_id == entry_id and (revision is None or entry.revision == revision)]
+    if not candidates:
+        raise FileNotFoundError(f"evidence entry not found: {entry_id}")
+    entry = max(candidates, key=lambda item: item.revision) if revision is None else candidates[0]
+    referenced: set[int] = set()
+    for statements in entry.sections.values():
+        for statement in statements:
+            referenced.update(statement.source_turns)
+    for mutation in entry.state_mutations:
+        referenced.update(mutation.source_turns)
+    turns = [turn for turn in vault.list_turns(entry.session_id) if turn["sequence"] in referenced]
+    return {"entry": entry.to_dict(), "source_turns": turns}
+
+
+def _run(args: argparse.Namespace) -> tuple[Any, bool]:
+    command = args.command
+    machine = bool(args.json or command in {"state", "work", "evidence", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "turn", "commit", "commit-draft", "setup"})
+    if command == "config":
+        if args.config_command == "set-vault":
+            path = set_vault_path(args.path, args.config)
+            return {"config_path": str(Path(args.config).expanduser()) if args.config else str(default_config_path()), "vault": str(path)}, True
+        return read_config(args.config), True
+    if command == "setup":
+        report = HarnessSetup().install(args.host, check=args.check).to_dict()
+        if args.vault:
+            selected = set_vault_path(args.vault, args.config)
+            report["configured_vault"] = str(selected)
+        return report, True
+    if command == "capture-hook":
+        event = normalize_capture_event(args.host, _read_payload("-"))
+        return HarnessCaptureService(_vault(args)).handle(event), True
+    if command == "capture-stop":
+        return HarnessCaptureService(_vault(args)).stop(host=args.host, host_session_id=args.host_session_id, session_id=args.session_id), True
+
+    vault = _vault(args)
+    if command == "init":
         vault.initialize()
-        print(f"initialized {vault.root}")
-        return 0
-    if args.command == "rebuild":
+        return {"initialized": True, "vault": str(vault.root)}, machine
+    if command == "rebuild":
         vault.rebuild_all()
-        print("rebuilt projections and SQLite")
-        return 0
-    if args.command == "session-start":
-        session = vault.create_session(started_at=args.started_at, modes=args.mode, domains=args.domain)
-        print(json.dumps(session, ensure_ascii=False, indent=2))
-        return 0
-    if args.command == "turn":
-        turn = vault.append_turn(args.session_id, args.role, args.content, recorded_at=args.recorded_at)
-        print(json.dumps(turn, ensure_ascii=False, indent=2))
-        return 0
-    if args.command == "commit":
-        with open(args.file, "r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-        entry = vault.commit_entry(args.session_id, payload)
-        print(json.dumps({"entry_id": entry.entry_id, "revision": entry.revision, "commit_id": entry.commit_id}, indent=2))
-        return 0
-    if args.command == "commit-draft":
-        with open(args.file, "r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-        entry = CommitResolver(vault).publish(args.session_id, payload, workflow=args.workflow)
-        print(json.dumps({"entry_id": entry.entry_id, "revision": entry.revision, "commit_id": entry.commit_id}, indent=2))
-        return 0
-    if args.command == "skills":
+        return {"rebuilt": True, "vault": str(vault.root)}, machine
+    if command == "doctor":
+        diagnostics = vault.doctor()
+        return {"ok": not diagnostics, "diagnostics": diagnostics}, machine
+    if command == "session-start":
+        return vault.create_session(started_at=args.started_at, modes=args.mode, domains=args.domain), True
+    if command == "turn":
+        content = args.content if args.content is not None else sys.stdin.read()
+        return vault.append_turn(args.session_id, args.role, content, recorded_at=args.recorded_at), True
+    if command == "commit":
+        entry = vault.commit_entry(args.session_id, _read_payload(args.file))
+        HarnessCaptureService(vault).stop_session(args.session_id)
+        return {"entry_id": entry.entry_id, "revision": entry.revision, "commit_id": entry.commit_id}, True
+    if command == "commit-draft":
+        entry = CommitResolver(vault).publish(args.session_id, _read_payload(args.file), workflow=args.workflow)
+        HarnessCaptureService(vault).stop_session(args.session_id)
+        return {"entry_id": entry.entry_id, "revision": entry.revision, "commit_id": entry.commit_id}, True
+    if command == "skills":
         loaded = SkillLoader().load(args.workflow, args.domain)
-        print(json.dumps({"resources": loaded.identities, "missing": list(loaded.missing)}, indent=2))
-        return 0
-    if args.command == "recoverable":
-        print(json.dumps([session for session in vault.all_sessions() if session.get("ended_at") is None], indent=2))
-        return 0
-    diagnostics = vault.doctor()
-    if diagnostics:
-        print("\n".join(diagnostics))
-        return 1
-    print("vault is healthy")
-    return 0
+        return {"resources": loaded.identities, "missing": list(loaded.missing)}, True
+    if command == "recoverable":
+        return [session for session in vault.all_sessions() if session.get("ended_at") is None], True
+    if command == "state" and args.state_command == "current":
+        return _current_state(vault), True
+    if command == "work" and args.work_command == "recent":
+        return _recent_work(vault, args.limit), True
+    if command == "work" and args.work_command == "loops":
+        return _open_loops(vault, args.limit), True
+    if command == "evidence" and args.evidence_command == "get":
+        return _hydrate(vault, args.entry_id, args.revision), True
+    if command == "evidence" and args.evidence_command == "search":
+        raise FeatureUnavailable("evidence search is an LLD-03 operation and is not available before retrieval is implemented")
+    raise ValidationError(f"unsupported command: {command}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    try:
+        args = _parser().parse_args(argv)
+        value, machine = _run(args)
+        code = 4 if args.command == "doctor" and not value["ok"] else 0
+        if machine:
+            _json_dump(value)
+        elif args.command == "init":
+            print(f"initialized {value['vault']}")
+        elif args.command == "rebuild":
+            print("rebuilt projections and SQLite")
+        elif args.command == "doctor":
+            print("vault is healthy")
+        return code
+    except SystemExit:
+        raise
+    except FeatureUnavailable as exc:
+        _json_dump(_error_payload("unavailable", str(exc)))
+        return EXIT_UNAVAILABLE
+    except LockError as exc:
+        _json_dump(_error_payload("lock_conflict", str(exc)))
+        return EXIT_LOCK
+    except (ValidationError, ValueError) as exc:
+        _json_dump(_error_payload("invalid_request", str(exc)))
+        return EXIT_VALIDATION
+    except (PersistenceError, IntegrityError, FileNotFoundError, json.JSONDecodeError) as exc:
+        _json_dump(_error_payload("persistence_error", str(exc)))
+        return EXIT_PERSISTENCE
+    except Exception as exc:
+        _json_dump(_error_payload("internal_error", str(exc)))
+        return EXIT_ERROR
 
 
 if __name__ == "__main__":
