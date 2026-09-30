@@ -151,7 +151,7 @@ presenting a false empty result.
 The base install has a deterministic hash-vector fallback so it remains
 offline-friendly and dependency-free. That fallback is useful for tests and
 small demos, but it is not a production-quality semantic model: the checked-in
-retrieval-quality corpus currently reaches 4/6 expected matches in the top
+retrieval-quality corpus currently reaches 3/6 expected matches in the top
 three cards. For normal semantic use, install the optional local BGE profile:
 
 ```bash

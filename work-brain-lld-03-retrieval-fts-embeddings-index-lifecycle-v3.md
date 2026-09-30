@@ -96,7 +96,7 @@ pagination, source hydration, staleness checks, and explicit `reindex`.
 The base public install uses a dependency-free deterministic local hash
 embedding adapter so a fresh Python 3.11 checkout remains installable without
 downloading model weights. The checked-in semantic smoke corpus measures this
-fallback at 4/6 expected top-three matches, so it is explicitly not treated as
+fallback at 3/6 expected top-three matches, so it is explicitly not treated as
 a production-quality semantic default. `EvidenceRetriever` accepts an
 injected local embedding provider with the documented `embed_documents` and
 `embed_query` contract, and the repository includes an optional FastEmbed

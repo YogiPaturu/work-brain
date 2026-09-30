@@ -26,7 +26,7 @@ QUALITY_CASES = (
     ("experience dealing with ambiguity", "Reversible architecture choice"),
     ("when did I influence people I wasn't managing?", "Cross-team proposal"),
     ("example of trading technical purity for speed", "Manual step shipped the fix"),
-    ("when did the result fail to happen?", "Support reduction did not materialize"),
+    ("which prediction never appeared?", "Support reduction did not materialize"),
 )
 
 CORPUS = (
@@ -38,7 +38,7 @@ CORPUS = (
     (
         "Production diagnosis corrected",
         "The live service outage came from a configuration mismatch, not the caching layer we initially investigated.",
-        "The first line of investigation was discarded after tracing the deployed settings.",
+        "The initial line of investigation was discarded after tracing the deployed settings.",
     ),
     (
         "Reversible architecture choice",
