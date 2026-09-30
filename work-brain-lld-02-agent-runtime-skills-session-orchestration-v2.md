@@ -230,8 +230,8 @@ No user-specific question bank, transcript, professional facts, private example,
 Each SOP/probe resource MUST declare a stable resource ID and integer version in its body, for example:
 
 ```text
-WORK-BRAIN-SOP-CORE v2
-WORK-BRAIN-SOP-THINK v2
+WORK-BRAIN-SOP-CORE v1
+WORK-BRAIN-SOP-THINK v1
 WORK-BRAIN-PROBE-ENGINEERING v1
 ```
 
@@ -245,8 +245,8 @@ Example:
 
 ```json
 [
-  "WORK-BRAIN-SOP-CORE@2",
-  "WORK-BRAIN-SOP-THINK@2",
+  "WORK-BRAIN-SOP-CORE@1",
+  "WORK-BRAIN-SOP-THINK@1",
   "WORK-BRAIN-PROBE-ENGINEERING@1"
 ]
 ```
@@ -431,24 +431,13 @@ For every visible conversational exchange:
 ```text
 user input
   -> append/fsync user turn
-  -> bounded model/tool loop
-       -> model response with tool calls
-       -> validate against active workflow profile
-       -> execute through ToolRegistry
-       -> return compact result to model
-       -> repeat until visible response or bounded failure
+  -> model/tool loop
   -> produce visible assistant text
   -> append/fsync assistant turn
   -> await next user input
 ```
 
 Internal tool calls and tool payloads are not raw conversational turns and are not required in `turns.jsonl`.
-
-The runtime MUST execute normalized model tool calls through the active
-`ToolRegistry` profile. It MUST return structured errors for malformed,
-unknown, unavailable, or failed calls without mutating source. One user turn
-MUST have a bounded model/tool loop; the reference implementation permits at
-most eight tool rounds before leaving the session recoverable.
 
 If retrieved evidence materially supports the final entry, the final commit MUST preserve stable source relationships as required by LLD-01/LLD-03.
 
