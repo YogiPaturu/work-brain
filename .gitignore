@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# Private vaults must never be committed.
+career-vault/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
