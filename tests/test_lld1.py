@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import tempfile
 import unittest
@@ -85,7 +86,7 @@ class LLD1Tests(unittest.TestCase):
         self.vault.commit_entry(self.session["session_id"], payload)
         state = json.loads((self.vault.root / "state/current.json").read_text())
         self.assertEqual(state_id, state["items"][0]["state_item_id"])
-        with self.vault._database().connect() as conn:
+        with closing(self.vault._database().connect()) as conn:
             self.assertEqual(1, conn.execute("SELECT COUNT(*) FROM entry_artifacts").fetchone()[0])
             self.assertEqual(1, conn.execute("SELECT COUNT(*) FROM state_items").fetchone()[0])
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import tempfile
 import unittest
@@ -49,7 +50,7 @@ class LLD3Tests(unittest.TestCase):
         self.assertEqual("ok", result["status"])
         self.assertEqual(session["entry_id"], result["cards"][0]["ref"]["entry_id"])
         self.assertNotIn("score", json.dumps(result["cards"]))
-        with self.vault._database().connect() as conn:
+        with closing(self.vault._database().connect()) as conn:
             chunks = {row[0] for row in conn.execute("SELECT chunk_id FROM retrieval_chunks")}
             fts = {row[0] for row in conn.execute("SELECT chunk_id FROM retrieval_fts")}
             vectors = {row[0] for row in conn.execute("SELECT chunk_id FROM retrieval_embeddings")}
@@ -84,8 +85,9 @@ class LLD3Tests(unittest.TestCase):
     def test_reindex_is_idempotent_and_repairs_derived_damage(self) -> None:
         self._commit("Repair index", "The retrieval index can be rebuilt.")
         retriever = EvidenceRetriever(self.vault)
-        with self.vault._database().connect() as conn:
-            conn.execute("DELETE FROM retrieval_fts")
+        with closing(self.vault._database().connect()) as conn:
+            with conn:
+                conn.execute("DELETE FROM retrieval_fts")
         self.assertTrue(retriever.doctor())
         result = retriever.search("rebuilt")
         self.assertEqual("ok", result["status"])
