@@ -16,6 +16,7 @@ from .fsutil import read_json
 from .instructions import SkillLoader
 from .setup import HarnessSetup
 from .retrieval import EvidenceRetriever
+from .profiles import CommunicationProfileStore, resolve_profiles_path, set_profiles_path
 from .vault import Vault
 
 
@@ -38,6 +39,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="work-brain")
     parser.add_argument("--vault", help="private vault path")
     parser.add_argument("--config", help="optional local configuration path")
+    parser.add_argument("--profiles", help="communication profiles JSON path")
     parser.add_argument("--json", action="store_true", help="emit deterministic machine-readable JSON")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -45,12 +47,24 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("rebuild", help="rebuild projections and SQLite")
     sub.add_parser("reindex", help="rebuild the derived retrieval index")
     sub.add_parser("doctor", help="validate the vault")
+    backfill_context = sub.add_parser("backfill-context", help="add workspace/project metadata as new entry revisions")
+    backfill_context.add_argument("--file", required=True, help="JSON mapping with defaults and entry assignments")
+    backfill_context.add_argument("--dry-run", action="store_true")
 
     config = sub.add_parser("config", help="manage local user configuration")
     config_sub = config.add_subparsers(dest="config_command", required=True)
     set_vault = config_sub.add_parser("set-vault", help="set the default private vault path")
     set_vault.add_argument("path")
+    set_profiles = config_sub.add_parser("set-profiles", help="set the communication profiles JSON path")
+    set_profiles.add_argument("path")
     config_sub.add_parser("show", help="show local configuration")
+
+    profiles = sub.add_parser("profiles", help="manage user-owned communication profiles")
+    profiles_sub = profiles.add_subparsers(dest="profiles_command", required=True)
+    profiles_sub.add_parser("list", help="list available communication profiles")
+    show_profile = profiles_sub.add_parser("show", help="show one communication profile")
+    show_profile.add_argument("profile_id")
+    profiles_sub.add_parser("validate", help="validate the communication profiles document")
 
     start = sub.add_parser("session-start", help="create a bounded conversation session")
     start.add_argument("--started-at")
@@ -189,6 +203,62 @@ def _read_transcript(path: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValidationError("transcript input must be a JSON object")
     return value
+
+
+def _backfill_context(vault: Vault, payload: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:
+    defaults = payload.get("defaults", {})
+    assignments = payload.get("entries", {})
+    if not isinstance(defaults, dict):
+        raise ValidationError("backfill-context defaults must be an object")
+    if not isinstance(assignments, dict):
+        raise ValidationError("backfill-context entries must be an object keyed by entry_id")
+    allowed = {"workspace", "project"}
+    for label, value in (("defaults", defaults),):
+        unknown = sorted(set(value) - allowed)
+        if unknown:
+            raise ValidationError(f"backfill-context {label} has unknown field: {unknown[0]}")
+    current = {entry.entry_id: entry for entry in vault.all_current_entries()}
+    unknown_entries = sorted(set(assignments) - set(current))
+    if unknown_entries:
+        raise ValidationError(f"backfill-context entry does not exist: {unknown_entries[0]}")
+    plan = []
+    for entry in sorted(current.values(), key=lambda item: (item.created_at, item.entry_id)):
+        override = assignments.get(entry.entry_id)
+        if override is not None and not isinstance(override, dict):
+            raise ValidationError(f"backfill-context assignment for {entry.entry_id} must be an object")
+        override = override or {}
+        unknown = sorted(set(override) - allowed)
+        if unknown:
+            raise ValidationError(f"backfill-context assignment has unknown field: {unknown[0]}")
+        requested = dict(defaults)
+        requested.update(override)
+        if not requested:
+            continue
+        plan.append({
+            "entry_id": entry.entry_id,
+            "title": entry.title,
+            "from": {"workspace": entry.workspace_entity_id, "project": entry.project_entity_id},
+            "requested": requested,
+        })
+    if dry_run:
+        return {"dry_run": True, "planned": plan, "count": len(plan)}
+    updated = []
+    unchanged = []
+    for item in plan:
+        entry_id = item["entry_id"]
+        requested = item["requested"]
+        before = vault.get_current_entry(entry_id)
+        changes = {}
+        if "workspace" in requested:
+            changes["workspace"] = requested["workspace"]
+        if "project" in requested:
+            changes["project"] = requested["project"]
+        entry = vault.backfill_entry_context(entry_id, **changes)
+        if entry.revision == before.revision:
+            unchanged.append(entry_id)
+        else:
+            updated.append({"entry_id": entry.entry_id, "revision": entry.revision, "commit_id": entry.commit_id})
+    return {"dry_run": False, "updated": updated, "unchanged": unchanged, "count": len(updated)}
 
 
 def _vault(args: argparse.Namespace) -> Vault:
@@ -499,7 +569,7 @@ def _question_ref(value: str | None) -> QuestionRef | None:
 
 def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     command = args.command
-    machine = bool(args.json or command in {"state", "work", "evidence", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session"})
+    machine = bool(args.json or command in {"state", "work", "evidence", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session", "profiles", "backfill-context"})
     if command == "status":
         snapshot = _live_status(_vault(args))
         return snapshot, bool(args.json)
@@ -507,7 +577,17 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         if args.config_command == "set-vault":
             path = set_vault_path(args.path, args.config)
             return {"config_path": str(Path(args.config).expanduser()) if args.config else str(default_config_path()), "vault": str(path)}, True
+        if args.config_command == "set-profiles":
+            path = set_profiles_path(args.path, args.config)
+            return {"config_path": str(Path(args.config).expanduser()) if args.config else str(default_config_path()), "communication_profiles": str(path)}, True
         return read_config(args.config), True
+    if command == "profiles":
+        store = CommunicationProfileStore.load(args.profiles, config_path=args.config)
+        if args.profiles_command == "list":
+            return {"path": str(resolve_profiles_path(args.profiles, config_path=args.config)), "profiles": [profile.to_dict() for profile in store.list()]}, True
+        if args.profiles_command == "show":
+            return store.get(args.profile_id).to_dict(), True
+        return {"valid": True, "path": str(resolve_profiles_path(args.profiles, config_path=args.config)), "count": len(store.list())}, True
     if command == "setup":
         report = HarnessSetup().install(args.host, check=args.check).to_dict()
         if args.vault:
@@ -557,6 +637,8 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         return {"rebuilt": True, "vault": str(vault.root)}, machine
     if command == "reindex":
         return EvidenceRetriever(vault).reindex(), True
+    if command == "backfill-context":
+        return _backfill_context(vault, _read_payload(args.file), dry_run=args.dry_run), True
     if command == "doctor":
         diagnostics = vault.doctor()
         retriever = EvidenceRetriever(vault)

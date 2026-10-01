@@ -11,6 +11,7 @@ Current documents:
 - [Domain and persistence](domain-and-persistence.md)
 - [Runtime and capture](runtime-and-capture.md)
 - [Retrieval and indexing](retrieval-and-indexing.md)
+- [Communication profiles](communication-profiles.md)
 - [Interview and career workflows](interview-and-career.md)
 - [Future considerations](future-considerations.md)
 

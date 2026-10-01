@@ -403,6 +403,8 @@ A structured entry revision has this v1 shape:
   },
   "modes": ["think", "operate"],
   "domains": ["engineering"],
+  "workspace_entity_id": "0199aaf1-c215-75ec-b2df-76f43ef7ae34",
+  "project_entity_id": "0199aaf1-c215-75ec-b2df-76f43ef7ae33",
   "sections": {
     "context": [],
     "observations": [],
@@ -432,6 +434,7 @@ Allowed `revision_reason` values in v1 are:
 initial_commit
 reextract
 user_correction
+metadata_backfill
 ```
 
 These values are required now because the application must distinguish model reinterpretation from user-supplied factual correction.
@@ -538,6 +541,7 @@ Entities provide stable identity and aliases for recurring professional concepts
 V1 entity kinds are:
 
 ```text
+workspace
 project
 person
 organization
@@ -582,6 +586,15 @@ Rules:
 ```
 
 `relation` is a normalized lowercase token and is not a closed enum so future projections can add useful relationship labels without source migrations.
+
+An entry may carry one first-class `workspace_entity_id` and one
+`project_entity_id`. A workspace is a broad working context such as `Ranq` or
+`Brother-in-law health tech`; a project is a specific effort such as `Auth
+implementation` or `Billing Right Code`. `domains` remain a multi-valued tag
+set for cross-cutting concerns such as `auth`, `architecture`, and `billing`.
+Workspace and project scope are indexed separately from ordinary entity
+references so communication profiles can retrieve experiences across multiple
+dates without relying on a daily window.
 
 ## 12. Artifact Reference Catalog
 
@@ -931,7 +944,9 @@ CREATE TABLE entries (
     occurrence_precision TEXT NOT NULL,
     current_path TEXT NOT NULL,
     current_hash TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    project_entity_id TEXT,
+    workspace_entity_id TEXT
 );
 ```
 

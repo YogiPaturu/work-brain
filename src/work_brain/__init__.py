@@ -8,6 +8,7 @@ from .instructions import InstructionResource, LoadedInstructions, SkillLoader
 from .model import ModelResponse, ScriptedModel
 from .orchestrator import ContextPlanner, PromptRoute, RuntimeState, SessionOrchestrator, normalize_routing_text, route_prompt, select_workflow
 from .tools import ToolDefinition, ToolRegistry, ToolResult
+from .profiles import CommunicationProfile, CommunicationProfileStore, profiles_document, resolve_profiles_path
 from .capture import CaptureEvent, HarnessCaptureService, normalize_capture_event
 from .setup import HarnessSetup
 from .retrieval import EvidenceRetriever, EvidenceRef, FastEmbedEmbeddingProvider, LocalHashEmbeddingProvider
@@ -38,6 +39,10 @@ __all__ = [
     "ToolDefinition",
     "ToolRegistry",
     "ToolResult",
+    "CommunicationProfile",
+    "CommunicationProfileStore",
+    "profiles_document",
+    "resolve_profiles_path",
     "CaptureEvent",
     "HarnessCaptureService",
     "normalize_capture_event",

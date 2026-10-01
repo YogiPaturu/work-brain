@@ -374,6 +374,12 @@ class EvidenceRetriever:
 
     def _dependency_hash(self, entry: SessionEntry) -> str:
         dependencies: list[Any] = []
+        if entry.workspace_entity_id is not None:
+            path = self.vault.root / "catalog/entities" / f"{entry.workspace_entity_id}.json"
+            dependencies.append({"kind": "workspace", "relation": "workspace", "value": read_json(path)})
+        if entry.project_entity_id is not None:
+            path = self.vault.root / "catalog/entities" / f"{entry.project_entity_id}.json"
+            dependencies.append({"kind": "project", "relation": "project", "value": read_json(path)})
         for ref in sorted(entry.entity_refs, key=lambda item: (item["entity_id"], item["relation"])):
             path = self.vault.root / "catalog/entities" / f"{ref['entity_id']}.json"
             dependencies.append({"kind": "entity", "relation": ref["relation"], "value": read_json(path)})
@@ -384,6 +390,12 @@ class EvidenceRetriever:
 
     def _metadata(self, entry: SessionEntry) -> str:
         values = list(entry.domains) + list(entry.modes)
+        if entry.workspace_entity_id is not None:
+            value = read_json(self.vault.root / "catalog/entities" / f"{entry.workspace_entity_id}.json")
+            values.extend([value["canonical_name"], *value.get("aliases", [])])
+        if entry.project_entity_id is not None:
+            value = read_json(self.vault.root / "catalog/entities" / f"{entry.project_entity_id}.json")
+            values.extend([value["canonical_name"], *value.get("aliases", [])])
         for ref in entry.entity_refs:
             value = read_json(self.vault.root / "catalog/entities" / f"{ref['entity_id']}.json")
             values.extend([value["canonical_name"], *value.get("aliases", [])])
@@ -443,10 +455,11 @@ class EvidenceRetriever:
         conn.execute("DELETE FROM retrieval_fts WHERE entry_id = ?", (entry_id,))
         conn.execute("DELETE FROM retrieval_entries WHERE entry_id = ?", (entry_id,))
         conn.execute(
-            "INSERT INTO retrieval_entries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO retrieval_entries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (entry.entry_id, entry.revision, source_hash, dependency_hash, RECIPE_ID, entry.title, entry.summary,
              entry.provenance_kind, occurrence_start, occurrence_end, entry.occurrence.precision, entry.occurrence.label,
-             int(bool(entry.sections["outcomes"])), int(bool(entry.sections["open_questions"])), timestamp_now()),
+             int(bool(entry.sections["outcomes"])), int(bool(entry.sections["open_questions"])), timestamp_now(),
+             entry.project_entity_id, entry.workspace_entity_id),
         )
         for mode in entry.modes:
             conn.execute("INSERT INTO retrieval_entry_modes VALUES (?, ?)", (entry.entry_id, normalize_alias(mode)))
@@ -582,7 +595,7 @@ class EvidenceRetriever:
         return health
 
     def _eligible(self, conn: Any, filters: Mapping[str, Any]) -> set[str]:
-        allowed = {"occurred_after", "occurred_before", "entities", "domains", "modes", "provenance_kind", "has_outcome"}
+        allowed = {"occurred_after", "occurred_before", "entities", "workspaces", "projects", "domains", "modes", "provenance_kind", "has_outcome"}
         unknown = sorted(set(filters) - allowed)
         if unknown:
             raise ValidationError(f"unknown evidence filter: {unknown[0]}")
@@ -637,6 +650,64 @@ class EvidenceRetriever:
             if entity_ids:
                 placeholders = ",".join("?" * len(entity_ids))
                 rows = conn.execute(f"SELECT DISTINCT entry_id FROM entry_entities WHERE entity_id IN ({placeholders})", tuple(entity_ids)).fetchall()
+                match_ids = {row["entry_id"] for row in rows}
+                ids = match_ids if ids is None else ids & match_ids
+            else:
+                ids = set()
+        workspace_values = filters.get("workspaces", [])
+        if not isinstance(workspace_values, list) or any(not isinstance(value, str) or not value.strip() for value in workspace_values):
+            raise ValidationError("workspaces must be a list of non-empty strings")
+        if workspace_values:
+            workspace_ids: set[str] = set()
+            for value in workspace_values:
+                normalized = normalize_alias(value.strip())
+                rows = conn.execute(
+                    "SELECT entity_id FROM entities WHERE kind = 'workspace' AND entity_id = ? "
+                    "UNION SELECT DISTINCT ea.entity_id FROM entity_aliases ea "
+                    "JOIN entities e ON e.entity_id = ea.entity_id "
+                    "WHERE e.kind = 'workspace' AND ea.alias_norm = ?",
+                    (value.strip(), normalized),
+                ).fetchall()
+                if not rows:
+                    continue
+                if len(rows) > 1:
+                    raise AmbiguousFilter(value, sorted(row["entity_id"] for row in rows))
+                workspace_ids.add(rows[0]["entity_id"])
+            if workspace_ids:
+                placeholders = ",".join("?" * len(workspace_ids))
+                rows = conn.execute(
+                    f"SELECT DISTINCT entry_id FROM retrieval_entries WHERE workspace_entity_id IN ({placeholders})",
+                    tuple(workspace_ids),
+                ).fetchall()
+                match_ids = {row["entry_id"] for row in rows}
+                ids = match_ids if ids is None else ids & match_ids
+            else:
+                ids = set()
+        project_values = filters.get("projects", [])
+        if not isinstance(project_values, list) or any(not isinstance(value, str) or not value.strip() for value in project_values):
+            raise ValidationError("projects must be a list of non-empty strings")
+        if project_values:
+            project_ids: set[str] = set()
+            for value in project_values:
+                normalized = normalize_alias(value.strip())
+                rows = conn.execute(
+                    "SELECT entity_id FROM entities WHERE kind = 'project' AND entity_id = ? "
+                    "UNION SELECT DISTINCT ea.entity_id FROM entity_aliases ea "
+                    "JOIN entities e ON e.entity_id = ea.entity_id "
+                    "WHERE e.kind = 'project' AND ea.alias_norm = ?",
+                    (value.strip(), normalized),
+                ).fetchall()
+                if not rows:
+                    continue
+                if len(rows) > 1:
+                    raise AmbiguousFilter(value, sorted(row["entity_id"] for row in rows))
+                project_ids.add(rows[0]["entity_id"])
+            if project_ids:
+                placeholders = ",".join("?" * len(project_ids))
+                rows = conn.execute(
+                    f"SELECT DISTINCT entry_id FROM retrieval_entries WHERE project_entity_id IN ({placeholders})",
+                    tuple(project_ids),
+                ).fetchall()
                 match_ids = {row["entry_id"] for row in rows}
                 ids = match_ids if ids is None else ids & match_ids
             else:
@@ -758,11 +829,19 @@ class EvidenceRetriever:
                     if value not in snippets:
                         snippets.append(value)
                 entry = self.vault.get_current_entry(entry_id)
+                workspace = None
+                if entry.workspace_entity_id is not None:
+                    workspace_value = read_json(self.vault.root / "catalog/entities" / f"{entry.workspace_entity_id}.json")
+                    workspace = {"entity_id": workspace_value["entity_id"], "kind": workspace_value["kind"], "name": workspace_value["canonical_name"]}
                 entities = []
                 for ref in entry.entity_refs:
                     entity = read_json(self.vault.root / "catalog/entities" / f"{ref['entity_id']}.json")
                     entities.append({"entity_id": entity["entity_id"], "kind": entity["kind"], "name": entity["canonical_name"]})
-                cards.append({"ref": {"entry_id": entry_id, "revision": row["source_revision"]}, "title": row["title"], "when": entry.occurrence.to_dict(), "summary": row["summary"], "provenance_kind": row["provenance_kind"], "modes": entry.modes, "domains": entry.domains, "entities": entities, "match": {"signals": signals, "sections": list(dict.fromkeys(match["sections"]))[:3], "snippets": snippets[:2]}, "flags": {"has_outcome": bool(row["has_outcome"]), "has_open_questions": bool(row["has_open_questions"])}})
+                project = None
+                if entry.project_entity_id is not None:
+                    project_value = read_json(self.vault.root / "catalog/entities" / f"{entry.project_entity_id}.json")
+                    project = {"entity_id": project_value["entity_id"], "kind": project_value["kind"], "name": project_value["canonical_name"]}
+                cards.append({"ref": {"entry_id": entry_id, "revision": row["source_revision"]}, "title": row["title"], "when": entry.occurrence.to_dict(), "summary": row["summary"], "provenance_kind": row["provenance_kind"], "modes": entry.modes, "domains": entry.domains, "workspace": workspace, "project": project, "entities": entities, "match": {"signals": signals, "sections": list(dict.fromkeys(match["sections"]))[:3], "snippets": snippets[:2]}, "flags": {"has_outcome": bool(row["has_outcome"]), "has_open_questions": bool(row["has_open_questions"])}})
             next_cursor = None
             if offset + page_size < len(ordered):
                 next_cursor = _cursor_encode({"fingerprint": fingerprint, "generation": generation, "offset": offset + page_size})

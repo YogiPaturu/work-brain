@@ -24,6 +24,8 @@ class ValidatedDraft:
     summary: str
     historical_occurrence: dict[str, Any] | None
     domains: list[str]
+    workspace_candidate: dict[str, Any] | None
+    project_candidate: dict[str, Any] | None
     sections: dict[str, list[dict[str, Any]]]
     state_changes: list[dict[str, Any]]
     entity_candidates: list[dict[str, Any]]
@@ -51,6 +53,8 @@ class CommitDraftValidator:
         if historical is not None:
             Occurrence.from_dict(historical)
         domains = self._domains(raw.get("domains", []))
+        workspace = self._workspace(raw.get("workspace"))
+        project = self._project(raw.get("project"))
         sections_raw = raw.get("sections")
         if not isinstance(sections_raw, Mapping) or set(sections_raw) != set(ENTRY_SECTIONS):
             raise ValidationError("sections must contain exactly the supported entry section names")
@@ -64,7 +68,7 @@ class CommitDraftValidator:
         entities = [self._entity(value) for value in self._list_field(raw, "entity_candidates")]
         artifacts = [self._artifact(value) for value in self._list_field(raw, "artifact_candidates")]
         source_refs = [self._source_ref(value) for value in self._list_field(raw, "source_entry_refs")]
-        return ValidatedDraft(title.strip(), summary.strip(), historical, domains, sections, state_changes, entities, artifacts, source_refs)
+        return ValidatedDraft(title.strip(), summary.strip(), historical, domains, workspace, project, sections, state_changes, entities, artifacts, source_refs)
 
     @staticmethod
     def _list_field(raw: Mapping[str, Any], name: str) -> list[Any]:
@@ -156,6 +160,34 @@ class CommitDraftValidator:
         return {"entity_id": entity_id, "kind": kind, "canonical_name": name, "aliases": list(aliases),
                 "description": value.get("description"), "relation": value.get("relation", "subject")}
 
+    @classmethod
+    def _project(cls, value: Any) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if not isinstance(value, Mapping):
+            raise ValidationError("project must be an object")
+        candidate = dict(value)
+        candidate["kind"] = "project"
+        candidate["relation"] = "project"
+        result = cls._entity(candidate)
+        if result["kind"] != "project":
+            raise ValidationError("project must use kind=project")
+        return result
+
+    @classmethod
+    def _workspace(cls, value: Any) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if not isinstance(value, Mapping):
+            raise ValidationError("workspace must be an object")
+        candidate = dict(value)
+        candidate["kind"] = "workspace"
+        candidate["relation"] = "workspace"
+        result = cls._entity(candidate)
+        if result["kind"] != "workspace":
+            raise ValidationError("workspace must use kind=workspace")
+        return result
+
     @staticmethod
     def _artifact(value: Any) -> dict[str, Any]:
         if not isinstance(value, Mapping):
@@ -210,6 +242,10 @@ class CommitResolver:
         # Resolve catalogs only after all non-catalog references have passed
         # validation, avoiding partial catalog updates for rejected drafts.
         entity_refs = self._resolve_entities(draft.entity_candidates)
+        workspace_refs = self._resolve_entities([draft.workspace_candidate]) if draft.workspace_candidate else []
+        workspace_entity_id = workspace_refs[0]["entity_id"] if workspace_refs else None
+        project_refs = self._resolve_entities([draft.project_candidate]) if draft.project_candidate else []
+        project_entity_id = project_refs[0]["entity_id"] if project_refs else None
         artifact_refs = self._resolve_artifacts(draft.artifact_candidates)
         source_refs = []
         known_revisions = {entry.entry_id: entry.revision for entry in self.vault.all_current_entries()}
@@ -230,6 +266,8 @@ class CommitResolver:
             "revision_reason": revision_reason,
             "provenance_kind": "reconstructed" if workflow == "backfill" or (session.get("runtime") or {}).get("capture_fidelity") == "imported" else "contemporaneous",
             "title": draft.title, "summary": draft.summary, "occurrence": occurrence, "modes": modes, "domains": domains,
+            "workspace_entity_id": workspace_entity_id,
+            "project_entity_id": project_entity_id,
             "sections": draft.sections, "state_mutations": mutations, "entity_refs": entity_refs,
             "artifact_refs": artifact_refs, "source_refs": source_refs,
         }
@@ -262,8 +300,11 @@ class CommitResolver:
         for candidate in candidates:
             entity_id = candidate["entity_id"]
             if entity_id is not None:
-                if not any(item["entity_id"] == entity_id for item in catalog):
+                matches = [item for item in catalog if item["entity_id"] == entity_id]
+                if not matches:
                     raise ValidationError(f"entity does not exist: {entity_id}")
+                if candidate.get("kind") is not None and matches[0]["kind"] != candidate["kind"]:
+                    raise ValidationError(f"entity {entity_id} is not a {candidate['kind']}")
             else:
                 key = SkillLoader.normalize_domain(candidate["canonical_name"])
                 matches = [item for item in catalog if item["kind"] == candidate["kind"] and

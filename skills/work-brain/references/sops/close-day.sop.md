@@ -15,6 +15,8 @@ already have preserved their raw turns and committed evidence.
 - **recent_work** (required): Bounded work committed for the current local day.
 - **local_date** (optional): The application’s local date.
 - **tomorrow_constraints** (optional): Known commitments or limits for the next day.
+- **post_close_profiles** (optional): User-owned communication profiles configured
+  to be offered after the day is closed.
 
 **Constraints for parameter acquisition:**
 
@@ -57,6 +59,13 @@ chooses for tomorrow. Keep tentative intentions visibly tentative.
 - You MUST NOT silently create deadlines, commitments, or assignments.
 - You SHOULD leave the user with a concise handoff they can use at open-day.
 
+If `post_close_profiles` is present, offer the user a concise opt-in follow-up
+after the close-day summary, for example: “Which update should I draft: Ranq
+WhatsApp or daily Discord?” Selecting one starts the `communicate` workflow
+with that profile. The offer is a prompt, not an automatic draft or external
+send. If several profiles are present, do not draft all of them without the
+user selecting the intended profile(s).
+
 ### 4. Commit Only Discussed Evidence
 
 If this conversation contains durable new evidence, produce the configured
@@ -68,6 +77,9 @@ CommitDraft; otherwise finish without manufacturing a journal entry.
   explicitly confirmed.
 - You MUST NOT duplicate an earlier session merely to make close-day appear complete.
 - The application MUST own persistence and journal projection.
+- A post-close communication offer MUST use only profiles supplied by the
+  application and MUST remain separate from close-day evidence. The user must
+  choose the profile before drafting.
 
 ## Examples
 
