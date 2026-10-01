@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -229,6 +230,26 @@ class HarnessV3Tests(unittest.TestCase):
         self.assertEqual(1, cursor_settings["version"])
         self.assertEqual("command", cursor_settings["hooks"]["afterAgentResponse"][0]["type"])
         self.assertTrue(cursor.changes)
+
+    def test_setup_uses_module_mode_for_current_python(self) -> None:
+        setup = HarnessSetup(home=self.home, skill_source=self.skill_source, executable=sys.executable)
+        self.assertIn(" -m work_brain capture-hook --host codex", setup.hook_command("codex"))
+
+    def test_setup_repairs_stale_work_brain_hooks_without_touching_unrelated_hooks(self) -> None:
+        settings = self.home / ".codex/hooks.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(json.dumps({"hooks": {
+            "SessionStart": [
+                {"hooks": [{"type": "command", "command": "old-python -m work_brain capture-hook --host codex"}]},
+                {"hooks": [{"type": "command", "command": "old-python capture-hook --host codex"}]},
+                {"hooks": [{"type": "command", "command": "keep-me"}]},
+            ]
+        }}), encoding="utf-8")
+        setup = HarnessSetup(home=self.home, skill_source=self.skill_source, executable=sys.executable)
+        setup.install("codex")
+        value = json.loads(settings.read_text(encoding="utf-8"))
+        commands = [hook["command"] for item in value["hooks"]["SessionStart"] for hook in item["hooks"]]
+        self.assertEqual(sorted(["keep-me", setup.hook_command("codex")]), sorted(commands))
 
     def test_vault_resolution_precedence_and_cli_json(self) -> None:
         root = Path(self.tempdir.name)

@@ -65,7 +65,10 @@ class HarnessSetup:
         found = shutil.which("work-brain")
         if found:
             return Path(found).resolve()
-        return Path(sys.executable).resolve()
+        # Keep the virtualenv launcher path intact. Resolving it can turn
+        # ``.venv/bin/python`` into the system interpreter and lose the
+        # virtualenv's import path when the hook is later executed.
+        return Path(sys.executable)
 
     def _host(self, host: str) -> HostSetup:
         normalized = "claude" if host == "claude-code" else host
@@ -81,8 +84,9 @@ class HarnessSetup:
         return self.home / self._host(host).settings_relative
 
     def hook_command(self, host: str) -> str:
-        executable = self.executable or Path(sys.executable).resolve()
-        if executable.name == Path(sys.executable).name and executable == Path(sys.executable).resolve() and not shutil.which("work-brain"):
+        executable = self.executable or Path(sys.executable)
+        python_executable = Path(sys.executable)
+        if executable in {python_executable, python_executable.resolve()} and not shutil.which("work-brain"):
             return shlex.join([str(executable), "-m", "work_brain", "capture-hook", "--host", "claude-code" if host == "claude" else host])
         return shlex.join([str(executable), "capture-hook", "--host", "claude-code" if host == "claude" else host])
 
@@ -122,6 +126,60 @@ class HarnessSetup:
                     return True
         return False
 
+    @staticmethod
+    def _is_capture_hook(command: Any, host: str) -> bool:
+        token = "claude-code" if host == "claude" else host
+        return isinstance(command, str) and command.endswith(f"capture-hook --host {token}")
+
+    def _normalize_capture_group(self, group: list[Any], host: str, command: str) -> tuple[list[Any], bool, bool]:
+        """Repair stale Work Brain entries without touching unrelated hooks."""
+        normalized: list[Any] = []
+        found = False
+        changed = False
+        for item in group:
+            if not isinstance(item, dict):
+                normalized.append(item)
+                continue
+            nested = item.get("hooks")
+            if isinstance(nested, list):
+                kept: list[Any] = []
+                for hook in nested:
+                    if isinstance(hook, dict) and self._is_capture_hook(hook.get("command"), host):
+                        if found:
+                            changed = True
+                            continue
+                        replacement = dict(hook)
+                        replacement["type"] = "command"
+                        replacement["command"] = command
+                        kept.append(replacement)
+                        found = True
+                        changed = changed or replacement != hook
+                    else:
+                        kept.append(hook)
+                if kept:
+                    replacement = dict(item)
+                    replacement["hooks"] = kept
+                    normalized.append(replacement)
+                elif nested:
+                    changed = True
+                continue
+            if self._is_capture_hook(item.get("command"), host):
+                if found:
+                    changed = True
+                    continue
+                replacement = dict(item)
+                replacement["type"] = "command"
+                replacement["command"] = command
+                normalized.append(replacement)
+                found = True
+                changed = changed or replacement != item
+                continue
+            normalized.append(item)
+        if not found:
+            normalized.append(self._hook_item(host, command))
+            changed = True
+        return normalized, changed, found
+
     def _install_hooks(self, host: str, path: Path, events: Iterable[str]) -> list[str]:
         settings = self._read_settings(path)
         hooks = settings.setdefault("hooks", {})
@@ -135,9 +193,10 @@ class HarnessSetup:
             group = hooks.setdefault(event, [])
             if not isinstance(group, list):
                 raise IntegrityError(f"existing hook event must contain a JSON array: {path}#{event}")
-            if not self._contains_command(group, command):
-                group.append(self._hook_item(host, command))
-                changes.append(f"added {event} hook")
+            normalized, changed, found = self._normalize_capture_group(group, host, command)
+            if changed:
+                hooks[event] = normalized
+                changes.append(f"{'updated' if found else 'added'} {event} hook")
         if changes:
             ensure_private_dir(path.parent)
             atomic_replace_json(path, settings)
