@@ -6,6 +6,7 @@ from pathlib import Path
 import shlex
 import shutil
 import sys
+import sysconfig
 from typing import Any, Iterable
 
 from .errors import IntegrityError, ValidationError
@@ -56,10 +57,23 @@ class HarnessSetup:
         executable: str | Path | None = None,
     ) -> None:
         self.home = Path(home).expanduser().resolve() if home else Path.home()
-        self.skill_source = Path(skill_source).resolve() if skill_source else Path(__file__).resolve().parents[2] / "skills/work-brain"
+        self.skill_source = Path(skill_source).resolve() if skill_source else self._default_skill_source()
         if not self.skill_source.is_dir() or not (self.skill_source / "SKILL.md").exists():
             raise ValidationError(f"canonical Work Brain Skill is missing: {self.skill_source}")
         self.executable = Path(executable).resolve() if executable else self._default_executable()
+
+    @staticmethod
+    def _default_skill_source() -> Path:
+        candidates = (
+            # Source checkout / editable development install.
+            Path(__file__).resolve().parents[2] / "skills/work-brain",
+            # Wheel installs, including pipx-managed environments.
+            Path(sysconfig.get_path("data")) / "share/work-brain/skills/work-brain",
+        )
+        for candidate in candidates:
+            if candidate.is_dir() and (candidate / "SKILL.md").exists():
+                return candidate
+        return candidates[0]
 
     def _default_executable(self) -> Path | None:
         found = shutil.which("work-brain")
@@ -86,7 +100,7 @@ class HarnessSetup:
     def hook_command(self, host: str) -> str:
         executable = self.executable or Path(sys.executable)
         python_executable = Path(sys.executable)
-        if executable in {python_executable, python_executable.resolve()} and not shutil.which("work-brain"):
+        if executable in {python_executable, python_executable.resolve()}:
             return shlex.join([str(executable), "-m", "work_brain", "capture-hook", "--host", "claude-code" if host == "claude" else host])
         return shlex.join([str(executable), "capture-hook", "--host", "claude-code" if host == "claude" else host])
 
@@ -206,7 +220,9 @@ class HarnessSetup:
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.is_symlink():
             if target.resolve() == self.skill_source:
-                return "Skill link already points to canonical repository"
+                return "Skill link already points to canonical source"
+            if target.resolve().is_dir() and self._same_tree(target.resolve(), self.skill_source):
+                return "Skill link already matches canonical source"
             raise IntegrityError(f"refusing to replace existing Skill link: {target}")
         if target.exists():
             if target.is_dir() and self._same_tree(target, self.skill_source):

@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+build/
 .venv/
 .pytest_cache/
 
@@ -9,4 +10,3 @@ career-vault/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
-

@@ -7,16 +7,35 @@ conversation and structured evidence in a private vault.
 
 ## Quick start
 
-From macOS or Linux, clone the repository and install it into a virtual
-environment:
+For a user install, use `pipx` so the `work-brain` command is available on
+your normal `PATH` without requiring an activated virtual environment. Install
+`pipx` using your platform's package manager first; on macOS with Homebrew:
 
 ```bash
+brew install pipx
+pipx ensurepath
+
 git clone https://github.com/YogiPaturu/work-brain.git
 cd work-brain
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
+pipx install .
 ```
+
+On systems where `pipx` is not provided by a package manager, install the
+`pipx` tool with Python 3 and then use `pipx` for Work Brain:
+
+```bash
+python3 -m pip install --user pipx
+python3 -m pipx ensurepath
+python3 -m pipx install /path/to/work-brain
+```
+
+`pip3 install work-brain` is not the recommended application install: plain
+`pip3` does not provide pipx's isolated command environment and can leave the
+launcher unavailable on the shell `PATH`.
+
+Restart the shell after `pipx ensurepath` if `work-brain` is not immediately
+found. The host hook setup records an absolute CLI launcher from the installed
+environment, so hook execution does not depend on a shell's `PATH`.
 
 Create a private vault outside the repository, initialize it, and connect your
 coding-agent host. For Codex:
@@ -160,13 +179,24 @@ rebuildable projections.
 ## Install
 
 Work Brain requires Python 3.11+ and SQLite and has no runtime dependencies.
-From a checkout:
+The recommended user installation is:
+
+```bash
+brew install pipx                 # macOS/Homebrew; otherwise install pipx with Python 3 below
+pipx ensurepath
+pipx install /path/to/work-brain
+```
+
+For development from a checkout, use an editable virtual environment instead:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
 ```
+
+The editable virtualenv keeps the current source tree importable for tests and
+development. It is not required for a normal user installation.
 
 Choose a private vault outside this public repository. You can configure it
 once for future commands:
@@ -242,22 +272,20 @@ presenting a false empty result.
 
 ### Semantic retrieval profile
 
-The base install has a deterministic hash-vector fallback so it remains
-offline-friendly and dependency-free. That fallback is useful for tests and
-small demos, but it is not a production-quality semantic model. Its hit count
-is only a diagnostic baseline because it changes with the exact smoke wording.
-For normal semantic use, install the optional local BGE profile:
+The normal install includes FastEmbed with the local BGE profile
+`BAAI/bge-small-en-v1.5`, so semantic retrieval works without an extra install.
+The first embedding operation downloads and locally caches the model. The
+deterministic hash-vector adapter remains available for tests, small demos,
+and offline environments, but it is not a production-quality semantic model.
 
 ```bash
-python3 -m pip install -e '.[semantic]'
+work-brain reindex
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-The profile uses FastEmbed with `BAAI/bge-small-en-v1.5`; its first embedding
-operation downloads and locally caches the model. When FastEmbed is installed,
-it is selected automatically. Set `WORK_BRAIN_EMBEDDING=hash` to force the
-deterministic fallback for offline tests or demos. The retrieval schema and
-`evidence search` CLI contract are the same for both providers.
+Set `WORK_BRAIN_EMBEDDING=hash` to force the deterministic fallback. The
+retrieval schema and `evidence search` CLI contract are the same for both
+providers.
 
 The semantic smoke cases use natural paraphrases and check only whether the
 expected experience appears in the first three cards. FastEmbed is expected to
@@ -269,8 +297,9 @@ and permissive to tune the model against. Run the smoke cases directly with:
 PYTHONPATH=src python3 -m unittest tests.test_retrieval_quality -v
 ```
 
-The FastEmbed case is skipped when the optional package is absent. Run cold
-process and cache-warm timings against a private or synthetic vault with:
+The FastEmbed case is skipped only when tests are run in a minimal environment
+where the package dependency has not been installed. Run cold-process and
+cache-warm timings against a private or synthetic vault with:
 
 ```bash
 PYTHONPATH=src python3 examples/benchmark_retrieval.py \
@@ -585,9 +614,10 @@ degraded behavior, reindexing, no-score EvidenceCards, tagged question parsing,
 explicit candidate marks, revision-stable preferences, and prepare/mock
 boundaries. Transcript-style behavioral contract fixtures cover bounded
 thinking, explicit state updates, scoped communication, career selection,
-uncertain backfill, and no-op close-day behavior. The default vector adapter is a
-dependency-free deterministic local baseline; a higher-quality local embedding
-provider can be injected behind the same adapter contract.
+uncertain backfill, and no-op close-day behavior. The default vector adapter is
+the local FastEmbed/BGE provider; a deterministic hash baseline remains
+available behind the same adapter contract for offline tests and minimal
+environments.
 
 Manual checks should be run separately for each available local harness:
 

@@ -6,6 +6,24 @@ Use the existing harness shell to invoke only the documented `work-brain`
 operations. The CLI is the supported application adapter for Work Brain v1;
 there is no MCP server and no second Work Brain model call.
 
+## CLI resolution
+
+Prefer `work-brain` when it is on `PATH`. A host may not inherit the shell
+that activated the repository virtualenv, so if the command is unavailable,
+resolve the checkout-local launcher before giving up:
+
+```sh
+WORK_BRAIN_CLI="$(command -v work-brain || true)"
+if [ -z "$WORK_BRAIN_CLI" ] && [ -x "$(pwd)/.venv/bin/work-brain" ]; then
+  WORK_BRAIN_CLI="$(pwd)/.venv/bin/work-brain"
+fi
+```
+
+Use the resolved absolute launcher for the rest of the operation. If the
+current directory is not the checkout, use the repository's absolute
+`.venv/bin/work-brain` path. Do not read the private vault directly as a
+fallback.
+
 ## Vault selection
 
 Resolution precedence is:

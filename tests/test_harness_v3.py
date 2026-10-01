@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 from work_brain.capture import HarnessCaptureService, normalize_capture_event
 from work_brain.cli import main
@@ -231,9 +233,22 @@ class HarnessV3Tests(unittest.TestCase):
         self.assertEqual("command", cursor_settings["hooks"]["afterAgentResponse"][0]["type"])
         self.assertTrue(cursor.changes)
 
+    def test_setup_accepts_equivalent_skill_link_from_another_install(self) -> None:
+        target = self.home / ".agents/skills/work-brain"
+        target.parent.mkdir(parents=True)
+        equivalent = self.home / "packaged-skill"
+        shutil.copytree(self.skill_source, equivalent)
+        target.symlink_to(equivalent, target_is_directory=True)
+        setup = HarnessSetup(home=self.home, skill_source=self.skill_source, executable="/opt/work-brain")
+        report = setup.install("codex")
+        self.assertIn("Skill link already matches canonical source", report.changes)
+
     def test_setup_uses_module_mode_for_current_python(self) -> None:
         setup = HarnessSetup(home=self.home, skill_source=self.skill_source, executable=sys.executable)
         self.assertIn(" -m work_brain capture-hook --host codex", setup.hook_command("codex"))
+
+    def test_setup_can_find_packaged_skill_from_install_prefix(self) -> None:
+        self.assertEqual(self.skill_source, HarnessSetup._default_skill_source())
 
     def test_setup_repairs_stale_work_brain_hooks_without_touching_unrelated_hooks(self) -> None:
         settings = self.home / ".codex/hooks.json"
@@ -267,12 +282,39 @@ class HarnessV3Tests(unittest.TestCase):
             self.assertEqual(0, main(["--vault", str(self.vault.root), "state", "current"]))
         self.assertEqual({"items": []}, json.loads(output.getvalue()))
 
+        trailing_json_output = StringIO()
+        with redirect_stdout(trailing_json_output):
+            self.assertEqual(0, main(["--vault", str(self.vault.root), "state", "current", "--json"]))
+        self.assertEqual({"items": []}, json.loads(trailing_json_output.getvalue()))
+
         config_output = StringIO()
         config_path = root / "cli-config.json"
         with redirect_stdout(config_output):
             self.assertEqual(0, main(["--config", str(config_path), "config", "set-vault", str(self.vault.root)]))
             self.assertEqual(0, main(["--config", str(config_path), "state", "current"]))
         self.assertEqual({"items": []}, json.loads(config_output.getvalue().splitlines()[-1]))
+
+    def test_codex_capture_hook_emits_only_valid_host_output(self) -> None:
+        payloads = (
+            {"hook_event_name": "SessionStart", "session_id": "hook-session", "source": "startup"},
+            {"hook_event_name": "UserPromptSubmit", "session_id": "hook-session", "turn_id": "turn-1", "prompt": "start my day"},
+            {"hook_event_name": "Stop", "session_id": "hook-session", "turn_id": "turn-1", "last_assistant_message": "done"},
+            {"hook_event_name": "SessionEnd", "session_id": "hook-session", "reason": "other"},
+            {"hook_event_name": "Interrupt", "session_id": "hook-session", "turn_id": "turn-1"},
+        )
+        for payload in payloads:
+            output = StringIO()
+            with redirect_stdout(output):
+                with patch("sys.stdin", StringIO(json.dumps(payload))):
+                    self.assertEqual(0, main(["--vault", str(self.vault.root), "capture-hook", "--host", "codex"]))
+            self.assertEqual({}, json.loads(output.getvalue()), payload["hook_event_name"])
+
+    def test_codex_capture_hook_swallows_internal_errors_at_host_boundary(self) -> None:
+        output = StringIO()
+        with redirect_stdout(output):
+            with patch("sys.stdin", StringIO(json.dumps({"hook_event_name": "SessionStart"}))):
+                self.assertEqual(0, main(["--vault", str(self.vault.root), "capture-hook", "--host", "codex"]))
+        self.assertEqual({}, json.loads(output.getvalue()))
 
     def test_capture_hook_rejects_malformed_payload_without_writing_source(self) -> None:
         service = HarnessCaptureService(self.vault)

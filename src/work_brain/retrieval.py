@@ -2,11 +2,11 @@ from __future__ import annotations
 
 """Local, rebuildable evidence retrieval.
 
-The module deliberately keeps the public surface small.  SQLite owns lexical
+The module deliberately keeps the public surface small. SQLite owns lexical
 and metadata indexes; the embedding provider is a replaceable local adapter.
-The default adapter is dependency-free and deterministic so a fresh checkout
-works without downloading a model.  A higher quality local provider can be
-injected without changing chunking, filtering, fusion, or CLI contracts.
+FastEmbed/BGE is the normal installed profile; the deterministic hash adapter
+remains an explicit offline fallback. Providers can be injected without
+changing chunking, filtering, fusion, or CLI contracts.
 """
 
 import base64
@@ -61,9 +61,8 @@ class LocalHashEmbeddingProvider:
     """A deterministic local vector adapter with no third-party dependency.
 
     This is intentionally a baseline, not a claim that hashed vectors equal a
-    transformer model.  It gives the public project a working semantic branch,
-    deterministic tests, and a stable adapter port.  Applications can inject
-    a local BGE/FastEmbed adapter later without changing the index contract.
+    transformer model. It gives deterministic tests and an offline fallback
+    without changing the index contract.
     """
 
     model_id = "work-brain-hash-embedding-v1"
@@ -94,12 +93,11 @@ class LocalHashEmbeddingProvider:
 
 
 class FastEmbedEmbeddingProvider:
-    """Optional local BGE adapter for production-quality semantic recall.
+    """Local BGE adapter for production-quality semantic recall.
 
-    FastEmbed is deliberately imported lazily. The public zero-dependency
-    install remains usable with :class:`LocalHashEmbeddingProvider`, while a
-    user who installs the ``semantic`` extra gets a real local model without
-    changing the retrieval schema or search API.
+    FastEmbed is deliberately imported lazily so the hash fallback remains
+    usable in minimal or offline environments without changing the retrieval
+    schema or search API.
 
     The model is loaded on the first embedding call. FastEmbed caches its
     model files locally; the first call may therefore download the model.
@@ -121,7 +119,7 @@ class FastEmbedEmbeddingProvider:
             text_embedding = module.TextEmbedding
         except (ImportError, AttributeError) as exc:
             raise FeatureUnavailable(
-                "FastEmbed is not installed; install work-brain[semantic] or use the hash fallback"
+                "FastEmbed is not installed; reinstall Work Brain with its runtime dependencies or use the hash fallback"
             ) from exc
         kwargs: dict[str, Any] = {"model_name": self.model_id}
         if self.cache_dir:
@@ -152,11 +150,11 @@ class FastEmbedEmbeddingProvider:
 
 
 def default_embedding_provider() -> EmbeddingProvider:
-    """Select the normal local profile without breaking zero-dependency use.
+    """Select the normal local profile without breaking offline fallback.
 
-    Installing the optional semantic extra makes BGE/FastEmbed the normal
-    provider. ``WORK_BRAIN_EMBEDDING=hash`` explicitly selects the
-    deterministic fallback for tests, demos, and offline environments.
+    FastEmbed/BGE is the normal provider. ``WORK_BRAIN_EMBEDDING=hash``
+    explicitly selects the deterministic fallback for tests, demos, and
+    offline environments.
     """
 
     if os.environ.get("WORK_BRAIN_EMBEDDING", "").casefold() == "hash":

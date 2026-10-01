@@ -4,16 +4,48 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "work-brain"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local-first Work Brain runtime and persistence"
 requires-python = ">=3.11"
-dependencies = []
-
-[project.optional-dependencies]
-semantic = ["fastembed"]
+dependencies = ["fastembed"]
 
 [project.scripts]
 work-brain = "work_brain.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# The Skill is part of the installable product, not only a repository fixture.
+# Keep the authored layout intact when a wheel is installed by pipx so the
+# setup command can expose it to the selected host.
+[tool.setuptools.data-files]
+"share/work-brain/skills/work-brain" = ["skills/work-brain/SKILL.md"]
+"share/work-brain/skills/work-brain/agents" = ["skills/work-brain/agents/openai.yaml"]
+"share/work-brain/skills/work-brain/references/probes" = [
+  "skills/work-brain/references/probes/architecture.md",
+  "skills/work-brain/references/probes/customer.md",
+  "skills/work-brain/references/probes/debugging.md",
+  "skills/work-brain/references/probes/engineering.md",
+  "skills/work-brain/references/probes/founder.md",
+  "skills/work-brain/references/probes/leadership.md",
+  "skills/work-brain/references/probes/marketing.md",
+  "skills/work-brain/references/probes/people-management.md",
+  "skills/work-brain/references/probes/product.md",
+  "skills/work-brain/references/probes/sales.md",
+  "skills/work-brain/references/probes/strategy.md",
+]
+"share/work-brain/skills/work-brain/references/schemas" = ["skills/work-brain/references/schemas/commit-draft.md"]
+"share/work-brain/skills/work-brain/references/sops" = [
+  "skills/work-brain/references/sops/backfill.sop.md",
+  "skills/work-brain/references/sops/career.sop.md",
+  "skills/work-brain/references/sops/close-day.sop.md",
+  "skills/work-brain/references/sops/communicate.sop.md",
+  "skills/work-brain/references/sops/core-conversation.sop.md",
+  "skills/work-brain/references/sops/open-day.sop.md",
+  "skills/work-brain/references/sops/operate.sop.md",
+  "skills/work-brain/references/sops/think.sop.md",
+]
+"share/work-brain/skills/work-brain/references/tools" = [
+  "skills/work-brain/references/tools/agent-tools.md",
+  "skills/work-brain/references/tools/work-brain-cli.md",
+]

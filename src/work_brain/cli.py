@@ -332,12 +332,39 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     raise ValidationError(f"unsupported command: {command}")
 
 
+def _is_codex_capture_hook(args: argparse.Namespace) -> bool:
+    return args.command == "capture-hook" and args.host == "codex"
+
+
+def _normalize_cli_argv(argv: list[str] | None) -> list[str] | None:
+    """Accept the global JSON flag before or after a subcommand.
+
+    Agent-generated shell commands commonly append ``--json`` to the
+    operation.  argparse only accepts this global option before the
+    subcommand, so normalize that harmless placement at the CLI boundary.
+    """
+    values = list(sys.argv[1:] if argv is None else argv)
+    if "--json" not in values:
+        return argv
+    values.remove("--json")
+    values.insert(0, "--json")
+    return values
+
+
 def main(argv: list[str] | None = None) -> int:
+    args: argparse.Namespace | None = None
     try:
-        args = _parser().parse_args(argv)
+        args = _parser().parse_args(_normalize_cli_argv(argv))
         value, machine = _run(args)
         code = 4 if args.command == "doctor" and not value["ok"] else 0
-        if machine:
+        if _is_codex_capture_hook(args):
+            # Codex hooks have a separate stdout protocol.  The capture result
+            # is an internal application response, not a valid Codex hook
+            # response; leaking it causes "invalid ... JSON output" errors.
+            # Persistence has already happened in _run, so a successful hook
+            # is intentionally a JSON no-op.
+            _json_dump({})
+        elif machine:
             _json_dump(value)
         elif args.command == "init":
             print(f"initialized {value['vault']}")
@@ -348,19 +375,25 @@ def main(argv: list[str] | None = None) -> int:
         return code
     except SystemExit:
         raise
-    except FeatureUnavailable as exc:
-        _json_dump(_error_payload("unavailable", str(exc)))
-        return EXIT_UNAVAILABLE
-    except LockError as exc:
-        _json_dump(_error_payload("lock_conflict", str(exc)))
-        return EXIT_LOCK
-    except (ValidationError, ValueError) as exc:
-        _json_dump(_error_payload("invalid_request", str(exc)))
-        return EXIT_VALIDATION
-    except (PersistenceError, IntegrityError, FileNotFoundError, json.JSONDecodeError) as exc:
-        _json_dump(_error_payload("persistence_error", str(exc)))
-        return EXIT_PERSISTENCE
     except Exception as exc:
+        if args is not None and _is_codex_capture_hook(args):
+            # Capture is best-effort at the host boundary.  A vault/config
+            # problem must not turn an internal error payload into malformed
+            # hook output or interfere with the user's Codex turn.
+            _json_dump({})
+            return 0
+        if isinstance(exc, FeatureUnavailable):
+            _json_dump(_error_payload("unavailable", str(exc)))
+            return EXIT_UNAVAILABLE
+        if isinstance(exc, LockError):
+            _json_dump(_error_payload("lock_conflict", str(exc)))
+            return EXIT_LOCK
+        if isinstance(exc, (ValidationError, ValueError)):
+            _json_dump(_error_payload("invalid_request", str(exc)))
+            return EXIT_VALIDATION
+        if isinstance(exc, (PersistenceError, IntegrityError, FileNotFoundError, json.JSONDecodeError)):
+            _json_dump(_error_payload("persistence_error", str(exc)))
+            return EXIT_PERSISTENCE
         _json_dump(_error_payload("internal_error", str(exc)))
         return EXIT_ERROR
 

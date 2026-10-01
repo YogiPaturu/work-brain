@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from work_brain import EvidenceRetriever, FastEmbedEmbeddingProvider, LocalHashEmbeddingProvider, Vault, new_uuid7
+from work_brain.retrieval import default_embedding_provider
 
 
 SECTIONS = (
@@ -119,7 +120,16 @@ class RetrievalQualityTests(unittest.TestCase):
         self.assertEqual(len(report), len(QUALITY_CASES))
         self.assertEqual(hits, sum(int(item["hit_at_3"]) for item in report))
 
-    @unittest.skipUnless(importlib.util.find_spec("fastembed"), "optional FastEmbed semantic extra is not installed")
+    @unittest.skipUnless(importlib.util.find_spec("fastembed"), "FastEmbed runtime dependency is not installed")
+    def test_default_provider_prefers_fastembed(self) -> None:
+        previous_provider = os.environ.pop("WORK_BRAIN_EMBEDDING", None)
+        try:
+            self.assertIsInstance(default_embedding_provider(), FastEmbedEmbeddingProvider)
+        finally:
+            if previous_provider is not None:
+                os.environ["WORK_BRAIN_EMBEDDING"] = previous_provider
+
+    @unittest.skipUnless(importlib.util.find_spec("fastembed"), "FastEmbed runtime dependency is not installed")
     def test_fastembed_bge_smoke_cases(self) -> None:
         retriever = EvidenceRetriever(
             self.vault,
