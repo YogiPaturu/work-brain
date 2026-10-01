@@ -72,11 +72,14 @@ After activation, ordinary follow-up speech is captured without repeating the
 `work brain` prefix. Yap's read-aloud shortcut can read the visible host
 response back to you.
 
-Work Brain v1 is hosted by an existing local coding-agent harness—Codex,
-Claude Code, or the local Cursor Agent. The harness owns the model,
-conversation, context, agent loop, and shell. Work Brain owns the private
-vault, evidence, retrieval, Skill/SOPs, deterministic CLI, and projections.
-There is no second Work Brain LLM call and no MCP server in v1.
+## Architecture overview
+
+Work Brain is a local extension around an existing coding-agent host—Codex,
+Claude Code, or the local Cursor Agent. The host owns the model, conversation,
+context, agent loop, and shell. Work Brain owns the private evidence vault,
+workflow instructions, retrieval, and deterministic persistence operations.
+This keeps the tool lightweight: it does not start a second language-model
+conversation and does not require an MCP server.
 
 ```text
 User
@@ -98,6 +101,25 @@ Codex / Claude Code / Cursor
                                   v
                                raw turns
 ```
+
+The important boundaries are:
+
+- **Host agent:** owns the conversation and decides when to use Work Brain’s
+  documented operations.
+- **Skill and SOPs:** provide workflow guidance, focused probes, and the
+  explicit activation boundary for durable capture.
+- **CLI and application:** validate requests, manage bounded sessions, and
+  expose state, evidence, retrieval, career, and commit operations.
+- **Private vault:** remains the source of truth for exact turns and
+  structured evidence; it is kept outside the public repository.
+- **Projections:** journals, current work state, SQLite, retrieval indexes,
+  and career views are rebuildable from the authoritative source.
+
+Lifecycle hooks are passive during ordinary coding chats. They observe host
+events and begin exact capture only after an explicit Work Brain activation
+such as `work brain ...`, `start my day`, or `open my work journal`.
+
+There is no second Work Brain LLM call and no MCP server in v1.
 
 ## What it is useful for
 
