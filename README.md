@@ -54,6 +54,24 @@ work-brain setup cursor
 work-brain setup cursor --check
 ```
 
+### Optional voice input with Yap
+
+On macOS, Yap can provide dictation and read-aloud around the active host. It
+does not connect directly to the Work Brain vault and does not replace Codex,
+Claude Code, or Cursor:
+
+```bash
+brew install --cask latent-variable/tap/yap
+open -a Yap
+```
+
+On first launch, download Yap's voice model and grant the requested
+microphone/accessibility permissions. Focus the host terminal, use Yap's
+configured dictate shortcut, and speak the same activation prompt shown above.
+After activation, ordinary follow-up speech is captured without repeating the
+`work brain` prefix. Yap's read-aloud shortcut can read the visible host
+response back to you.
+
 Work Brain v1 is hosted by an existing local coding-agent harness—Codex,
 Claude Code, or the local Cursor Agent. The harness owns the model,
 conversation, context, agent loop, and shell. Work Brain owns the private
