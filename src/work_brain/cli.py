@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +86,11 @@ def _parser() -> argparse.ArgumentParser:
     skills.add_argument("--workflow", default="think")
     skills.add_argument("--domain", action="append", default=[])
     sub.add_parser("recoverable", help="list unfinished sessions")
+
+    live_status = sub.add_parser("status", help="show live capture and commit lifecycle status")
+    live_status.add_argument("--watch", action="store_true", help="refresh the status continuously")
+    live_status.add_argument("--interval", type=float, default=2.0, help="watch refresh interval in seconds")
+    live_status.add_argument("--quiet", action="store_true", help="print a one-line prompt-friendly status")
 
     state = sub.add_parser("state", help="agent-facing Work Brain state operations")
     state_sub = state.add_subparsers(dest="state_command", required=True)
@@ -292,6 +298,141 @@ def _session_status(vault: Vault, session_id: str) -> dict[str, Any]:
     }
 
 
+def _live_status(vault: Vault) -> dict[str, Any]:
+    """Build a read-only lifecycle snapshot without requiring a session ID."""
+    mappings_path = vault.root / HarnessCaptureService.MAP_RELATIVE
+    mappings = read_json(mappings_path) if mappings_path.exists() else {}
+    if not isinstance(mappings, dict):
+        raise ValidationError("capture mapping state must be a JSON object")
+
+    active_ids: list[str] = []
+    for mapping in mappings.values():
+        if not isinstance(mapping, dict) or not isinstance(mapping.get("session_id"), str):
+            continue
+        session_id = mapping["session_id"]
+        if session_id not in active_ids:
+            active_ids.append(session_id)
+    active_sessions = [_session_status(vault, session_id) for session_id in active_ids]
+
+    recoverable_sessions = []
+    for session in vault.all_sessions():
+        runtime = session.get("runtime") or {}
+        if session.get("ended_at") is None or runtime.get("commit_status") in {"pending_auto_commit", "auto_commit_failed"}:
+            if session["session_id"] not in active_ids:
+                recoverable_sessions.append(_session_status(vault, session["session_id"]))
+
+    primary = active_sessions[0] if active_sessions else (recoverable_sessions[0] if recoverable_sessions else None)
+    if active_sessions:
+        lifecycle = primary["lifecycle"]
+        message = primary["message"]
+    elif recoverable_sessions:
+        lifecycle = "recoverable_raw"
+        message = "No active capture; raw turns are preserved and a structured commit is pending."
+    else:
+        lifecycle = "inactive"
+        message = "No active Work Brain capture or recoverable raw session."
+    return {
+        "lifecycle": lifecycle,
+        "message": message,
+        "capture_active": bool(active_sessions),
+        "active_sessions": active_sessions,
+        "recoverable_sessions": recoverable_sessions,
+        "active_count": len(active_sessions),
+        "recoverable_count": len(recoverable_sessions),
+        "primary": primary,
+    }
+
+
+def _status_commit_label(status: str | None) -> str:
+    return status or "not_started"
+
+
+def _status_text(snapshot: dict[str, Any], *, quiet: bool = False) -> str:
+    primary = snapshot.get("primary")
+    if quiet:
+        if not primary:
+            return "[Work Brain: inactive]"
+        capture = "ACTIVE" if primary.get("capture_active") else primary.get("lifecycle", "inactive").upper()
+        commit = _status_commit_label(primary.get("commit_status"))
+        return f"[Work Brain: {capture} · {primary.get('turn_count', 0)} turns · commit {commit}]"
+
+    lines = ["WORK BRAIN LIVE", "────────────────────────────────────────"]
+    if primary:
+        lines.extend([
+            f"Capture     {'ACTIVE' if primary.get('capture_active') else primary.get('lifecycle', 'INACTIVE').upper()}",
+            f"Session     {primary.get('session_id', '—')}",
+            f"Turns       {primary.get('turn_count', 0)}",
+            f"Last turn   {primary.get('last_captured_at') or '—'}",
+            f"Commit      {_status_commit_label(primary.get('commit_status'))}",
+            f"Lifecycle   {primary.get('lifecycle', 'unknown')}",
+            f"Message     {primary.get('message', '—')}",
+        ])
+    else:
+        lines.extend([
+            "Capture     INACTIVE",
+            "Session     —",
+            "Turns       0",
+            "Last turn   —",
+            "Commit      —",
+            f"Lifecycle   {snapshot.get('lifecycle', 'inactive')}",
+            f"Message     {snapshot.get('message', '—')}",
+        ])
+    if snapshot.get("active_count", 0) > 1:
+        lines.append(f"Active      {snapshot['active_count']} host sessions")
+    if snapshot.get("recoverable_count", 0):
+        lines.append(f"Recoverable  {snapshot['recoverable_count']} raw session(s)")
+    return "\n".join(lines)
+
+
+def _watch_status(args: argparse.Namespace) -> int:
+    if args.json:
+        raise ValidationError("--watch cannot be combined with --json")
+    if args.interval <= 0:
+        raise ValidationError("--interval must be greater than zero")
+    vault = _vault(args)
+    try:
+        while True:
+            snapshot = _live_status(vault)
+            if sys.stdout.isatty():
+                sys.stdout.write("\033[2J\033[H")
+            else:
+                sys.stdout.write("\n")
+            sys.stdout.write(_status_text(snapshot, quiet=args.quiet) + "\n")
+            sys.stdout.flush()
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        if sys.stdout.isatty():
+            sys.stdout.write("\n")
+        return 0
+
+
+def _codex_hook_output(vault: Vault, event: Any, result: dict[str, Any]) -> dict[str, Any]:
+    """Return a valid Codex hook response with deterministic lifecycle context."""
+    event_names = {
+        "session_start": "SessionStart",
+        "user_prompt": "UserPromptSubmit",
+        "assistant_message": "Stop",
+    }
+    hook_event_name = event_names.get(event.kind)
+    if hook_event_name is None:
+        return {}
+    snapshot = _live_status(vault)
+    # Ordinary coding conversations remain silent. Once Work Brain is active,
+    # or a recoverable session exists, the host receives the status banner
+    # without asking the model to remember to run a command.
+    if not snapshot.get("primary") and not result.get("captured"):
+        return {}
+    banner = _status_text(snapshot, quiet=True)
+    details = _status_text(snapshot)
+    return {
+        "systemMessage": banner,
+        "hookSpecificOutput": {
+            "hookEventName": hook_event_name,
+            "additionalContext": f"Deterministic Work Brain lifecycle status:\n{details}",
+        },
+    }
+
+
 def _open_loops(vault: Vault, limit: int) -> list[dict[str, Any]]:
     if not isinstance(limit, int) or not 0 < limit <= 100:
         raise ValidationError("limit must be an integer between 1 and 100")
@@ -353,6 +494,9 @@ def _question_ref(value: str | None) -> QuestionRef | None:
 def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     command = args.command
     machine = bool(args.json or command in {"state", "work", "evidence", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session"})
+    if command == "status":
+        snapshot = _live_status(_vault(args))
+        return snapshot, bool(args.json)
     if command == "config":
         if args.config_command == "set-vault":
             path = set_vault_path(args.path, args.config)
@@ -365,8 +509,12 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
             report["configured_vault"] = str(selected)
         return report, True
     if command == "capture-hook":
+        vault = _vault(args)
         event = normalize_capture_event(args.host, _read_payload("-"))
-        return HarnessCaptureService(_vault(args)).handle(event), True
+        result = HarnessCaptureService(vault).handle(event)
+        if args.host == "codex":
+            return {"_hook_output": _codex_hook_output(vault, event, result)}, True
+        return result, True
     if command == "capture-stop":
         return HarnessCaptureService(_vault(args)).stop(host=args.host, host_session_id=args.host_session_id, session_id=args.session_id), True
 
@@ -492,6 +640,8 @@ def main(argv: list[str] | None = None) -> int:
     args: argparse.Namespace | None = None
     try:
         args = _parser().parse_args(_normalize_cli_argv(argv))
+        if args.command == "status" and args.watch:
+            return _watch_status(args)
         value, machine = _run(args)
         code = 4 if args.command == "doctor" and not value["ok"] else 0
         if _is_codex_capture_hook(args):
@@ -500,7 +650,7 @@ def main(argv: list[str] | None = None) -> int:
             # response; leaking it causes "invalid ... JSON output" errors.
             # Persistence has already happened in _run, so a successful hook
             # is intentionally a JSON no-op.
-            _json_dump({})
+            _json_dump(value.get("_hook_output", {}))
         elif machine:
             _json_dump(value)
         elif args.command == "init":
@@ -515,6 +665,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"warning: {embedding['warning']}")
             for diagnostic in value["diagnostics"]:
                 print(f"diagnostic: {diagnostic}")
+        elif args.command == "status":
+            print(_status_text(value, quiet=args.quiet))
         return code
     except SystemExit:
         raise

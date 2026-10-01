@@ -49,6 +49,9 @@ work-brain evidence get --entry-id ENTRY_ID
 work-brain evidence search --query "import reliability" --page-size 10
 work-brain evidence hydrate < refs.json
 work-brain recoverable
+work-brain status
+work-brain status --quiet
+work-brain status --watch
 work-brain session turns --session-id SESSION_ID
 work-brain session turns --session-id SESSION_ID --offset 0 --limit 100
 work-brain session status --session-id SESSION_ID
@@ -88,6 +91,18 @@ host mapping is never silently closed.
 captured turn, capture/commit status, and host-session mappings. `session close`
 is the explicit no-new-evidence/abandoned boundary when no structured entry is
 being published.
+
+`status` is the human-facing lifecycle dashboard. It automatically discovers
+the active host mapping and prints capture state, turn count, last captured
+time, commit state, and recoverable-session count. `status --quiet` prints a
+single prompt-friendly line; `status --watch` refreshes the dashboard until
+interrupted. These are read-only views and never modify raw turns or entries.
+
+For Codex, the installed capture hook also emits the compact lifecycle banner
+through Codex's valid `SessionStart`, `UserPromptSubmit`, and `Stop` hook
+output once Work Brain is active or recoverable. The agent does not need to
+remember to run `status` for the banner; it must still verify the exact session
+with `session status` before reading turns or committing.
 
 `session quarantine --session-id SESSION_ID --reason REASON` is a maintenance
 operation for an explicitly identified closed session with a known bad

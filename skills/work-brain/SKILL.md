@@ -112,6 +112,18 @@ raw session exists, the turn count and last-captured time, and whether a
 structured entry is committed, pending, absent, or imported. If capture is
 inactive, say so plainly and tell the user how to reactivate it.
 
+Use the read-only `work-brain status --json` operation as the first lifecycle
+check because it discovers the active host mapping. Use `session status` with
+the exact returned session ID before reading turns or emitting a CommitDraft.
+The human-facing `work-brain status`, `status --quiet`, and `status --watch`
+views are optional terminal conveniences; they never replace exact session
+verification and never mutate raw turns.
+
+On Codex, the host capture hook supplies the same compact lifecycle banner at
+the host's valid session, prompt, and stop hook boundaries. Treat that banner
+as runtime-provided state, not as a reason to invent a session or skip exact
+provenance checks.
+
 Resources:
 
 - `references/sops/core-conversation.sop.md`

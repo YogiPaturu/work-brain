@@ -48,6 +48,32 @@ work-brain setup codex
 work-brain setup codex --check
 ```
 
+To see the current Work Brain lifecycle in the terminal:
+
+```bash
+work-brain status          # one-time human-readable dashboard
+work-brain status --watch  # continuously refresh until Ctrl-C
+work-brain status --quiet  # one-line prompt-friendly snapshot
+```
+
+The dashboard is read-only. It reports whether capture is active, how many
+raw turns have been captured, when the last turn was saved, and whether a
+structured commit is pending or complete. It never changes raw turns or
+entries. To show the one-line snapshot before each zsh prompt, add this to
+your `~/.zshrc`:
+
+```zsh
+source /path/to/work-brain/examples/work-brain-status.zsh
+```
+
+Or copy the small helper from
+[`examples/work-brain-status.zsh`](examples/work-brain-status.zsh) into your
+shell configuration.
+
+This prompt hook runs when the shell redraws the prompt; it is not a
+background daemon. The agent-facing Skill performs its own lifecycle check at
+Work Brain boundaries, so the agent does not need to run `status --watch`.
+
 Start a fresh Codex session, then try:
 
 ```text
@@ -241,6 +267,7 @@ work-brain work recent --limit 8
 work-brain work loops --limit 20
 work-brain evidence get --entry-id ENTRY_ID
 work-brain recoverable
+work-brain status --json
 work-brain session turns --session-id SESSION_ID
 work-brain session status --session-id SESSION_ID
 
@@ -252,6 +279,8 @@ work-brain commit-draft --session-id SESSION_ID < commit-draft.json
 session. Use `--offset` and `--limit` to page through long sessions.
 `session status` is a read-only health view showing lifecycle, turn count, last
 captured turn, capture/commit status, and host-session mappings.
+`status --json` is the auto-detected lifecycle view for the active host mapping;
+the human-facing forms are `status`, `status --quiet`, and `status --watch`.
 `session import --file transcript.json` is the explicit recovery path for a
 user-supplied transcript whose original host capture was missed; it preserves
 the supplied raw turns in a separately marked imported session.
@@ -391,7 +420,8 @@ work-brain --vault "$HOME/work-brain-vault" career candidates unmark --entry-id 
 
 For advanced/manual integration, the CLI also supports `init`, `rebuild`,
 `reindex`, `session-start`, `commit`, `commit-draft`, `recoverable`,
-`session status`, `session close`, `session quarantine`, and `capture-hook`.
+`status`, `session status`, `session close`, `session quarantine`, and
+`capture-hook`.
 Raw-turn append is intentionally not exposed as a normal CLI operation. Use `work-brain --help`
 for the complete syntax.
 

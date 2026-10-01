@@ -16,6 +16,7 @@ commands through the harness's existing shell capability:
 - `list_interview_candidates`
 - `commit-draft` through stdin or a bounded file during the committing phase
 - `session status` for read-only capture health and lifecycle inspection
+- `status` for the auto-detected lifecycle dashboard at Work Brain boundaries
 
 The host capture mapping, not a newly created `session-start`, identifies the
 conversation being handled. `session-start` is an application/setup operation
@@ -23,7 +24,11 @@ used when opening a real Work Brain boundary; it is not a way to obtain a
 session for an already-running host conversation. Do not select a session by
 recency when more than one recoverable session exists.
 
-Use `session status` to produce a visible lifecycle banner. Report capture and
+At every Work Brain start, resume, workflow boundary, or commit boundary, use
+the read-only `work-brain status --json` dashboard first. It auto-detects the
+active host mapping and prevents choosing a session merely because it is the
+newest recoverable one. For a selected session, use `session status` to verify
+the exact session ID before reading turns or committing. Report capture and
 commit independently: `capture_active`, `lifecycle`, `turn_count`,
 `last_captured_at`, `commit_status`, and `message`. An empty `work recent`
 result does not mean that no raw session exists.

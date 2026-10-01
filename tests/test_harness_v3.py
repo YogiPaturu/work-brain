@@ -341,6 +341,35 @@ class HarnessV3Tests(unittest.TestCase):
         self.assertEqual("status-view", value["host_mappings"][0]["host_session_id"])
         self.assertNotIn("content", value["last_captured_turn"])
 
+    def test_live_status_auto_detects_active_session_and_has_prompt_view(self) -> None:
+        service = HarnessCaptureService(self.vault)
+        started = service.handle(normalize_capture_event("codex", {
+            "event": "UserPromptSubmit", "session_id": "live-status", "prompt": "work brain: show status"
+        }))
+
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(0, main(["--vault", str(self.vault.root), "status"]))
+        self.assertIn("WORK BRAIN LIVE", output.getvalue())
+        self.assertIn("Capture     ACTIVE", output.getvalue())
+        self.assertIn(f"Session     {started['session_id']}", output.getvalue())
+        self.assertIn("Turns       1", output.getvalue())
+
+        quiet = StringIO()
+        with redirect_stdout(quiet):
+            self.assertEqual(0, main(["--vault", str(self.vault.root), "status", "--quiet"]))
+        self.assertEqual("[Work Brain: ACTIVE · 1 turns · commit not_started]\n", quiet.getvalue())
+
+    def test_live_status_json_distinguishes_inactive_from_recoverable(self) -> None:
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(0, main(["--vault", str(self.vault.root), "status", "--json"]))
+        value = json.loads(output.getvalue())
+        self.assertEqual("inactive", value["lifecycle"])
+        self.assertFalse(value["capture_active"])
+        self.assertEqual([], value["active_sessions"])
+        self.assertEqual([], value["recoverable_sessions"])
+
     def test_stale_rollover_closes_inactive_boundary_but_preserves_turns(self) -> None:
         service = HarnessCaptureService(self.vault)
         old = service.handle(normalize_capture_event("codex", {
@@ -377,12 +406,21 @@ class HarnessV3Tests(unittest.TestCase):
             {"hook_event_name": "SessionEnd", "session_id": "hook-session", "reason": "other"},
             {"hook_event_name": "Interrupt", "session_id": "hook-session", "turn_id": "turn-1"},
         )
+        outputs = []
         for payload in payloads:
             output = StringIO()
             with redirect_stdout(output):
                 with patch("sys.stdin", StringIO(json.dumps(payload))):
                     self.assertEqual(0, main(["--vault", str(self.vault.root), "capture-hook", "--host", "codex"]))
-            self.assertEqual({}, json.loads(output.getvalue()), payload["hook_event_name"])
+            outputs.append(json.loads(output.getvalue()))
+        self.assertEqual({}, outputs[0])
+        self.assertEqual("UserPromptSubmit", outputs[1]["hookSpecificOutput"]["hookEventName"])
+        self.assertIn("Capture     ACTIVE", outputs[1]["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("Work Brain: ACTIVE", outputs[1]["systemMessage"])
+        self.assertEqual("Stop", outputs[2]["hookSpecificOutput"]["hookEventName"])
+        self.assertIn("Turns       2", outputs[2]["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual({}, outputs[3])
+        self.assertEqual({}, outputs[4])
 
     def test_codex_capture_hook_swallows_internal_errors_at_host_boundary(self) -> None:
         output = StringIO()
