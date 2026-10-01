@@ -132,6 +132,15 @@ or impossible to reconstruct from artifacts later?”
   workflow boundary.
 - Every non-empty statement and state change in a CommitDraft MUST include the exact persisted raw turn sequence numbers that support it. If the evidence is not in the captured turns, omit the claim or keep the session recoverable rather than guessing.
 - Each statement and state change MUST reference at least one user-authored source turn. An assistant-only or synthetic turn cannot support a durable entry.
+- Before emitting a CommitDraft, the agent MUST classify the bounded evidence
+  with both a `workspace` and `project` field. It SHOULD infer these from the
+  user’s explicit words, the active work item, an active communication profile,
+  or supplied retrieved context; it MUST NOT invent a name when the context is
+  genuinely ambiguous.
+- If workspace or project classification is materially ambiguous, the agent
+  MUST ask one concise clarification question before committing. It MUST always
+  emit both keys in the final draft; `project: null` is allowed only when the
+  work is explicitly cross-cutting or not project-scoped.
 - A revision is allowed only for additional evidence in the same bounded session. Evidence from another session must be committed as a separate entry, optionally linked with `source_entry_refs`.
 - If validation rejects a draft, inspect the target session and repair the source references. Do not create a new session or use the low-level `turn` command as a workaround.
 - Explicit lifecycle phrases have distinct meanings: “finish this,” “that’s

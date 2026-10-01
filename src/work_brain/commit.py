@@ -53,6 +53,12 @@ class CommitDraftValidator:
         if historical is not None:
             Occurrence.from_dict(historical)
         domains = self._domains(raw.get("domains", []))
+        if "workspace" not in raw:
+            raise ValidationError("CommitDraft must include workspace; infer it or clarify it before committing")
+        if raw.get("workspace") is None:
+            raise ValidationError("CommitDraft workspace cannot be null; infer it or clarify it before committing")
+        if "project" not in raw:
+            raise ValidationError("CommitDraft must include project; use null only when the work is not project-scoped")
         workspace = self._workspace(raw.get("workspace"))
         project = self._project(raw.get("project"))
         sections_raw = raw.get("sections")

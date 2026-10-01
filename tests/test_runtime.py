@@ -36,6 +36,8 @@ def draft(*, workflow: str = "think", bad_runtime_field: bool = False) -> dict:
             "start": "2026-09-29", "end": None, "precision": "day", "label": "historical"
         } if workflow == "backfill" else None,
         "domains": ["engineering"],
+        "workspace": {"canonical_name": "Work Brain", "aliases": ["workbrain"]},
+        "project": {"canonical_name": "Import boundary", "aliases": ["imports"]},
         "sections": sections,
         "state_changes": [], "entity_candidates": [], "artifact_candidates": [], "source_entry_refs": [],
     }
@@ -137,6 +139,22 @@ class RuntimeTests(unittest.TestCase):
         validator = CommitDraftValidator()
         with self.assertRaises(ValidationError):
             validator.validate(draft(bad_runtime_field=True), turn_count=1, workflow="think")
+
+    def test_commit_draft_requires_workspace_and_project_classification(self) -> None:
+        value = draft()
+        value.pop("workspace")
+        with self.assertRaisesRegex(ValidationError, "must include workspace"):
+            CommitDraftValidator().validate(value, turn_count=1, workflow="think")
+
+        value = draft()
+        value.pop("project")
+        with self.assertRaisesRegex(ValidationError, "must include project"):
+            CommitDraftValidator().validate(value, turn_count=1, workflow="think")
+
+        value = draft()
+        value["project"] = None
+        validated = CommitDraftValidator().validate(value, turn_count=1, workflow="think")
+        self.assertIsNone(validated.project_candidate)
 
     def test_commit_statements_require_exact_source_turns(self) -> None:
         value = draft()
