@@ -72,6 +72,7 @@ improves the user’s understanding or the eventual evidence.
 - You SHOULD follow a valuable unexpected branch when it remains part of the same coherent target.
 - You MUST NOT ask a question whose answer is already clearly established in the available context.
 - You MUST NOT persist hidden chain-of-thought; persist only user-grounded statements, explicit inferences where supported, and concise decisions or next actions.
+- The host-captured session is authoritative. The agent MUST NOT create a replacement session or append a model-generated summary as a raw assistant turn.
 
 ### 4. Track Basis and Uncertainty
 
@@ -130,6 +131,9 @@ or impossible to reconstruct from artifacts later?”
   gone, preserve raw turns and defer the structured commit to the next live
   workflow boundary.
 - Every non-empty statement and state change in a CommitDraft MUST include the exact persisted raw turn sequence numbers that support it. If the evidence is not in the captured turns, omit the claim or keep the session recoverable rather than guessing.
+- Each statement and state change MUST reference at least one user-authored source turn. An assistant-only or synthetic turn cannot support a durable entry.
+- A revision is allowed only for additional evidence in the same bounded session. Evidence from another session must be committed as a separate entry, optionally linked with `source_entry_refs`.
+- If validation rejects a draft, inspect the target session and repair the source references. Do not create a new session or use the low-level `turn` command as a workaround.
 - Explicit lifecycle phrases have distinct meanings: “finish this,” “that’s
   enough,” or “save this” finish the bounded session and keep host capture
   active; “stop Work Brain” and “close my day” finish and deactivate capture.

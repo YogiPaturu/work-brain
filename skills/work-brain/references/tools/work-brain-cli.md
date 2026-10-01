@@ -88,6 +88,24 @@ captured turn, capture/commit status, and host-session mappings. `session close`
 is the explicit no-new-evidence/abandoned boundary when no structured entry is
 being published.
 
+### Choosing the target session
+
+For an active hosted conversation, use the session ID supplied by the active
+host mapping and verify it with `session status`. If several sessions are
+recoverable, inspect their host mappings and bounded turns; never assume the
+newest session is the current conversation. `session-start` creates a new
+application session and must not be used as a fallback for a missing mapping.
+
+`session turns` is for auditing captured evidence. It is not a source for
+copying or rewriting a transcript. The host hooks already persist the visible
+user and assistant turns continuously.
+
+If `commit-draft` returns a validation error, do not invoke `turn` to add a
+summary. Correct the draft's exact `source_turns` for the selected session, or
+leave that session recoverable for a later workflow boundary. A same-session
+follow-up may create a revision; evidence from a different session creates a
+new entry and may use `source_entry_refs` to link the earlier entry.
+
 ## Capture activation
 
 Hooks are passive for ordinary coding conversations. Exact durable capture is

@@ -17,6 +17,12 @@ commands through the harness's existing shell capability:
 - `commit-draft` through stdin or a bounded file during the committing phase
 - `session status` for read-only capture health and lifecycle inspection
 
+The host capture mapping, not a newly created `session-start`, identifies the
+conversation being handled. `session-start` is an application/setup operation
+used when opening a real Work Brain boundary; it is not a way to obtain a
+session for an already-running host conversation. Do not select a session by
+recency when more than one recoverable session exists.
+
 An ordinary `commit-draft` closes only the current bounded logical session and
 keeps the host capture envelope active. `close-day` and explicit stop commands
 close the envelope as well. At a live workflow boundary, meaningful evidence
@@ -54,6 +60,12 @@ application validates the request, applies the active workflow contract, and
 returns a compact JSON result. Unknown, malformed, or failed calls become
 stable structured errors; they MUST NOT mutate the vault. Tool payloads and
 host shell details are not appended to the raw visible-turn transcript.
+
+The low-level `turn` command is reserved for adapters, fixtures, and explicit
+integration tests. A hosted agent MUST NOT use it to append its own summary or
+to manufacture missing conversation history. If a CommitDraft fails because
+of provenance, inspect `session turns` and repair the draft; do not create a
+replacement session or combine unrelated sessions.
 
 Career question lookup is deterministic and does not require a model call.
 Question banks are separate from professional evidence. `prepare` may show a

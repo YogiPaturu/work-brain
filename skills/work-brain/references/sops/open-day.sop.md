@@ -45,6 +45,9 @@ raw sessions, active capture, and closed/no-new-evidence sessions.
   a CommitDraft automatically when they contain meaningful evidence, and close
   them as `no_new_evidence` when they do not. Do not ask the user to say
   “save” for this recovery step.
+- Rollover recovery MUST use the session selected by the application. Do not
+  create a fresh session and copy a summary into it. Preserve the rolled-over
+  raw turns and use their exact sequences as CommitDraft provenance.
 - A session exactly one calendar day old is a midnight edge case and MUST remain
   recoverable unless the host explicitly closed it. Sessions more than one day
   old may be rolled over only when their host mapping is inactive/recoverable;
@@ -77,6 +80,9 @@ twice.
 - Beginning this workflow is also a workflow boundary: any prior recoverable
   session selected for rollover is committed or explicitly closed before the
   new day’s focus is presented.
+- If a commit fails, distinguish a provenance problem from missing evidence;
+  report the recoverable session and defer it rather than manufacturing turns
+  or merging it into an older entry.
 
 ## Examples
 
