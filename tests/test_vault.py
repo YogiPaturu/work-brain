@@ -139,6 +139,14 @@ class VaultTests(unittest.TestCase):
         self.assertEqual([], self.vault.all_sessions())
         self.assertFalse((self.vault.root / "state/current.json").read_text().find(self.session["entry_id"]) >= 0)
 
+    def test_quarantine_preserves_raw_turns_and_hides_entry(self) -> None:
+        self.vault.append_turn(self.session["session_id"], "user", "This raw evidence must remain.", recorded_at="2026-09-30T10:01:00+01:00")
+        self.vault.commit_entry(self.session["session_id"], entry_payload(self.session))
+        self.vault.quarantine_entry(self.session["session_id"], reason="synthetic assistant-only capture")
+        self.assertEqual([], self.vault.all_current_entries())
+        self.assertEqual("This raw evidence must remain.", self.vault.list_turns(self.session["session_id"])[0]["content"])
+        self.assertTrue((self.vault.root / "quarantine/entries/2026-09-30" / self.session["session_id"] / "0001.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

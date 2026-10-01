@@ -252,6 +252,9 @@ work-brain commit-draft --session-id SESSION_ID < commit-draft.json
 session. Use `--offset` and `--limit` to page through long sessions.
 `session status` is a read-only health view showing lifecycle, turn count, last
 captured turn, capture/commit status, and host-session mappings.
+`session import --file transcript.json` is the explicit recovery path for a
+user-supplied transcript whose original host capture was missed; it preserves
+the supplied raw turns in a separately marked imported session.
 
 `evidence search` is the stable retrieval operation. It searches current
 structured entries with deterministic chunks, SQLite FTS5, a local vector
@@ -387,8 +390,9 @@ work-brain --vault "$HOME/work-brain-vault" career candidates unmark --entry-id 
 ```
 
 For advanced/manual integration, the CLI also supports `init`, `rebuild`,
-`reindex`, `session-start`, `turn`, `commit`, `commit-draft`, `recoverable`,
-`session status`, `session close`, and `capture-hook`. Use `work-brain --help`
+`reindex`, `session-start`, `commit`, `commit-draft`, `recoverable`,
+`session status`, `session close`, `session quarantine`, and `capture-hook`.
+Raw-turn append is intentionally not exposed as a normal CLI operation. Use `work-brain --help`
 for the complete syntax.
 
 ## Install the one canonical Skill

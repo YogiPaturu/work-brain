@@ -8,7 +8,7 @@ from typing import Any, Mapping
 from .errors import ValidationError
 from .fsutil import atomic_replace_json, ensure_private_file, read_json
 from .orchestrator import PromptRoute, route_prompt, select_workflow
-from .timeutil import date_for_timestamp, timestamp_now
+from .timeutil import date_for_timestamp, parse_timestamp, timestamp_now
 
 
 HOSTS = {"codex", "claude-code", "cursor"}
@@ -193,6 +193,47 @@ class HarnessCaptureService:
     def _write_mappings(self, value: Mapping[str, Any]) -> None:
         atomic_replace_json(self.mapping_path, dict(value))
 
+    def _lifecycle_snapshot(self, session_id: str, *, host: str | None = None, host_session_id: str | None = None) -> dict[str, Any]:
+        session = self.vault.read_session(session_id)
+        turns = self.vault.list_turns(session_id)
+        runtime = dict(session.get("runtime") or {})
+        if host_session_id is None:
+            host_session_id = runtime.get("host_session_id")
+        if host is None:
+            host = runtime.get("host")
+        if runtime.get("capture_status") == "active":
+            lifecycle = "active_capture"
+            message = "Capture is active; raw turns are being saved."
+        elif runtime.get("capture_status") == "recoverable":
+            lifecycle = "recoverable_raw"
+            message = "Capture is inactive; raw turns are preserved and the structured commit is pending."
+        elif runtime.get("capture_status") == "imported":
+            lifecycle = "imported"
+            message = "Imported raw transcript is preserved; no structured entry has been committed."
+        elif runtime.get("commit_status") == "no_new_evidence":
+            lifecycle = "closed_no_new_evidence"
+            message = "Capture is closed; no new structured evidence was committed."
+        elif runtime.get("commit_status") in {"auto_commit_failed", "pending_auto_commit"}:
+            lifecycle = "recoverable_raw"
+            message = "Raw turns are safe; the structured commit still needs attention."
+        elif session.get("ended_at") is not None:
+            lifecycle = "closed_uncommitted"
+            message = "Capture is closed; raw turns are preserved but no structured entry is committed."
+        else:
+            lifecycle = "inactive"
+            message = "Work Brain capture is inactive for this host session; no raw turns are being saved."
+        last = turns[-1] if turns else None
+        return {
+            "lifecycle": lifecycle,
+            "capture_status": runtime.get("capture_status", "not_captured"),
+            "commit_status": runtime.get("commit_status"),
+            "turn_count": len(turns),
+            "last_captured_at": last.get("recorded_at") if last else None,
+            "host": host,
+            "host_session_id": host_session_id,
+            "message": message,
+        }
+
     def rollover_stale_sessions(self, *, reference_at: str | None = None) -> list[dict[str, Any]]:
         """Close stale host capture boundaries without discarding raw turns.
 
@@ -245,10 +286,24 @@ class HarnessCaptureService:
             key = f"{event.host}:{event.host_session_id}"
             mapping = mappings.get(key)
             if event.kind == "session_start":
-                return {"captured": False, "status": "ready", "host": event.host, "host_session_id": event.host_session_id}
+                return {
+                    "captured": False,
+                    "status": "ready",
+                    "lifecycle": "inactive",
+                    "message": "Work Brain is available but capture is inactive until explicitly activated.",
+                    "host": event.host,
+                    "host_session_id": event.host_session_id,
+                }
             if event.kind == "user_prompt":
                 if mapping is None and not event.explicit_activation:
-                    return {"captured": False, "status": "inactive", "host": event.host, "host_session_id": event.host_session_id}
+                    return {
+                        "captured": False,
+                        "status": "inactive",
+                        "lifecycle": "inactive",
+                        "message": "Work Brain capture is inactive for this host session; no raw turns are being saved. Say ‘capture this’ to resume.",
+                        "host": event.host,
+                        "host_session_id": event.host_session_id,
+                    }
                 rollover = self.rollover_stale_sessions(reference_at=event.recorded_at) if mapping is None else []
                 if mapping is None:
                     workflow = event.workflow_hint or select_workflow(event.text)
@@ -289,7 +344,14 @@ class HarnessCaptureService:
                     self.vault.update_session_metadata(session_id, session)
                     mapping["lifecycle"] = event.lifecycle
                 self._write_mappings(mappings)
-                result = {"captured": True, "status": "active", "session_id": session_id, "role": "user", "workflow": requested_workflow or workflow}
+                result = {
+                    "captured": True,
+                    "status": "active",
+                    "session_id": session_id,
+                    "role": "user",
+                    "workflow": requested_workflow or workflow,
+                    **self._lifecycle_snapshot(session_id, host=event.host, host_session_id=event.host_session_id),
+                }
                 if rollover:
                     result["rolled_over"] = rollover
                 return result
@@ -300,11 +362,31 @@ class HarnessCaptureService:
                 self.vault.append_turn(session_id, "assistant", event.text or "", recorded_at=event.recorded_at)
                 if mapping.get("workflow") == "close-day" or mapping.get("lifecycle") == "deactivate":
                     self._deactivate_mapping(mappings, key, session_id, status="closed")
-                    return {"captured": True, "status": "closed", "deactivated": True, "session_id": session_id, "role": "assistant", "workflow": "close-day"}
-                return {"captured": True, "status": "active", "session_id": session_id, "role": "assistant"}
+                    return {
+                        "captured": True,
+                        "status": "closed",
+                        "deactivated": True,
+                        "session_id": session_id,
+                        "role": "assistant",
+                        "workflow": "close-day",
+                        **self._lifecycle_snapshot(session_id, host=event.host, host_session_id=event.host_session_id),
+                    }
+                return {
+                    "captured": True,
+                    "status": "active",
+                    "session_id": session_id,
+                    "role": "assistant",
+                    **self._lifecycle_snapshot(session_id, host=event.host, host_session_id=event.host_session_id),
+                }
             if event.kind in {"session_end", "interrupt"}:
                 self._deactivate_mapping(mappings, key, session_id, status="recoverable")
-                return {"captured": False, "status": "recoverable", "session_id": session_id, "event": event.kind}
+                return {
+                    "captured": False,
+                    "status": "recoverable",
+                    "session_id": session_id,
+                    "event": event.kind,
+                    **self._lifecycle_snapshot(session_id, host=event.host, host_session_id=event.host_session_id),
+                }
             raise ValidationError(f"unsupported normalized capture event: {event.kind}")
 
     def stop(self, *, host: str, host_session_id: str, session_id: str | None = None) -> dict[str, Any]:
@@ -328,6 +410,74 @@ class HarnessCaptureService:
             for key in matches:
                 self._deactivate_mapping(mappings, key, session_id, status="closed")
             return {"deactivated": bool(matches), "status": "closed", "session_id": session_id}
+
+    def import_transcript(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Import an explicitly supplied transcript without merging it into a live session."""
+        if not isinstance(payload, Mapping):
+            raise ValidationError("transcript import must be a JSON object")
+        raw_turns = payload.get("turns")
+        if not isinstance(raw_turns, list) or not raw_turns:
+            raise ValidationError("transcript import requires a non-empty turns list")
+        turns: list[dict[str, Any]] = []
+        for index, raw in enumerate(raw_turns, start=1):
+            if not isinstance(raw, Mapping):
+                raise ValidationError(f"transcript turn {index} must be an object")
+            role = raw.get("role")
+            content = raw.get("content")
+            if role not in {"user", "assistant"}:
+                raise ValidationError(f"transcript turn {index} role must be user or assistant")
+            if not isinstance(content, str) or not content:
+                raise ValidationError(f"transcript turn {index} content must be a non-empty string")
+            recorded_at = raw.get("recorded_at")
+            if recorded_at is not None:
+                parse_timestamp(recorded_at, f"transcript turn {index}.recorded_at")
+            turns.append({"role": role, "content": content, "recorded_at": recorded_at})
+        if not any(turn["role"] == "user" for turn in turns):
+            raise ValidationError("transcript import requires at least one user-authored turn")
+
+        started_at = payload.get("started_at") or next((turn["recorded_at"] for turn in turns if turn["recorded_at"]), None) or timestamp_now()
+        parse_timestamp(started_at, "transcript.started_at")
+        modes = payload.get("modes", ["think"])
+        domains = payload.get("domains", [])
+        source = payload.get("source", "user-supplied transcript")
+        if not isinstance(modes, list) or any(not isinstance(item, str) or not item.strip() for item in modes):
+            raise ValidationError("transcript.modes must be a list of non-empty strings")
+        if not isinstance(domains, list) or any(not isinstance(item, str) or not item.strip() for item in domains):
+            raise ValidationError("transcript.domains must be a list of non-empty strings")
+        if not isinstance(source, str) or not source.strip():
+            raise ValidationError("transcript.source must be a non-empty string")
+        workflow = payload.get("workflow", modes[0] if modes else "think")
+        if not isinstance(workflow, str) or not workflow.strip():
+            raise ValidationError("transcript.workflow must be a non-empty string")
+
+        with self.vault.write_lock():
+            imported_at = timestamp_now()
+            session = self.vault.create_session(
+                started_at=started_at,
+                modes=modes,
+                domains=domains,
+                runtime={
+                    "capture_status": "imported",
+                    "capture_boundary": "closed",
+                    "capture_fidelity": "imported",
+                    "workflow": workflow,
+                    "import_source": source.strip(),
+                    "imported_at": imported_at,
+                },
+            )
+            session_id = session["session_id"]
+            for turn in turns:
+                self.vault.append_turn(session_id, turn["role"], turn["content"], recorded_at=turn["recorded_at"] or imported_at)
+            session["ended_at"] = imported_at
+            self.vault.update_session_metadata(session_id, session)
+            return {
+                "session_id": session_id,
+                "entry_id": session["entry_id"],
+                "status": "imported",
+                "capture_fidelity": "imported",
+                "turn_count": len(turns),
+                "raw_turns_preserved": True,
+            }
 
     def rotate_session(self, session_id: str) -> dict[str, Any]:
         """Start the next bounded session while keeping the host capture active.

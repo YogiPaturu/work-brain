@@ -23,6 +23,11 @@ used when opening a real Work Brain boundary; it is not a way to obtain a
 session for an already-running host conversation. Do not select a session by
 recency when more than one recoverable session exists.
 
+Use `session status` to produce a visible lifecycle banner. Report capture and
+commit independently: `capture_active`, `lifecycle`, `turn_count`,
+`last_captured_at`, `commit_status`, and `message`. An empty `work recent`
+result does not mean that no raw session exists.
+
 An ordinary `commit-draft` closes only the current bounded logical session and
 keeps the host capture envelope active. `close-day` and explicit stop commands
 close the envelope as well. At a live workflow boundary, meaningful evidence
@@ -61,11 +66,16 @@ returns a compact JSON result. Unknown, malformed, or failed calls become
 stable structured errors; they MUST NOT mutate the vault. Tool payloads and
 host shell details are not appended to the raw visible-turn transcript.
 
-The low-level `turn` command is reserved for adapters, fixtures, and explicit
-integration tests. A hosted agent MUST NOT use it to append its own summary or
-to manufacture missing conversation history. If a CommitDraft fails because
-of provenance, inspect `session turns` and repair the draft; do not create a
-replacement session or combine unrelated sessions.
+Raw-turn append is not exposed as a normal CLI operation. The internal append
+API is reserved for adapters, fixtures, and explicit integration tests. A
+hosted agent MUST NOT use it to append its own summary or manufacture missing
+conversation history. If a CommitDraft fails because of provenance, inspect
+`session turns` and repair the draft; do not create a replacement session or
+combine unrelated sessions.
+
+`session quarantine` is a narrowly scoped maintenance command requiring an
+explicit session ID and reason; it hides a known bad structured entry while
+preserving the raw turns. It is not for ordinary workflow completion.
 
 Career question lookup is deterministic and does not require a model call.
 Question banks are separate from professional evidence. `prepare` may show a

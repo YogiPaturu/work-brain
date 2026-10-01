@@ -84,6 +84,27 @@ twice.
   report the recoverable session and defer it rather than manufacturing turns
   or merging it into an older entry.
 
+At the start of the response, show a compact lifecycle banner with both
+capture and commit state. Use the application’s `session status` fields rather
+than inferring state from whether `work recent` is empty. The banner should
+identify whether capture is active, whether raw turns are recoverable, whether
+the session is imported, and whether a structured entry exists.
+
+For example:
+
+```text
+Work Brain
+Capture: INACTIVE — this host conversation is not being captured.
+Last session: recoverable raw, 5 turns; last captured at 13:03.
+Commit: no entry.
+Action: say “capture this” to resume.
+```
+
+When capture is active, show the Work Brain session ID, turn count, and last
+captured time. When a commit has failed, say that raw turns are safe and the
+structured commit is pending. Never describe an empty recent-work result as
+proof that no raw session exists.
+
 ## Examples
 
 ### Example Input

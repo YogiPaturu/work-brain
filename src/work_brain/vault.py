@@ -420,6 +420,35 @@ class Vault:
             except Exception as exc:
                 raise PersistenceError(f"session deleted but derived state is stale: {exc}") from exc
 
+    def quarantine_entry(self, session_id: str, *, reason: str) -> None:
+        """Hide a bad structured entry while preserving the session's raw turns."""
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValidationError("quarantine reason must be a non-empty string")
+        with self._require_or_lock():
+            session = self.read_session(session_id)
+            if session.get("ended_at") is None:
+                raise ValidationError("cannot quarantine an active session; close it first")
+            entries_dir = self.session_dir(session_id) / "entries"
+            entry_paths = sorted(entries_dir.glob("*.json"))
+            if not entry_paths:
+                raise FileNotFoundError(f"structured entry not found for session: {session_id}")
+            target = self.root / "quarantine" / "entries" / session["local_date"] / session_id
+            if target.exists():
+                raise IntegrityError(f"session entry is already quarantined: {session_id}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            entries_dir.rename(target)
+            runtime = dict(session.get("runtime") or {})
+            runtime.update({"quarantine_status": "structured_entry", "quarantine_reason": reason.strip(), "quarantined_at": timestamp_now()})
+            session["runtime"] = runtime
+            atomic_replace_json(self.session_dir(session_id) / "session.json", session)
+            try:
+                self.rebuild_projections(affected_date=session["local_date"])
+                self.reconcile_database()
+                from .retrieval import EvidenceRetriever
+                EvidenceRetriever(self).reindex()
+            except Exception as exc:
+                raise PersistenceError(f"entry quarantined but derived state is stale: {exc}") from exc
+
     def apply_amendment(self, amendment_id: str, payload: Mapping[str, Any] | None = None) -> SessionEntry:
         """Publish a new user-correction revision linked to an amendment."""
         with self._require_or_lock():

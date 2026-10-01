@@ -71,8 +71,8 @@ while keeping capture active; “stop Work Brain” and “close my day” deact
 The host capture session is the source of truth for the current conversation.
 The agent MUST NOT create a second session to summarize the conversation, and
 MUST NOT append a model-written summary with the low-level `turn` command. The
-`turn` command is an integration/testing primitive, not a normal hosted-agent
-capture operation. Raw user and assistant turns are written by the host hooks;
+raw-turn append API is an internal integration/testing primitive, not a normal
+hosted-agent operation. Raw user and assistant turns are written by host hooks;
 the agent only reads them and emits a semantic CommitDraft.
 
 Before committing, the agent MUST identify the exact active `session_id` from
@@ -98,6 +98,19 @@ creating a new session, appending synthetic turns, or combining unrelated
 entries. Read the target session's bounded turns, correct the draft's
 provenance, and retry once; if the evidence is unavailable, report the failure
 and defer the commit to the next live workflow boundary.
+
+When the user supplies a transcript whose original host capture was missed, use
+the explicit transcript-import operation. Treat the imported session as raw
+source evidence with `capture_fidelity: imported`; do not pretend it was
+verbatim host capture, do not assign unknown historical timestamps, and do not
+merge it into an existing entry before review.
+
+Lifecycle visibility is part of the user contract. Whenever Work Brain starts,
+resumes, or reaches a boundary, report capture state and commit state
+separately: whether raw turns are actively being saved, whether a recoverable
+raw session exists, the turn count and last-captured time, and whether a
+structured entry is committed, pending, absent, or imported. If capture is
+inactive, say so plainly and tell the user how to reactivate it.
 
 Resources:
 

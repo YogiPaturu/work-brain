@@ -113,6 +113,8 @@ class HarnessV3Tests(unittest.TestCase):
         service = HarnessCaptureService(self.vault)
         inactive = service.handle(normalize_capture_event("codex", {"event": "UserPromptSubmit", "session_id": "ordinary", "prompt": "Fix the build"}))
         self.assertEqual("inactive", inactive["status"])
+        self.assertEqual("inactive", inactive["lifecycle"])
+        self.assertIn("no raw turns are being saved", inactive["message"])
         self.assertEqual([], self.vault.all_sessions())
 
         service.handle(normalize_capture_event("codex", {"event": "SessionStart", "session_id": "active"}))
@@ -318,6 +320,9 @@ class HarnessV3Tests(unittest.TestCase):
         started = service.handle(normalize_capture_event("codex", {
             "event": "UserPromptSubmit", "session_id": "status-view", "prompt": "work brain: inspect this"
         }))
+        self.assertEqual("active_capture", started["lifecycle"])
+        self.assertEqual(1, started["turn_count"])
+        self.assertIsNotNone(started["last_captured_at"])
         output = StringIO()
         with redirect_stdout(output):
             self.assertEqual(0, main([
@@ -329,6 +334,8 @@ class HarnessV3Tests(unittest.TestCase):
         self.assertEqual(1, value["turn_count"])
         self.assertEqual(1, value["last_captured_turn"]["sequence"])
         self.assertEqual("active", value["capture_status"])
+        self.assertTrue(value["capture_active"])
+        self.assertEqual("Capture is active; raw turns are being saved.", value["message"])
         self.assertEqual("status-view", value["host_mappings"][0]["host_session_id"])
         self.assertNotIn("content", value["last_captured_turn"])
 

@@ -52,6 +52,7 @@ work-brain recoverable
 work-brain session turns --session-id SESSION_ID
 work-brain session turns --session-id SESSION_ID --offset 0 --limit 100
 work-brain session status --session-id SESSION_ID
+work-brain session import --file transcript.json
 ```
 
 `evidence search` is the retrieval application operation. It returns bounded
@@ -88,6 +89,13 @@ captured turn, capture/commit status, and host-session mappings. `session close`
 is the explicit no-new-evidence/abandoned boundary when no structured entry is
 being published.
 
+`session quarantine --session-id SESSION_ID --reason REASON` is a maintenance
+operation for an explicitly identified closed session with a known bad
+structured entry. It removes that entry from active projections while
+preserving the session metadata and raw turns for audit. It is not a normal
+recovery step and MUST NOT be used to hide an uncertain or merely unwanted work
+item; use `session close` or a user correction instead.
+
 ### Choosing the target session
 
 For an active hosted conversation, use the session ID supplied by the active
@@ -100,7 +108,17 @@ application session and must not be used as a fallback for a missing mapping.
 copying or rewriting a transcript. The host hooks already persist the visible
 user and assistant turns continuously.
 
-If `commit-draft` returns a validation error, do not invoke `turn` to add a
+`session import --file transcript.json` is the explicit recovery path for a
+user-supplied transcript whose original host capture was missed. The JSON
+object must contain a non-empty `turns` list of `{role, content}` objects and
+may include `started_at`, `workflow`, `modes`, `domains`, and `source`. The
+application validates the entire input before creating a closed imported
+session. It preserves the supplied turn text exactly, marks the capture as
+`imported`, and never merges it into an existing session or entry. Missing
+per-turn timestamps are recorded at import time rather than fabricated as
+historical event times.
+
+If `commit-draft` returns a validation error, do not append a turn to add a
 summary. Correct the draft's exact `source_turns` for the selected session, or
 leave that session recoverable for a later workflow boundary. A same-session
 follow-up may create a revision; evidence from a different session creates a

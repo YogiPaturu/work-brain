@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 
 from work_brain import (
+    CommitResolver,
     CommitDraftValidator,
     RuntimeState,
     ScriptedModel,
@@ -142,6 +143,34 @@ class RuntimeTests(unittest.TestCase):
         value["sections"]["context"][0]["source_turns"] = []
         with self.assertRaises(ValidationError):
             CommitDraftValidator().validate(value, turn_count=1, workflow="think")
+
+    def test_commit_rejects_assistant_only_source_turns(self) -> None:
+        session = self.vault.create_session(modes=["think"])
+        self.vault.append_turn(session["session_id"], "assistant", "Synthetic summary")
+        with self.assertRaisesRegex(ValidationError, "user-authored source turn"):
+            CommitResolver(self.vault).publish(session["session_id"], draft(), workflow="think")
+        self.assertEqual([], self.vault.all_current_entries())
+
+    def test_transcript_import_preserves_supplied_raw_turns(self) -> None:
+        result = HarnessCaptureService(self.vault).import_transcript({
+            "source": "manual smoke transcript",
+            "started_at": "2026-10-01T13:30:00+01:00",
+            "workflow": "think",
+            "modes": ["think"],
+            "domains": ["product"],
+            "turns": [
+                {"role": "user", "content": "I changed the design after testing the first approach."},
+                {"role": "assistant", "content": "What evidence changed your mind?"},
+            ],
+        })
+        self.assertEqual("imported", result["status"])
+        self.assertTrue(result["raw_turns_preserved"])
+        session = self.vault.read_session(result["session_id"])
+        self.assertEqual("imported", session["runtime"]["capture_fidelity"])
+        self.assertEqual(
+            ["I changed the design after testing the first approach.", "What evidence changed your mind?"],
+            [turn["content"] for turn in self.vault.list_turns(result["session_id"])],
+        )
 
     def test_commit_repair_is_bounded_and_raw_session_remains_recoverable(self) -> None:
         model = ScriptedModel(drafts=[draft(bad_runtime_field=True)], repairs=[])

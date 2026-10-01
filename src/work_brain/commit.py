@@ -192,6 +192,7 @@ class CommitResolver:
         session = self.vault.read_session(session_id)
         turns = self.vault.list_turns(session_id)
         draft = self.validator.validate(raw_draft, turn_count=len(turns), workflow=workflow)
+        self._require_user_authored_sources(draft, turns)
         state = self._state_items()
         mutations = []
         for change in draft.state_changes:
@@ -232,6 +233,21 @@ class CommitResolver:
             "artifact_refs": artifact_refs, "source_refs": source_refs,
         }
         return self.vault.commit_entry(session_id, payload)
+
+    @staticmethod
+    def _require_user_authored_sources(draft: ValidatedDraft, turns: list[dict[str, Any]]) -> None:
+        roles = {turn["sequence"]: turn["role"] for turn in turns}
+        for section, statements in draft.sections.items():
+            for statement in statements:
+                if not any(roles[sequence] == "user" for sequence in statement["source_turns"]):
+                    raise ValidationError(
+                        f"sections.{section} statements must reference at least one user-authored source turn"
+                    )
+        for change in draft.state_changes:
+            if not any(roles[sequence] == "user" for sequence in change["source_turns"]):
+                raise ValidationError(
+                    "state_changes.source_turns must reference at least one user-authored source turn"
+                )
 
     def _state_items(self) -> dict[str, bool]:
         path = self.vault.root / "state/current.json"

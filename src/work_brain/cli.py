@@ -66,11 +66,11 @@ def _parser() -> argparse.ArgumentParser:
     close = session_sub.add_parser("close", help="close a session without publishing a structured entry")
     close.add_argument("--session-id", required=True)
     close.add_argument("--reason", choices=["no_new_evidence", "abandoned"], default="no_new_evidence")
-    turn = sub.add_parser("turn", help="append one durable user or assistant turn")
-    turn.add_argument("--session-id", required=True)
-    turn.add_argument("--role", required=True, choices=["user", "assistant"])
-    turn.add_argument("--content")
-    turn.add_argument("--recorded-at")
+    quarantine = session_sub.add_parser("quarantine", help="hide one bad structured entry while preserving raw turns")
+    quarantine.add_argument("--session-id", required=True)
+    quarantine.add_argument("--reason", required=True)
+    import_transcript = session_sub.add_parser("import", help="import an explicitly supplied transcript as raw turns")
+    import_transcript.add_argument("--file", required=True, help="JSON transcript object containing a turns list")
     commit = sub.add_parser("commit", help="publish a resolved SessionEntry JSON payload")
     commit.add_argument("--session-id", required=True)
     commit.add_argument("--file", required=True, help="JSON file containing the resolved SessionEntry payload")
@@ -175,6 +175,13 @@ def _read_payload(path: str | None) -> dict[str, Any]:
     return value
 
 
+def _read_transcript(path: str) -> dict[str, Any]:
+    value = read_json(Path(path))
+    if not isinstance(value, dict):
+        raise ValidationError("transcript input must be a JSON object")
+    return value
+
+
 def _vault(args: argparse.Namespace) -> Vault:
     return Vault(resolve_vault_path(args.vault, config_path=args.config))
 
@@ -239,6 +246,20 @@ def _session_status(vault: Vault, session_id: str) -> dict[str, Any]:
     else:
         lifecycle = "closed_uncommitted"
     last = turns[-1] if turns else None
+    if lifecycle == "active_capture":
+        message = "Capture is active; raw turns are being saved."
+    elif lifecycle == "recoverable_raw":
+        message = "Capture is inactive; raw turns are preserved and the structured commit is pending."
+    elif runtime.get("capture_status") == "imported":
+        lifecycle = "imported"
+        message = "Imported raw transcript is preserved; no structured entry has been committed."
+    elif lifecycle == "closed_no_new_evidence":
+        message = "Capture is closed; no new structured evidence was committed."
+    elif lifecycle == "committed":
+        message = "Structured entry is committed; raw turns remain preserved."
+    else:
+        message = "Capture is closed; raw turns are preserved but no structured entry is committed."
+    active_mapping = host_mappings[0] if host_mappings else None
     return {
         "session_id": session["session_id"],
         "entry_id": session["entry_id"],
@@ -246,12 +267,16 @@ def _session_status(vault: Vault, session_id: str) -> dict[str, Any]:
         "started_at": session["started_at"],
         "ended_at": session.get("ended_at"),
         "lifecycle": lifecycle,
+        "message": message,
         "capture_status": runtime.get("capture_status", "not_captured"),
         "commit_status": runtime.get("commit_status"),
+        "capture_active": bool(host_mappings),
         "turn_count": len(turns),
         "last_captured_turn": None if last is None else {
             "sequence": last["sequence"], "role": last["role"], "recorded_at": last["recorded_at"],
         },
+        "last_captured_at": last["recorded_at"] if last else None,
+        "host_session_id": active_mapping["host_session_id"] if active_mapping else runtime.get("host_session_id"),
         "host_mappings": host_mappings,
         "has_committed_entry": bool(entries),
         "current_revision": max((entry.revision for entry in entries), default=None),
@@ -318,7 +343,7 @@ def _question_ref(value: str | None) -> QuestionRef | None:
 
 def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     command = args.command
-    machine = bool(args.json or command in {"state", "work", "evidence", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "turn", "commit", "commit-draft", "setup", "reindex", "session"})
+    machine = bool(args.json or command in {"state", "work", "evidence", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session"})
     if command == "config":
         if args.config_command == "set-vault":
             path = set_vault_path(args.path, args.config)
@@ -389,9 +414,11 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     if command == "session" and args.session_command == "close":
         HarnessCaptureService(vault).stop_session(args.session_id)
         return vault.close_session(args.session_id, commit_status=args.reason), True
-    if command == "turn":
-        content = args.content if args.content is not None else sys.stdin.read()
-        return vault.append_turn(args.session_id, args.role, content, recorded_at=args.recorded_at), True
+    if command == "session" and args.session_command == "quarantine":
+        vault.quarantine_entry(args.session_id, reason=args.reason)
+        return {"session_id": args.session_id, "status": "structured_entry_quarantined", "raw_turns_preserved": True}, True
+    if command == "session" and args.session_command == "import":
+        return HarnessCaptureService(vault).import_transcript(_read_transcript(args.file)), True
     if command == "commit":
         entry = vault.commit_entry(args.session_id, _read_payload(args.file))
         continuation = _finish_capture_after_commit(vault, args.session_id)
