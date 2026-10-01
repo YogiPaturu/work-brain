@@ -417,8 +417,8 @@ class HarnessV3Tests(unittest.TestCase):
         self.assertEqual("UserPromptSubmit", outputs[1]["hookSpecificOutput"]["hookEventName"])
         self.assertIn("Capture     ACTIVE", outputs[1]["hookSpecificOutput"]["additionalContext"])
         self.assertIn("Work Brain: ACTIVE", outputs[1]["systemMessage"])
-        self.assertEqual("Stop", outputs[2]["hookSpecificOutput"]["hookEventName"])
-        self.assertIn("Turns       2", outputs[2]["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("2 turns", outputs[2]["systemMessage"])
+        self.assertNotIn("hookSpecificOutput", outputs[2])
         self.assertEqual({}, outputs[3])
         self.assertEqual({}, outputs[4])
 

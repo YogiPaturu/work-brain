@@ -424,6 +424,12 @@ def _codex_hook_output(vault: Vault, event: Any, result: dict[str, Any]) -> dict
         return {}
     banner = _status_text(snapshot, quiet=True)
     details = _status_text(snapshot)
+    if hook_event_name == "Stop":
+        # Codex Stop accepts the common systemMessage field, but unlike
+        # SessionStart/UserPromptSubmit it does not accept hookSpecificOutput
+        # additionalContext. Keeping this response minimal avoids the
+        # "invalid stop hook JSON output" failure while retaining visibility.
+        return {"systemMessage": banner}
     return {
         "systemMessage": banner,
         "hookSpecificOutput": {
