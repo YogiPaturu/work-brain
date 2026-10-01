@@ -125,14 +125,13 @@ There is no second Work Brain LLM call and no MCP server in v1.
 
 - **Think:** challenge assumptions, explore alternatives, and preserve why a
   decision was made.
-- **Operate:** recover tasks, blockers, open loops, commitments, and next
-  actions from current work state.
+- **Operate:** orient around current work state, recover tasks, blockers, open
+  loops, commitments, and next actions, and manage the start/close-day
+  lifecycle including clean capture deactivation.
 - **Communicate:** turn private context into a concise audience-appropriate
   draft without exposing unrelated private evidence.
 - **Career:** retrieve multiple plausible experiences for interview practice and
   let the human choose the story or angle.
-- **Open/close day:** orient around current state and close a bounded day with
-  durable reflection.
 - **Backfill:** reconstruct an older experience while marking it as
   `reconstructed`, not contemporaneous capture.
 
