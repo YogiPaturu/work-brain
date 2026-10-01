@@ -292,7 +292,12 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         return EvidenceRetriever(vault).reindex(), True
     if command == "doctor":
         diagnostics = vault.doctor()
-        return {"ok": not diagnostics, "diagnostics": diagnostics}, machine
+        retriever = EvidenceRetriever(vault)
+        return {
+            "ok": not diagnostics,
+            "diagnostics": diagnostics,
+            "embedding": retriever.embedding_status(retriever.health()),
+        }, machine
     if command == "session-start":
         return vault.create_session(started_at=args.started_at, modes=args.mode, domains=args.domain), True
     if command == "turn":
@@ -371,7 +376,13 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "rebuild":
             print("rebuilt projections and SQLite")
         elif args.command == "doctor":
-            print("vault is healthy")
+            print("vault is healthy" if value["ok"] else "vault diagnostics failed")
+            embedding = value["embedding"]
+            print(f"semantic retrieval: {embedding['provider']} ({embedding['status']})")
+            if embedding.get("warning"):
+                print(f"warning: {embedding['warning']}")
+            for diagnostic in value["diagnostics"]:
+                print(f"diagnostic: {diagnostic}")
         return code
     except SystemExit:
         raise

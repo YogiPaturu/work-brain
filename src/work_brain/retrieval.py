@@ -69,6 +69,9 @@ class LocalHashEmbeddingProvider:
     adapter_recipe = "WORK-BRAIN-HASH-EMBEDDING@1"
     dimensions = 384
 
+    def __init__(self, *, selection_reason: str = "explicit") -> None:
+        self.selection_reason = selection_reason
+
     def _vector(self, text: str) -> list[float]:
         values = [0.0] * self.dimensions
         normalized = _normalize_text(text).casefold()
@@ -107,8 +110,9 @@ class FastEmbedEmbeddingProvider:
     adapter_recipe = "WORK-BRAIN-FASTEMBED-BGE@1"
     dimensions = 384
 
-    def __init__(self, *, cache_dir: str | None = None) -> None:
+    def __init__(self, *, cache_dir: str | None = None, selection_reason: str = "explicit") -> None:
         self.cache_dir = cache_dir
+        self.selection_reason = selection_reason
         self._model: Any | None = None
 
     def _load(self) -> Any:
@@ -158,10 +162,10 @@ def default_embedding_provider() -> EmbeddingProvider:
     """
 
     if os.environ.get("WORK_BRAIN_EMBEDDING", "").casefold() == "hash":
-        return LocalHashEmbeddingProvider()
+        return LocalHashEmbeddingProvider(selection_reason="explicit-hash")
     if importlib.util.find_spec("fastembed") is not None:
-        return FastEmbedEmbeddingProvider()
-    return LocalHashEmbeddingProvider()
+        return FastEmbedEmbeddingProvider(selection_reason="default-fastembed")
+    return LocalHashEmbeddingProvider(selection_reason="fastembed-unavailable")
 
 
 @dataclass(frozen=True)
@@ -180,6 +184,37 @@ class RetrievalHealth:
     lexical_available: bool
     semantic_available: bool
     generation: str
+
+
+def embedding_profile(provider: EmbeddingProvider) -> dict[str, Any]:
+    """Return a safe, user-facing description of the selected vector provider."""
+
+    if isinstance(provider, FastEmbedEmbeddingProvider):
+        return {
+            "provider": "fastembed",
+            "model": provider.model_id,
+            "semantic_quality": "bge",
+            "fallback": False,
+            "selection_reason": getattr(provider, "selection_reason", "explicit"),
+            "dimensions": provider.dimensions,
+        }
+    if isinstance(provider, LocalHashEmbeddingProvider):
+        return {
+            "provider": "hash",
+            "model": provider.model_id,
+            "semantic_quality": "hash-fallback",
+            "fallback": True,
+            "selection_reason": getattr(provider, "selection_reason", "explicit"),
+            "dimensions": provider.dimensions,
+        }
+    return {
+        "provider": "custom",
+        "model": provider.model_id,
+        "semantic_quality": "custom",
+        "fallback": False,
+        "selection_reason": "injected",
+        "dimensions": provider.dimensions,
+    }
 
 
 def _normalize_text(value: str) -> str:
@@ -302,6 +337,38 @@ class EvidenceRetriever:
         self.vault = vault
         self.embedding_provider = embedding_provider or default_embedding_provider()
 
+    def embedding_status(
+        self,
+        health: RetrievalHealth | None = None,
+        *,
+        runtime_failure: bool = False,
+    ) -> dict[str, Any]:
+        """Describe the selected provider and whether its index is usable."""
+
+        status = embedding_profile(self.embedding_provider)
+        if health is None:
+            status["status"] = "fallback" if status["fallback"] else "selected"
+            return status
+        status.update({
+            "index_available": health.semantic_available,
+            "index_state": health.index_state,
+            "stale_entries": health.stale_entries,
+        })
+        if runtime_failure:
+            status["status"] = "degraded"
+            status["reason"] = "provider-error"
+        elif not health.semantic_available:
+            status["status"] = "degraded"
+            status["reason"] = "reindex-required"
+            status["warning"] = "The selected embedding provider does not match the indexed vectors; run work-brain reindex."
+        elif status["fallback"]:
+            status["status"] = "fallback"
+            if status["selection_reason"] == "fastembed-unavailable":
+                status["warning"] = "FastEmbed is unavailable; deterministic hash embeddings are active."
+        else:
+            status["status"] = "available"
+        return status
+
     def _db(self):
         return self.vault._database()
 
@@ -401,6 +468,7 @@ class EvidenceRetriever:
         return {"entry_id": entry.entry_id, "source_revision": entry.revision, "source_hash": source_hash,
                 "dependency_hash": dependency_hash, "status": "indexed", "chunk_count": len(chunks),
                 "recipe_id": RECIPE_ID, "embedding_model_id": self.embedding_provider.model_id,
+                "embedding": embedding_profile(self.embedding_provider),
                 "indexed_at": timestamp_now()}
 
     def index_entry(self, entry_id: str) -> dict[str, Any]:
@@ -445,7 +513,13 @@ class EvidenceRetriever:
                     self._set_meta(conn, "index_state", "current")
                     self._set_meta(conn, "full_reindex_completed_at", timestamp_now())
                     self._set_meta(conn, "generation", hashlib.sha256(f"{timestamp_now()}:full".encode()).hexdigest())
-                return {"status": "current", "indexed_entries": len(indexed), "indexed_chunks": sum(item["chunk_count"] for item in indexed)}
+                result = {
+                    "status": "current",
+                    "indexed_entries": len(indexed),
+                    "indexed_chunks": sum(item["chunk_count"] for item in indexed),
+                    "embedding": self.embedding_status(),
+                }
+                return result
             except Exception:
                 with conn:
                     self._set_meta(conn, "index_state", "stale")
@@ -625,21 +699,22 @@ class EvidenceRetriever:
             raise ValidationError(f"page_size must be between 1 and {MAX_PAGE_SIZE}")
         normalized_filters = dict(filters or {})
         health = self._ensure_current()
+        embedding = self.embedding_status(health)
         if health.index_state != "current":
-            return {"status": "retrieval_unavailable", "degraded_components": ["index"], "incomplete": True, "omitted_stale_entries": health.stale_entries, "cards": [], "next_cursor": None}
+            return {"status": "retrieval_unavailable", "degraded_components": ["index"], "incomplete": True, "omitted_stale_entries": health.stale_entries, "cards": [], "next_cursor": None, "embedding": embedding}
         conn = self._db().connect()
         try:
             try:
                 eligible = self._eligible(conn, normalized_filters)
             except AmbiguousFilter as exc:
-                return {"status": "ambiguous_filter", "degraded_components": [], "incomplete": health.stale_entries > 0, "omitted_stale_entries": health.stale_entries, "cards": [], "next_cursor": None, "error": {"value": exc.value, "candidates": exc.candidates}}
+                return {"status": "ambiguous_filter", "degraded_components": [], "incomplete": health.stale_entries > 0, "omitted_stale_entries": health.stale_entries, "cards": [], "next_cursor": None, "error": {"value": exc.value, "candidates": exc.candidates}, "embedding": embedding}
             generation = health.generation
             fingerprint = hashlib.sha256(canonical_json_bytes({"query": _normalize_text(query).strip(), "filters": normalized_filters, "page_size": page_size})).hexdigest()
             offset = 0
             if cursor:
                 decoded = _cursor_decode(cursor)
                 if decoded.get("fingerprint") != fingerprint or decoded.get("generation") != generation:
-                    return {"status": "cursor_expired", "degraded_components": [], "incomplete": health.stale_entries > 0, "omitted_stale_entries": health.stale_entries, "cards": [], "next_cursor": None}
+                    return {"status": "cursor_expired", "degraded_components": [], "incomplete": health.stale_entries > 0, "omitted_stale_entries": health.stale_entries, "cards": [], "next_cursor": None, "embedding": embedding}
                 offset = int(decoded.get("offset", 0))
             lexical: dict[str, dict[str, Any]] = {}
             semantic: dict[str, dict[str, Any]] = {}
@@ -656,10 +731,11 @@ class EvidenceRetriever:
                     semantic = self._branch_semantic(conn, query, eligible)
                 except Exception:
                     degraded.append("semantic")
+                    embedding = self.embedding_status(health, runtime_failure=True)
             else:
                 degraded.append("semantic")
             if not lexical and not semantic and len(degraded) == 2:
-                return {"status": "retrieval_unavailable", "degraded_components": degraded, "incomplete": True, "omitted_stale_entries": health.stale_entries, "cards": [], "next_cursor": None}
+                return {"status": "retrieval_unavailable", "degraded_components": degraded, "incomplete": True, "omitted_stale_entries": health.stale_entries, "cards": [], "next_cursor": None, "embedding": embedding}
             lexical_rank = {entry_id: rank for rank, entry_id in enumerate(lexical, 1)}
             semantic_rank = {entry_id: rank for rank, entry_id in enumerate(semantic, 1)}
             candidates = set(lexical) | set(semantic)
@@ -691,7 +767,7 @@ class EvidenceRetriever:
             if offset + page_size < len(ordered):
                 next_cursor = _cursor_encode({"fingerprint": fingerprint, "generation": generation, "offset": offset + page_size})
             status = "degraded" if degraded else "ok"
-            return {"status": status, "degraded_components": sorted(set(degraded)), "incomplete": health.stale_entries > 0, "omitted_stale_entries": health.stale_entries, "cards": cards, "next_cursor": next_cursor}
+            return {"status": status, "degraded_components": sorted(set(degraded)), "incomplete": health.stale_entries > 0, "omitted_stale_entries": health.stale_entries, "cards": cards, "next_cursor": next_cursor, "embedding": embedding}
         finally:
             conn.close()
 

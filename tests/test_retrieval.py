@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from work_brain import EvidenceRetriever, Vault, new_uuid7
+from work_brain import EvidenceRetriever, LocalHashEmbeddingProvider, Vault, new_uuid7
 
 
 SECTIONS = (
@@ -96,6 +96,14 @@ class RetrievalTests(unittest.TestCase):
         self.assertEqual(before["indexed_entries"], after["indexed_entries"])
         self.assertEqual(before["indexed_chunks"], after["indexed_chunks"])
         self.assertEqual([], retriever.doctor())
+
+    def test_search_and_reindex_report_embedding_provider(self) -> None:
+        self._commit("Provider diagnostics", "The retrieval provider should be visible to users.")
+        retriever = EvidenceRetriever(self.vault, LocalHashEmbeddingProvider())
+        reindexed = retriever.reindex()
+        self.assertEqual("hash", reindexed["embedding"]["provider"])
+        self.assertEqual("hash-fallback", reindexed["embedding"]["semantic_quality"])
+        self.assertEqual("fallback", retriever.search("provider diagnostics")["embedding"]["status"])
 
 
 if __name__ == "__main__":

@@ -287,6 +287,13 @@ Set `WORK_BRAIN_EMBEDDING=hash` to force the deterministic fallback. The
 retrieval schema and `evidence search` CLI contract are the same for both
 providers.
 
+Provider diagnostics are included in `work-brain --json doctor`, `reindex`,
+and `evidence search` results under `embedding`. A normal installation reports
+`provider: "fastembed"` and `status: "available"`. If FastEmbed is missing,
+the result reports `provider: "hash"`, `status: "fallback"`, and a warning.
+If the selected provider does not match the stored vectors, the result reports
+`status: "degraded"` and `reason: "reindex-required"`.
+
 The semantic smoke cases use natural paraphrases and check only whether the
 expected experience appears in the first three cards. FastEmbed is expected to
 reach at least 5/6; that is a cheap regression signal, not evidence that
