@@ -26,6 +26,7 @@ work-brain config set-vault "$HOME/work-brain-vault"
 work-brain init
 work-brain doctor
 work-brain setup codex
+work-brain setup codex --check
 ```
 
 Start a fresh Codex session, then try:
@@ -39,6 +40,19 @@ prefix. You can also begin a day with `start my day` and finish with
 `close my day`. See [Using Work Brain with Codex](#using-work-brain-with-codex)
 for the exact capture and lifecycle behavior, or [Install the one canonical
 Skill](#install-the-one-canonical-skill) for Claude Code and Cursor.
+
+If you use another supported host, run the matching setup and verification
+commands instead:
+
+```bash
+# Claude Code
+work-brain setup claude
+work-brain setup claude --check
+
+# Cursor Agent
+work-brain setup cursor
+work-brain setup cursor --check
+```
 
 Work Brain v1 is hosted by an existing local coding-agent harness—Codex,
 Claude Code, or the local Cursor Agent. The harness owns the model,
