@@ -8,6 +8,7 @@ from typing import Any, Callable, Mapping
 from .domain import SessionEntry
 from .errors import ValidationError
 from .profiles import CommunicationProfileStore
+from .timeutil import date_for_timestamp, timestamp_now, validate_calendar_date
 
 
 @dataclass(frozen=True)
@@ -37,7 +38,7 @@ PROFILES: dict[str, tuple[str, ...]] = {
         "mark_interview_candidate", "unmark_interview_candidate", "list_interview_candidates",
     ),
     "open-day": ("get_current_state", "get_recent_work"),
-    "close-day": ("get_current_state", "get_recent_work", "list_post_close_communication_profiles"),
+    "close-day": ("get_current_state", "get_close_day_record", "list_post_close_communication_profiles"),
     "backfill": ("search_evidence", "hydrate_evidence"),
 }
 
@@ -48,6 +49,10 @@ class ToolRegistry:
     DEFINITIONS = {
         "get_current_state": ToolDefinition("get_current_state", "Read compact active work state."),
         "get_recent_work": ToolDefinition("get_recent_work", "Read compact recent committed work."),
+        "get_close_day_record": ToolDefinition(
+            "get_close_day_record",
+            "Read target-day committed entries, committed entries missing from their journal projection, and all uncommitted raw sessions.",
+        ),
         "search_evidence": ToolDefinition("search_evidence", "Search evidence through the configured retrieval adapter."),
         "search_profile_evidence": ToolDefinition("search_profile_evidence", "Search evidence using a validated communication profile's exact scope."),
         "hydrate_evidence": ToolDefinition("hydrate_evidence", "Hydrate selected stable evidence references."),
@@ -110,6 +115,79 @@ class ToolRegistry:
                 {"entry_id": entry.entry_id, "revision": entry.revision, "title": entry.title, "summary": entry.summary}
                 for entry in entries[:limit]
             ])
+        if name == "get_close_day_record":
+            local_date = arguments.get("local_date") or date_for_timestamp(timestamp_now())
+            try:
+                validate_calendar_date(local_date, "local_date")
+            except ValidationError as exc:
+                return ToolResult(False, error=str(exc))
+            sessions = {session["session_id"]: session for session in self.vault.all_sessions()}
+            journal_cache: dict[str, str] = {}
+
+            def journal_contains(entry: SessionEntry, session: Mapping[str, Any]) -> bool:
+                entry_date = session["local_date"]
+                if entry_date not in journal_cache:
+                    year, month, _ = entry_date.split("-")
+                    path = self.vault.root / "journal" / year / month / f"{entry_date}.md"
+                    journal_cache[entry_date] = path.read_text(encoding="utf-8") if path.exists() else ""
+                marker = f"<!-- entry_id: {entry.entry_id}; revision: {entry.revision} -->"
+                return marker in journal_cache[entry_date]
+
+            entries = []
+            unjournaled_entries = []
+            all_entry_session_ids: set[str] = set()
+            for entry in sorted(self.vault.all_current_entries(), key=lambda item: (item.created_at, item.entry_id)):
+                session = sessions.get(entry.session_id)
+                if session is None:
+                    continue
+                all_entry_session_ids.add(entry.session_id)
+                card = {
+                    "entry_id": entry.entry_id,
+                    "revision": entry.revision,
+                    "session_id": entry.session_id,
+                    "local_date": session["local_date"],
+                    "journal_associated": journal_contains(entry, session),
+                    "started_at": session["started_at"],
+                    "created_at": entry.created_at,
+                    "title": entry.title,
+                    "summary": entry.summary,
+                    "sections": entry.sections,
+                    "state_mutations": [mutation.to_dict() for mutation in entry.state_mutations],
+                }
+                if session["local_date"] == local_date:
+                    entries.append(card)
+                elif not card["journal_associated"]:
+                    unjournaled_entries.append(card)
+
+            uncommitted_raw = []
+            for session in sorted(sessions.values(), key=lambda item: (item["started_at"], item["session_id"])):
+                if session["session_id"] in all_entry_session_ids:
+                    continue
+                turns = self.vault.list_turns(session["session_id"])
+                runtime = dict(session.get("runtime") or {})
+                pending = runtime.get("commit_status") in {"pending_auto_commit", "auto_commit_failed"}
+                recoverable = runtime.get("capture_status") in {"active", "recoverable", "rolled_over"}
+                if not turns or not (session.get("ended_at") is None or pending or recoverable):
+                    continue
+                uncommitted_raw.append({
+                    "session_id": session["session_id"],
+                    "entry_id": session["entry_id"],
+                    "local_date": session["local_date"],
+                    "started_at": session["started_at"],
+                    "ended_at": session.get("ended_at"),
+                    "workflow": runtime.get("workflow"),
+                    "capture_status": runtime.get("capture_status"),
+                    "commit_status": runtime.get("commit_status"),
+                    "turn_count": len(turns),
+                    "turns": turns,
+                })
+
+            return ToolResult(True, {
+                "local_date": local_date,
+                "committed_entries": entries,
+                "unjournaled_entries": unjournaled_entries,
+                "uncommitted_raw_sessions": uncommitted_raw,
+            })
         if name in {"search_evidence", "hydrate_evidence"}:
             handler = self.retrieval.get(name)
             if handler is None:

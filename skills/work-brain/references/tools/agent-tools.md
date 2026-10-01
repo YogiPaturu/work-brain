@@ -6,6 +6,8 @@ commands through the harness's existing shell capability:
 
 - `get_current_state`
 - `get_recent_work`
+- `get_close_day_record` for target-day committed entries, committed entries
+  missing from their journal projection, and every uncommitted raw session
 - `search_evidence`
 - `hydrate_evidence`
 - `search_questions`

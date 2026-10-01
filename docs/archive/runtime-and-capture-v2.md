@@ -985,7 +985,12 @@ If the transcript is too large for current context policy, the runtime SHOULD co
 
 `close-day.sop.md` MUST:
 
-- read today's committed entry cards plus current WorkState;
+- read every committed entry for the target local day, committed entries
+  missing from their journal projection, and every uncommitted raw session
+  regardless of date;
+- label each item with its own local date and journal-association status so
+  older carryovers and midnight-boundary sessions remain distinguishable from
+  the target day;
 - act as a gap-detection safety net, not as the creator of the day's journal;
 - ask whether anything important happened that the system did not discuss;
 - capture unresolved outcomes, new blockers, changed beliefs, commitments, or missing events;

@@ -17,6 +17,7 @@ from .instructions import SkillLoader
 from .setup import HarnessSetup
 from .retrieval import EvidenceRetriever
 from .profiles import CommunicationProfileStore, resolve_profiles_path, set_profiles_path
+from .timeutil import timestamp_now
 from .vault import Vault
 
 
@@ -318,14 +319,14 @@ def _session_status(vault: Vault, session_id: str) -> dict[str, Any]:
         lifecycle = "archived"
     elif host_mappings:
         lifecycle = "active_capture"
+    elif entries:
+        lifecycle = "committed"
     elif runtime.get("commit_status") == "pending_auto_commit" or (
         session.get("ended_at") is None and runtime.get("capture_status") in {"recoverable", "rolled_over"}
     ):
         lifecycle = "recoverable_raw"
     elif runtime.get("commit_status") == "no_new_evidence":
         lifecycle = "closed_no_new_evidence"
-    elif entries:
-        lifecycle = "committed"
     else:
         lifecycle = "closed_uncommitted"
     last = turns[-1] if turns else None
@@ -354,7 +355,7 @@ def _session_status(vault: Vault, session_id: str) -> dict[str, Any]:
         "lifecycle": lifecycle,
         "message": message,
         "capture_status": runtime.get("capture_status", "not_captured"),
-        "commit_status": runtime.get("commit_status"),
+        "commit_status": "committed" if entries else runtime.get("commit_status"),
         "capture_active": bool(host_mappings),
         "turn_count": len(turns),
         "last_captured_turn": None if last is None else {
@@ -384,10 +385,13 @@ def _live_status(vault: Vault) -> dict[str, Any]:
             active_ids.append(session_id)
     active_sessions = [_session_status(vault, session_id) for session_id in active_ids]
 
+    entry_session_ids = {entry.session_id for entry in vault.all_current_entries()}
     recoverable_sessions = []
     for session in vault.all_sessions():
         runtime = session.get("runtime") or {}
-        if session.get("ended_at") is None or runtime.get("commit_status") in {"pending_auto_commit", "auto_commit_failed"}:
+        if session["session_id"] not in entry_session_ids and (
+            session.get("ended_at") is None or runtime.get("commit_status") in {"pending_auto_commit", "auto_commit_failed"}
+        ):
             if session["session_id"] not in active_ids:
                 recoverable_sessions.append(_session_status(vault, session["session_id"]))
 
@@ -547,8 +551,26 @@ def _finish_capture_after_commit(vault: Vault, session_id: str, workflow: str | 
     chosen = workflow or (session.get("runtime") or {}).get("workflow") or "think"
     capture = HarnessCaptureService(vault)
     if chosen == "close-day":
-        return capture.stop_session(session_id)
-    return capture.rotate_session(session_id)
+        continuation = capture.stop_session(session_id)
+    else:
+        continuation = capture.rotate_session(session_id)
+
+    # The capture service owns rotation/deactivation, while this CLI path owns
+    # publication. Reconcile both pieces so a successful commit cannot remain
+    # marked as a recoverable raw session, including sessions with no active
+    # host mapping.
+    session = vault.read_session(session_id)
+    runtime = dict(session.get("runtime") or {})
+    runtime.update({
+        "workflow": chosen,
+        "commit_status": "committed",
+        "capture_status": "committed",
+        "capture_boundary": "closed",
+    })
+    session["runtime"] = runtime
+    session["ended_at"] = session.get("ended_at") or timestamp_now()
+    vault.update_session_metadata(session_id, session)
+    return continuation
 
 
 def _question_filters(args: argparse.Namespace) -> QuestionFilters:
@@ -681,10 +703,13 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         loaded = SkillLoader().load(args.workflow, args.domain)
         return {"resources": loaded.identities, "missing": list(loaded.missing)}, True
     if command == "recoverable":
+        entry_session_ids = {entry.session_id for entry in vault.all_current_entries()}
         return [
             session for session in vault.all_sessions()
-            if session.get("ended_at") is None
-            or (session.get("runtime") or {}).get("commit_status") in {"pending_auto_commit", "auto_commit_failed"}
+            if session["session_id"] not in entry_session_ids and (
+                session.get("ended_at") is None
+                or (session.get("runtime") or {}).get("commit_status") in {"pending_auto_commit", "auto_commit_failed"}
+            )
         ], True
     if command == "state" and args.state_command == "current":
         return _current_state(vault), True

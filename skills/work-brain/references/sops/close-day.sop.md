@@ -12,7 +12,9 @@ already have preserved their raw turns and committed evidence.
 
 - **user_message** (required): The end-of-day request or reflection.
 - **current_state** (required): Compact active state from the application.
-- **recent_work** (required): Bounded work committed for the current local day.
+- **recent_work** (required): All work committed for the current local day,
+  committed entries missing from their journal projection, and all uncommitted
+  raw sessions regardless of date.
 - **local_date** (optional): The application’s local date.
 - **tomorrow_constraints** (optional): Known commitments or limits for the next day.
 - **post_close_profiles** (optional): User-owned communication profiles configured
@@ -28,12 +30,19 @@ already have preserved their raw turns and committed evidence.
 
 ### 1. Review Today’s Compact Record
 
-Read current state and today’s recent work. Identify outcomes, unfinished loops,
-commitments, decisions, and items that may need a next action.
+Read current state and the close-day record. The record must include every
+committed entry for the target local day, committed entries missing from their
+journal projection, and all uncommitted raw sessions, including older sessions
+that may have crossed a day boundary. Use each item's own local date and
+journal-association status to distinguish primary-day work, unjournaled work,
+and raw carryovers. Identify outcomes, unfinished loops, commitments,
+decisions, and items that may need a next action.
 
 **Constraints:**
 
 - You MUST distinguish recorded work from the user’s new reflection.
+- You MUST distinguish primary-day items, unjournaled committed entries, and
+  older uncommitted carryovers; do not silently fold them into the target day.
 - You SHOULD say when the supplied record is incomplete or unavailable.
 - You MUST NOT infer work that is not supported by the record or the user’s words.
 

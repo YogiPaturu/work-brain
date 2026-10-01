@@ -3,6 +3,8 @@ from __future__ import annotations
 import tempfile
 import unittest
 import json
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 import re
 
@@ -21,6 +23,7 @@ from work_brain import (
 )
 from work_brain.model import ModelResponse
 from work_brain.capture import HarnessCaptureService, normalize_capture_event
+from work_brain.cli import main
 
 
 def draft(*, workflow: str = "think", bad_runtime_field: bool = False) -> dict:
@@ -111,6 +114,54 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(["respond", "commit_draft"], [call["kind"] for call in model.calls])
         self.assertEqual(["WORK-BRAIN-SKILL@2", "WORK-BRAIN-SOP-CORE@2", "WORK-BRAIN-SOP-THINK@2", "WORK-BRAIN-PROBE-ENGINEERING@2"], self.vault.read_session(session["session_id"])["runtime"]["sops"])
 
+    def test_cli_commit_draft_finalizes_lifecycle_and_status_ignores_stale_pending_flag(self) -> None:
+        session = self.vault.create_session(
+            started_at="2026-10-01T16:40:00+01:00",
+            modes=["think"],
+            runtime={"workflow": "think", "capture_status": "recoverable", "commit_status": "pending_auto_commit"},
+        )
+        self.vault.append_turn(session["session_id"], "user", "Preserve the bounded decision.")
+        draft_path = Path(self.tempdir.name) / "commit-draft.json"
+        draft_path.write_text(json.dumps(draft()), encoding="utf-8")
+
+        with redirect_stdout(StringIO()):
+            self.assertEqual(0, main([
+                "--vault", str(self.vault.root), "commit-draft",
+                "--session-id", session["session_id"], "--file", str(draft_path),
+            ]))
+
+        finalized = self.vault.read_session(session["session_id"])
+        self.assertEqual("committed", finalized["runtime"]["commit_status"])
+        self.assertEqual("committed", finalized["runtime"]["capture_status"])
+        self.assertEqual("closed", finalized["runtime"]["capture_boundary"])
+        self.assertIsNotNone(finalized["ended_at"])
+
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(0, main([
+                "--vault", str(self.vault.root), "session", "status",
+                "--session-id", session["session_id"], "--json",
+            ]))
+        status = json.loads(output.getvalue())
+        self.assertEqual("committed", status["lifecycle"])
+        self.assertEqual("committed", status["commit_status"])
+        self.assertTrue(status["has_committed_entry"])
+
+        # Protect against the exact legacy shape that caused the dashboard bug.
+        stale = self.vault.read_session(session["session_id"])
+        stale["ended_at"] = None
+        stale["runtime"]["commit_status"] = "pending_auto_commit"
+        self.vault.update_session_metadata(session["session_id"], stale)
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(0, main([
+                "--vault", str(self.vault.root), "session", "status",
+                "--session-id", session["session_id"], "--json",
+            ]))
+        legacy_status = json.loads(output.getvalue())
+        self.assertEqual("committed", legacy_status["lifecycle"])
+        self.assertEqual("committed", legacy_status["commit_status"])
+
     def test_model_tool_calls_execute_and_return_without_polluting_raw_turns(self) -> None:
         model = ScriptedModel(responses=[
             ModelResponse("", ({"id": "call-1", "name": "get_recent_work", "arguments": {"limit": 1}},)),
@@ -125,6 +176,54 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual("tool", orchestrator._messages[2]["role"])
         self.assertEqual(4, len(orchestrator._messages))
         self.assertEqual("There is no recent committed work yet.", orchestrator._messages[3]["content"])
+
+    def test_close_day_record_includes_day_entries_unjournaled_entries_and_uncommitted_raw(self) -> None:
+        committed = self.vault.create_session(
+            started_at="2026-10-01T09:00:00+01:00", modes=["think"], domains=["engineering"],
+        )
+        self.vault.append_turn(committed["session_id"], "user", "Capture the completed import decision.")
+        CommitResolver(self.vault).publish(committed["session_id"], draft(), workflow="think")
+
+        unjournaled = self.vault.create_session(
+            started_at="2026-08-01T09:00:00+01:00", modes=["think"], domains=["engineering"],
+        )
+        self.vault.append_turn(unjournaled["session_id"], "user", "Capture an older committed item.")
+        CommitResolver(self.vault).publish(unjournaled["session_id"], draft(), workflow="think")
+        unjournaled_journal = self.vault.root / "journal/2026/08/2026-08-01.md"
+        unjournaled_journal.unlink()
+
+        raw = self.vault.create_session(
+            started_at="2026-10-01T16:00:00+01:00",
+            modes=["operate"],
+            runtime={"workflow": "operate", "capture_status": "recoverable", "commit_status": "pending_auto_commit"},
+        )
+        self.vault.append_turn(raw["session_id"], "user", "Review the remaining follow-up work.")
+
+        previous_day = self.vault.create_session(
+            started_at="2026-08-01T16:00:00+01:00",
+            modes=["think"],
+            runtime={"workflow": "think", "capture_status": "recoverable", "commit_status": "pending_auto_commit"},
+        )
+        self.vault.append_turn(previous_day["session_id"], "user", "Older raw work.")
+
+        registry = ToolRegistry(self.vault)
+        names = {tool.name for tool in registry.definitions("close-day")}
+        self.assertIn("get_close_day_record", names)
+        result = registry.call("get_close_day_record", local_date="2026-10-01")
+
+        self.assertTrue(result.ok)
+        self.assertEqual("2026-10-01", result.data["local_date"])
+        self.assertEqual([committed["entry_id"]], [item["entry_id"] for item in result.data["committed_entries"]])
+        self.assertEqual(
+            [unjournaled["entry_id"]],
+            [item["entry_id"] for item in result.data["unjournaled_entries"]],
+        )
+        self.assertFalse(result.data["unjournaled_entries"][0]["journal_associated"])
+        self.assertEqual(
+            [previous_day["session_id"], raw["session_id"]],
+            [item["session_id"] for item in result.data["uncommitted_raw_sessions"]],
+        )
+        self.assertEqual("Review the remaining follow-up work.", result.data["uncommitted_raw_sessions"][1]["turns"][0]["content"])
 
     def test_malformed_or_disallowed_tool_call_returns_structured_error(self) -> None:
         model = ScriptedModel(responses=[

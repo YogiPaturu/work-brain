@@ -205,14 +205,14 @@ class HarnessCaptureService:
         if runtime.get("capture_status") == "active":
             lifecycle = "active_capture"
             message = "Capture is active; raw turns are being saved."
+        elif entries:
+            lifecycle = "committed"
+            message = "Structured entry is committed; raw turns remain preserved."
         elif runtime.get("commit_status") == "pending_auto_commit" or (
             session.get("ended_at") is None and runtime.get("capture_status") in {"recoverable", "rolled_over"}
         ):
             lifecycle = "recoverable_raw"
             message = "Capture is inactive; raw turns are preserved and the structured commit is pending."
-        elif entries:
-            lifecycle = "committed"
-            message = "Structured entry is committed; raw turns remain preserved."
         elif runtime.get("capture_status") == "imported":
             lifecycle = "imported"
             message = "Imported raw transcript is preserved; no structured entry has been committed."
@@ -232,7 +232,7 @@ class HarnessCaptureService:
         return {
             "lifecycle": lifecycle,
             "capture_status": runtime.get("capture_status", "not_captured"),
-            "commit_status": runtime.get("commit_status"),
+            "commit_status": "committed" if entries else runtime.get("commit_status"),
             "turn_count": len(turns),
             "last_captured_at": last.get("recorded_at") if last else None,
             "host": host,
@@ -502,8 +502,11 @@ class HarnessCaptureService:
             key, mapping = matches[0]
             previous = self.vault.read_session(session_id)
             runtime = dict(previous.get("runtime") or {})
+            runtime.pop("commit_status", None)
+            runtime.pop("capture_boundary", None)
             runtime.update({
                 "capture_status": "active",
+                "capture_boundary": "open",
                 "capture_continuation": True,
                 "previous_session_id": session_id,
                 "capture_activation": "continued",
@@ -516,6 +519,7 @@ class HarnessCaptureService:
             previous_runtime = dict(previous.get("runtime") or {})
             previous_runtime.update({
                 "capture_status": "committed",
+                "capture_boundary": "closed",
                 "capture_continuation_to": next_session["session_id"],
             })
             previous["runtime"] = previous_runtime

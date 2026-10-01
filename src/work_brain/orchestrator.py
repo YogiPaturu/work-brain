@@ -243,7 +243,10 @@ class SessionOrchestrator:
         """
         results: list[dict[str, Any]] = []
         pending = []
+        committed_session_ids = {entry.session_id for entry in self.vault.all_current_entries()}
         for session in self.vault.all_sessions():
+            if session["session_id"] in committed_session_ids:
+                continue
             runtime = session.get("runtime") or {}
             explicitly_pending = (
                 runtime.get("commit_status") == "pending_auto_commit"

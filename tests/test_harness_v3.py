@@ -187,6 +187,10 @@ class HarnessV3Tests(unittest.TestCase):
         rotated = service.rotate_session(started["session_id"])
         self.assertTrue(rotated["rotated"])
         self.assertNotEqual(started["session_id"], rotated["session_id"])
+        previous = self.vault.read_session(started["session_id"])
+        self.assertEqual("committed", previous["runtime"]["capture_status"])
+        self.assertEqual("closed", previous["runtime"]["capture_boundary"])
+        self.assertNotIn("commit_status", self.vault.read_session(rotated["session_id"])["runtime"])
         follow_up = service.handle(normalize_capture_event("codex", {
             "event": "UserPromptSubmit", "session_id": "day-long", "prompt": "I am now deciding the migration boundary."
         }))
