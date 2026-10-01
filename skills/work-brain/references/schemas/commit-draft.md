@@ -9,6 +9,10 @@ The model emits only semantic fields:
 - `historical_occurrence`: `null` for normal sessions; a historical occurrence for
   `backfill`.
 - `domains`: lowercase tokens.
+- `workspace`: optional broad working-context candidate, such as `Ranq` or
+  `Brother-in-law health tech`.
+- `project`: optional specific effort candidate, such as `Auth implementation`
+  or `Billing Right Code`.
 - `sections`: exactly the supported entry section names; each statement has `text`,
   `basis` (`stated` or `inferred`), and one or more exact `source_turns` from the
   persisted raw conversation. Every statement must identify the raw turn numbers

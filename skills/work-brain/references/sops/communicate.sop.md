@@ -16,6 +16,7 @@ what the intended audience should receive.
 - **desired_action** (optional): The action or response requested from the audience.
 - **tone** (optional): Desired tone, with a neutral professional tone as the default.
 - **share_constraints** (optional): Facts, details, or topics that must or must not be shared.
+- **profile_id** (optional): A user-owned communication profile that supplies the channel, audience, scope, and format defaults.
 - **retrieved_evidence** (optional): Bounded relevant evidence from the private vault.
 
 **Constraints for parameter acquisition:**
@@ -26,14 +27,26 @@ what the intended audience should receive.
   purpose. This does not authorize unrelated facts, external sending, or reuse
   outside the requested draft.
 - The agent MUST produce a draft for review; no external-send capability is implied.
+- When `profile_id` is supplied, the agent SHOULD load the validated profile through
+  the configured profile tool and treat it as user preference, not as permission
+  to weaken evidence or privacy rules.
+- The active profile's `rendering` contract is channel-specific. Workspace and
+  project scope are separate: workspace identifies the broad working context,
+  while project identifies the specific effort. The agent MUST
+  preserve plain-text compactness for WhatsApp profiles and may use structured
+  Markdown only when the selected profile explicitly permits it.
+- For a profile-scoped draft, the agent MUST use the profile-scoped evidence
+  search tool. It MUST NOT broaden the entity, domain, or time window by issuing
+  an unrestricted search for the same draft.
 
 ## Steps
 
 ### 1. Define the Communication Job
 
 Confirm the audience, purpose, desired action, tone, format, deadline, and
-constraints. Identify whether the user wants a new draft, a rewrite, or a
-critique.
+constraints. If a profile is named, use its values as defaults and confirm only
+the material gaps or conflicts. Identify whether the user wants a new draft, a
+rewrite, or a critique.
 
 **Constraints:**
 
@@ -45,7 +58,8 @@ critique.
 
 ### 2. Select Shareable Evidence
 
-Retrieve only relevant evidence when needed. Separate user-stated facts,
+Retrieve only relevant evidence when needed. If a profile is active, retrieve
+through its exact scope first. Separate user-stated facts,
 source-supported facts, private speculation, sensitive details, and model
 inference before using any detail in the draft.
 

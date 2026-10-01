@@ -6,6 +6,9 @@ build/
 .venv/
 .pytest_cache/
 
+# User-owned Work Brain profiles and local configuration must never be committed.
+.work-brain-local/
+
 # Private vaults must never be committed.
 career-vault/
 *.sqlite

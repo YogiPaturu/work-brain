@@ -29,6 +29,9 @@ from .projections import _apply_mutation, journal_text, rebuild_state, render_jo
 from .timeutil import date_for_timestamp, parse_timestamp, timestamp_now, validate_calendar_date
 
 
+_CONTEXT_UNSET = object()
+
+
 class Vault:
     """Authoritative source store plus rebuildable projections."""
 
@@ -320,6 +323,8 @@ class Vault:
             raw.setdefault("created_at", timestamp_now())
             raw.setdefault("supersedes_revision", current_revision or None)
             raw.setdefault("revision_reason", "initial_commit" if current_revision == 0 else "reextract")
+            raw.setdefault("workspace_entity_id", None)
+            raw.setdefault("project_entity_id", None)
             if current_revision == 0:
                 raw["supersedes_revision"] = None
                 raw["revision_reason"] = "initial_commit" if raw["revision_reason"] == "reextract" else raw["revision_reason"]
@@ -340,6 +345,18 @@ class Vault:
             for ref in entry.entity_refs:
                 if not self._catalog_exists("entity", ref["entity_id"]):
                     raise IntegrityError(f"missing entity reference: {ref['entity_id']}")
+            if entry.workspace_entity_id is not None:
+                workspace_path = self.root / "catalog/entities" / f"{entry.workspace_entity_id}.json"
+                if not workspace_path.exists():
+                    raise IntegrityError(f"missing workspace reference: {entry.workspace_entity_id}")
+                if read_json(workspace_path).get("kind") != "workspace":
+                    raise IntegrityError(f"workspace reference is not a workspace entity: {entry.workspace_entity_id}")
+            if entry.project_entity_id is not None:
+                project_path = self.root / "catalog/entities" / f"{entry.project_entity_id}.json"
+                if not project_path.exists():
+                    raise IntegrityError(f"missing project reference: {entry.project_entity_id}")
+                if read_json(project_path).get("kind") != "project":
+                    raise IntegrityError(f"project reference is not a project entity: {entry.project_entity_id}")
             for ref in entry.artifact_refs:
                 if not self._catalog_exists("artifact", ref["artifact_id"]):
                     raise IntegrityError(f"missing artifact reference: {ref['artifact_id']}")
@@ -364,6 +381,95 @@ class Vault:
             except Exception as exc:
                 raise PersistenceError(f"source commit published but derived state is stale: {exc}") from exc
             return entry
+
+    def backfill_entry_context(
+        self,
+        entry_id: str,
+        *,
+        workspace: str | Mapping[str, Any] | None | object = _CONTEXT_UNSET,
+        project: str | Mapping[str, Any] | None | object = _CONTEXT_UNSET,
+    ) -> SessionEntry:
+        """Add or correct workspace/project metadata without rewriting a revision.
+
+        Context classification is a structured interpretation, so backfill
+        publishes a new immutable revision and retains the prior revision as
+        history. Omitted fields are preserved; explicit null clears a field.
+        Names create or reuse catalog entities deterministically.
+        """
+        with self._require_or_lock():
+            current = self.get_current_entry(entry_id)
+            workspace_id = current.workspace_entity_id
+            project_id = current.project_entity_id
+            if workspace is not _CONTEXT_UNSET:
+                workspace_id = self._resolve_context_entity("workspace", workspace)
+            if project is not _CONTEXT_UNSET:
+                project_id = self._resolve_context_entity("project", project)
+            if workspace_id == current.workspace_entity_id and project_id == current.project_entity_id:
+                return current
+            raw = current.to_dict()
+            raw.update({
+                "workspace_entity_id": workspace_id,
+                "project_entity_id": project_id,
+                "revision": current.revision + 1,
+                "commit_id": new_uuid7(),
+                "created_at": timestamp_now(),
+                "supersedes_revision": current.revision,
+                "revision_reason": "metadata_backfill",
+            })
+            refs = list(raw.get("source_refs", []))
+            previous_ref = {"kind": "entry", "id": current.entry_id, "revision": current.revision}
+            if previous_ref not in refs:
+                refs.append(previous_ref)
+            raw["source_refs"] = refs
+            return self.commit_entry(current.session_id, raw)
+
+    def _resolve_context_entity(self, kind: str, value: str | Mapping[str, Any] | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, Mapping):
+            entity_id = value.get("entity_id")
+            canonical_name = value.get("canonical_name")
+            aliases = value.get("aliases", [])
+            description = value.get("description")
+        elif isinstance(value, str):
+            entity_id = value if (self.root / "catalog/entities" / f"{value}.json").exists() else None
+            canonical_name = None if entity_id else value
+            aliases = []
+            description = None
+        else:
+            raise ValidationError(f"{kind} must be a name, entity object, or null")
+        if entity_id is not None:
+            entity_id = validate_uuid7(entity_id, f"{kind}.entity_id")
+            path = self.root / "catalog/entities" / f"{entity_id}.json"
+            if not path.exists():
+                raise ValidationError(f"{kind} entity does not exist: {entity_id}")
+            entity = read_json(path)
+            if entity.get("kind") != kind:
+                raise ValidationError(f"entity {entity_id} is not a {kind}")
+            return entity_id
+        if not isinstance(canonical_name, str) or not canonical_name.strip():
+            raise ValidationError(f"{kind} requires a non-empty canonical_name")
+        if not isinstance(aliases, list) or any(not isinstance(item, str) or not item.strip() for item in aliases):
+            raise ValidationError(f"{kind}.aliases must be a list of non-empty strings")
+        key = normalize_alias(canonical_name)
+        matches = []
+        for path in sorted((self.root / "catalog/entities").glob("*.json")):
+            entity = read_json(path)
+            if entity.get("kind") != kind:
+                continue
+            names = [entity.get("canonical_name", ""), *entity.get("aliases", [])]
+            if any(normalize_alias(name) == key for name in names):
+                matches.append(entity)
+        if len(matches) > 1:
+            raise IntegrityError(f"ambiguous {kind} entity: {canonical_name}")
+        if matches:
+            return matches[0]["entity_id"]
+        return self.upsert_entity(
+            kind=kind,
+            canonical_name=canonical_name.strip(),
+            aliases=list(aliases),
+            description=description,
+        )["entity_id"]
 
     def create_amendment(
         self,
@@ -519,7 +625,7 @@ class Vault:
         updated_at: str | None = None,
     ) -> dict[str, Any]:
         with self._require_or_lock():
-            if kind not in {"project", "person", "organization", "customer", "system", "topic"}:
+            if kind not in {"workspace", "project", "person", "organization", "customer", "system", "topic"}:
                 raise ValidationError("invalid entity kind")
             if not isinstance(canonical_name, str) or not canonical_name:
                 raise ValidationError("canonical_name must be non-empty")
@@ -646,6 +752,18 @@ class Vault:
             for ref in entry.artifact_refs:
                 if ref["artifact_id"] not in artifact_ids:
                     raise IntegrityError(f"missing artifact reference during rebuild: {ref['artifact_id']}")
+            if entry.workspace_entity_id is not None:
+                workspace = next((item for item in entities if item["entity_id"] == entry.workspace_entity_id), None)
+                if workspace is None:
+                    raise IntegrityError(f"missing workspace reference during rebuild: {entry.workspace_entity_id}")
+                if workspace["kind"] != "workspace":
+                    raise IntegrityError(f"workspace reference is not a workspace entity during rebuild: {entry.workspace_entity_id}")
+            if entry.project_entity_id is not None:
+                project = next((item for item in entities if item["entity_id"] == entry.project_entity_id), None)
+                if project is None:
+                    raise IntegrityError(f"missing project reference during rebuild: {entry.project_entity_id}")
+                if project["kind"] != "project":
+                    raise IntegrityError(f"project reference is not a project entity during rebuild: {entry.project_entity_id}")
         # Generate the state source before opening the transaction so a bad
         # mutation cannot partially replace the derived database.
         state = rebuild_state(current_entries.values(), self.root / "state/current.json")
@@ -662,10 +780,10 @@ class Vault:
                 for entry in current_entries.values():
                     path = self._entry_paths(self.read_session(entry.session_id))[-1]
                     raw = read_json(path)
-                    conn.execute("INSERT INTO entries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
+                    conn.execute("INSERT INTO entries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
                         entry.entry_id, entry.session_id, entry.revision, entry.title, entry.provenance_kind,
                         entry.occurrence.start, entry.occurrence.end, entry.occurrence.precision, str(path),
-                        content_hash(raw), entry.created_at))
+                        content_hash(raw), entry.created_at, entry.project_entity_id, entry.workspace_entity_id))
                 for entry, path in revisions:
                     conn.execute("INSERT INTO entry_revisions VALUES (?, ?, ?, ?, ?, ?, ?)", (
                         entry.entry_id, entry.revision, entry.commit_id, entry.revision_reason, entry.created_at,

@@ -7,6 +7,7 @@ from typing import Any, Callable, Mapping
 
 from .domain import SessionEntry
 from .errors import ValidationError
+from .profiles import CommunicationProfileStore
 
 
 @dataclass(frozen=True)
@@ -28,15 +29,15 @@ class ToolDefinition:
 
 PROFILES: dict[str, tuple[str, ...]] = {
     "think": ("search_evidence", "hydrate_evidence", "get_current_state"),
-    "operate": ("get_current_state", "get_recent_work", "search_evidence", "hydrate_evidence"),
-    "communicate": ("get_recent_work", "search_evidence", "hydrate_evidence"),
+    "operate": ("get_current_state", "get_recent_work", "search_evidence", "hydrate_evidence", "list_work_item_communication_profiles"),
+    "communicate": ("get_current_state", "get_recent_work", "search_evidence", "search_profile_evidence", "hydrate_evidence", "get_communication_profile"),
     "career": (
         "search_questions", "get_question", "choose_question",
         "search_evidence", "hydrate_evidence",
         "mark_interview_candidate", "unmark_interview_candidate", "list_interview_candidates",
     ),
     "open-day": ("get_current_state", "get_recent_work"),
-    "close-day": ("get_current_state", "get_recent_work"),
+    "close-day": ("get_current_state", "get_recent_work", "list_post_close_communication_profiles"),
     "backfill": ("search_evidence", "hydrate_evidence"),
 }
 
@@ -48,7 +49,11 @@ class ToolRegistry:
         "get_current_state": ToolDefinition("get_current_state", "Read compact active work state."),
         "get_recent_work": ToolDefinition("get_recent_work", "Read compact recent committed work."),
         "search_evidence": ToolDefinition("search_evidence", "Search evidence through the configured retrieval adapter."),
+        "search_profile_evidence": ToolDefinition("search_profile_evidence", "Search evidence using a validated communication profile's exact scope."),
         "hydrate_evidence": ToolDefinition("hydrate_evidence", "Hydrate selected stable evidence references."),
+        "get_communication_profile": ToolDefinition("get_communication_profile", "Read one validated user-owned communication profile."),
+        "list_post_close_communication_profiles": ToolDefinition("list_post_close_communication_profiles", "List user-owned communication profiles configured to be offered after close-day."),
+        "list_work_item_communication_profiles": ToolDefinition("list_work_item_communication_profiles", "List user-owned communication profiles configured for meaningful work-item completion."),
         "search_questions": ToolDefinition("search_questions", "Filter configured interview questions without an LLM call."),
         "get_question": ToolDefinition("get_question", "Fetch one exact interview question by stable reference."),
         "choose_question": ToolDefinition("choose_question", "Choose one question from a bounded filtered set."),
@@ -59,8 +64,11 @@ class ToolRegistry:
         "record_amendment": ToolDefinition("record_amendment", "Record an explicit user correction.", mutating=True),
     }
 
-    def __init__(self, vault: Any, retrieval: Mapping[str, Callable[..., Any]] | None = None):
+    def __init__(self, vault: Any, retrieval: Mapping[str, Callable[..., Any]] | None = None,
+                 profile_store: CommunicationProfileStore | None = None):
         self.vault = vault
+        self.profile_store = profile_store or CommunicationProfileStore.load()
+        self.active_profile_id: str | None = None
         if retrieval is None:
             from .retrieval import EvidenceRetriever
             adapter = EvidenceRetriever(vault)
@@ -71,9 +79,23 @@ class ToolRegistry:
         if workflow not in PROFILES:
             raise ValidationError(f"unknown workflow: {workflow}")
         names = list(PROFILES[workflow])
+        if workflow == "communicate":
+            if self.active_profile_id:
+                names.remove("search_evidence")
+            else:
+                names.remove("search_profile_evidence")
         if committing:
             names.append("commit_session")
         return tuple(self.DEFINITIONS[name] for name in names)
+
+    def activate_profile(self, profile_id: str | None) -> None:
+        if profile_id is None:
+            self.active_profile_id = None
+            return
+        profile = self.profile_store.get(profile_id)
+        if profile.workflow != "communicate":
+            raise ValidationError("communication profile must use workflow=communicate")
+        self.active_profile_id = profile.profile_id
 
     def call(self, name: str, **arguments: Any) -> ToolResult:
         if name == "get_current_state":
@@ -96,6 +118,89 @@ class ToolRegistry:
                 return ToolResult(True, handler(**arguments))
             except (ValidationError, ValueError) as exc:
                 return ToolResult(False, error=str(exc))
+        if name == "search_profile_evidence":
+            handler = self.retrieval.get("search_evidence")
+            if handler is None:
+                return ToolResult(False, error="retrieval adapter is not configured")
+            profile_id = arguments.get("profile_id") or self.active_profile_id
+            try:
+                profile = self.profile_store.get(profile_id)
+                filters = profile.retrieval_filters(local_date=arguments.get("local_date"))
+                query = arguments.get("query")
+                if profile.scope.get("time_window") == "work_item":
+                    work_item = arguments.get("work_item")
+                    if not isinstance(work_item, str) or not work_item.strip():
+                        raise ValidationError("work_item is required for a work-item-scoped communication profile")
+                    query = f"{work_item.strip()} {query or ''}".strip()
+                page_size = arguments.get("page_size", 8)
+                cursor = arguments.get("cursor")
+                result = handler(
+                    query=query,
+                    filters=filters,
+                    page_size=page_size,
+                    cursor=cursor,
+                )
+                fallback_used = False
+                scope_fields = ("entities", "workspaces", "projects")
+                if (
+                    not cursor
+                    and any(filters.get(field) for field in scope_fields)
+                    and isinstance(result, dict)
+                    and not result.get("cards")
+                ):
+                    # Older entries may mention a scoped entity or project
+                    # without carrying an explicit catalog reference. Preserve
+                    # that boundary as a text anchor for legacy entries.
+                    fallback_filters = dict(filters)
+                    scope_terms: list[str] = []
+                    for field in scope_fields:
+                        scope_terms.extend(fallback_filters.pop(field, []))
+                    fallback_query = " ".join(scope_terms + [query]).strip()
+                    result = handler(
+                        query=fallback_query,
+                        filters=fallback_filters,
+                        page_size=page_size,
+                        cursor=None,
+                    )
+                    fallback_used = True
+                if isinstance(result, dict):
+                    result = dict(result)
+                    result["profile_scope"] = {
+                        "profile_id": profile.profile_id,
+                        "filters": filters,
+                        "retrieval_mode": "text_entity_fallback" if fallback_used else "metadata",
+                    }
+                return ToolResult(True, result)
+            except (ValidationError, ValueError) as exc:
+                return ToolResult(False, error=str(exc))
+        if name == "get_communication_profile":
+            try:
+                profile_id = arguments.get("profile_id") or self.active_profile_id
+                return ToolResult(True, self.profile_store.get(profile_id).to_dict())
+            except ValidationError as exc:
+                return ToolResult(False, error=str(exc))
+        if name == "list_post_close_communication_profiles":
+            return ToolResult(True, [
+                {
+                    "id": profile.profile_id,
+                    "label": profile.label,
+                    "channel": profile.channel,
+                    "audience": profile.audience,
+                    "purpose": profile.purpose,
+                }
+                for profile in self.profile_store.triggered_after_close_day()
+            ])
+        if name == "list_work_item_communication_profiles":
+            return ToolResult(True, [
+                {
+                    "id": profile.profile_id,
+                    "label": profile.label,
+                    "channel": profile.channel,
+                    "audience": profile.audience,
+                    "purpose": profile.purpose,
+                }
+                for profile in self.profile_store.triggered_after_work_item()
+            ])
         if name in {"search_questions", "get_question", "choose_question", "mark_interview_candidate", "unmark_interview_candidate", "list_interview_candidates"}:
             try:
                 from .career import CareerService, QuestionFilters, QuestionRef

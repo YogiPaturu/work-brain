@@ -198,13 +198,19 @@ class SessionOrchestrator:
         self._messages: list[dict[str, Any]] = []
         self._modes: list[str] = []
         self._domains: list[str] = []
+        self.profile_id: str | None = None
         self.last_rollover_commits: list[dict[str, Any]] = []
 
     def start(self, user_text: str | None = None, *, workflow: str | None = None,
-              domains: list[str] | None = None, started_at: str | None = None) -> dict[str, Any]:
+              domains: list[str] | None = None, started_at: str | None = None,
+              profile_id: str | None = None) -> dict[str, Any]:
         if self.state not in {RuntimeState.IDLE, RuntimeState.COMMITTED, RuntimeState.RECOVERABLE}:
             raise ValidationError("a session is already active")
         self.workflow = select_workflow(workflow or user_text, None)
+        if profile_id is not None and self.workflow != "communicate":
+            raise ValidationError("profile_id can only be used with workflow=communicate")
+        self.profile_id = profile_id
+        self.tools.activate_profile(profile_id)
         self._domains = list(domains or [])
         self.instructions = self.loader.load(self.workflow, self._domains)
         self._modes = [self.workflow]
@@ -218,7 +224,8 @@ class SessionOrchestrator:
         session = self.vault.create_session(
             started_at=started_at, modes=self._modes, domains=self._domains,
             runtime={"model": self.model.model_id, "app_revision": "runtime-v1", "workflow": self.workflow,
-                     "sops": self.instructions.identities, "missing_resources": list(self.instructions.missing)},
+                     "sops": self.instructions.identities, "missing_resources": list(self.instructions.missing),
+                     "profile_id": self.profile_id},
         )
         self.session_id = session["session_id"]
         self._messages = []
@@ -300,6 +307,9 @@ class SessionOrchestrator:
         route = route_prompt(user_text, self.workflow)
         if route.recognized and route.workflow != self.workflow:
             self.workflow = route.workflow
+            if self.workflow != "communicate":
+                self.profile_id = None
+                self.tools.activate_profile(None)
             self.instructions = self.loader.load(self.workflow, self._domains)
             self._modes = self._merge(self._modes, [self.workflow])
             session = self.vault.read_session(self.session_id)
@@ -308,6 +318,7 @@ class SessionOrchestrator:
                 "workflow": self.workflow,
                 "sops": self.instructions.identities,
                 "missing_resources": list(self.instructions.missing),
+                "profile_id": self.profile_id,
             })
             self.vault.update_session_metadata(self.session_id, session)
         # Rollover happens before this user turn is appended so the new turn is
@@ -325,7 +336,10 @@ class SessionOrchestrator:
         # session must be allowed to accept its first bounded user turn when
         # the instructions alone put it near that threshold. Only a hard
         # context overflow is rejected here.
-        if plan.estimated_input_tokens > plan.usable_input_tokens:
+        # A freshly rolled session must be allowed to accept its first bounded
+        # user turn even when the instructions plus that turn are near the
+        # provider limit. Subsequent turns still fail fast on hard overflow.
+        if plan.estimated_input_tokens > plan.usable_input_tokens and len(self._messages) > 1:
             raise PersistenceError("context budget reached; close and roll over before adding another turn")
         try:
             response = self._respond_with_tools()
@@ -345,7 +359,7 @@ class SessionOrchestrator:
         allowed = set(available)
         for _round in range(self.MAX_TOOL_ROUNDS):
             plan = self.context_planner.plan(self._messages, self.instructions.text, self.model)
-            if plan.estimated_input_tokens > plan.usable_input_tokens:
+            if plan.estimated_input_tokens > plan.usable_input_tokens and len(self._messages) > 1:
                 raise PersistenceError("context budget reached during model/tool loop")
             response = self.model.respond(
                 self._messages, instructions=self.instructions.text, tools=available,
@@ -452,6 +466,10 @@ class SessionOrchestrator:
             raise ValidationError("only an unfinished session can be resumed")
         self.session_id = session_id
         self.workflow = select_workflow(workflow, (session.get("runtime") or {}).get("workflow"))
+        self.profile_id = (session.get("runtime") or {}).get("profile_id")
+        if self.profile_id is not None and self.workflow != "communicate":
+            raise ValidationError("session profile_id requires workflow=communicate")
+        self.tools.activate_profile(self.profile_id)
         self._modes = list(session.get("modes", [])) or [self.workflow]
         self._domains = list(session.get("domains", []))
         self.instructions = self.loader.load(self.workflow, self._domains)

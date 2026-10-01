@@ -188,19 +188,24 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual("reconstructed", "reconstructed" if validator.validate(draft(workflow="backfill"), turn_count=1, workflow="backfill") else "")
         registry = ToolRegistry(self.vault)
         self.assertEqual({"get_current_state", "get_recent_work"}, {tool.name for tool in registry.definitions("open-day")})
+        self.assertIn("list_post_close_communication_profiles", {tool.name for tool in registry.definitions("close-day")})
         self.assertFalse(any(tool.name in {"sql", "filesystem", "vector"} for tool in registry.definitions("think")))
 
     def test_resolver_owns_catalog_and_state_ids(self) -> None:
         model_draft = draft()
-        model_draft["entity_candidates"] = [{"kind": "project", "canonical_name": "Import Service", "aliases": []}]
+        model_draft["workspace"] = {"canonical_name": "Ranq", "aliases": ["ranq"]}
+        model_draft["project"] = {"canonical_name": "Import Service", "aliases": []}
         model_draft["state_changes"] = [{"operation": "create", "kind": "task", "fields": {"title": "Run import experiment"}, "source_turns": [1]}]
         model = ScriptedModel(drafts=[model_draft])
         orchestrator = SessionOrchestrator(self.vault, model)
         session = orchestrator.start("We need to run an import experiment.", workflow="operate")
         orchestrator.close()
-        self.assertEqual(1, len(list((self.vault.root / "catalog/entities").glob("*.json"))))
+        self.assertEqual(2, len(list((self.vault.root / "catalog/entities").glob("*.json"))))
         state = json.loads((self.vault.root / "state/current.json").read_text(encoding="utf-8"))
         self.assertEqual("Run import experiment", state["items"][0]["title"])
+        entry = self.vault.get_current_entry(session["entry_id"])
+        self.assertIsNotNone(entry.workspace_entity_id)
+        self.assertIsNotNone(entry.project_entity_id)
         self.assertEqual("operate", self.vault.get_current_entry(session["entry_id"]).modes[0])
 
     def test_context_pressure_rolls_to_a_new_session(self) -> None:

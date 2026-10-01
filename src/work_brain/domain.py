@@ -12,13 +12,13 @@ ENTRY_SECTIONS = (
     "evidence", "alternatives_tradeoffs", "decisions_actions", "expectations",
     "outcomes", "learning", "open_questions",
 )
-REVISION_REASONS = {"initial_commit", "reextract", "user_correction"}
+REVISION_REASONS = {"initial_commit", "reextract", "user_correction", "metadata_backfill"}
 PROVENANCE_KINDS = {"contemporaneous", "reconstructed"}
 OCCURRENCE_PRECISIONS = {"instant", "day", "month", "quarter", "year", "range", "unknown"}
 STATE_KINDS = {"task", "open_loop", "commitment", "project_state"}
 STATE_STATUSES = {"active", "waiting", "done", "dropped"}
 MUTATION_OPS = {"create", "update", "close", "reopen"}
-ENTITY_KINDS = {"project", "person", "organization", "customer", "system", "topic"}
+ENTITY_KINDS = {"workspace", "project", "person", "organization", "customer", "system", "topic"}
 
 
 def _required(obj: Mapping[str, Any], key: str) -> Any:
@@ -150,6 +150,8 @@ class SessionEntry:
     occurrence: Occurrence
     modes: list[str]
     domains: list[str]
+    workspace_entity_id: str | None
+    project_entity_id: str | None
     sections: dict[str, list[Statement]]
     state_mutations: list[StateMutation]
     entity_refs: list[dict[str, str]]
@@ -184,6 +186,12 @@ class SessionEntry:
             raise ValidationError("title and summary must be strings; title cannot be empty")
         occurrence = Occurrence.from_dict(_required(raw, "occurrence"))
         modes, domains = _string_list(_required(raw, "modes"), "modes"), _string_list(_required(raw, "domains"), "domains")
+        workspace_entity_id = raw.get("workspace_entity_id")
+        if workspace_entity_id is not None:
+            workspace_entity_id = validate_uuid7(workspace_entity_id, "workspace_entity_id")
+        project_entity_id = raw.get("project_entity_id")
+        if project_entity_id is not None:
+            project_entity_id = validate_uuid7(project_entity_id, "project_entity_id")
         sections_raw = _required(raw, "sections")
         if not isinstance(sections_raw, dict) or set(sections_raw) != set(ENTRY_SECTIONS):
             raise ValidationError("sections must contain exactly the supported entry section names")
@@ -213,7 +221,7 @@ class SessionEntry:
         if any(statement.basis == "inferred" and not statement.source_turns for statements in sections.values() for statement in statements) and not artifacts:
             raise ValidationError("inferred statements without source_turns require an artifact reference")
         return cls(entry_id, session_id, revision, commit_id, created_at, supersedes, reason, provenance, title, summary,
-                   occurrence, modes, domains, sections, mutations, entities, artifacts, sources)
+                   occurrence, modes, domains, workspace_entity_id, project_entity_id, sections, mutations, entities, artifacts, sources)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -221,7 +229,9 @@ class SessionEntry:
             "commit_id": self.commit_id, "created_at": self.created_at, "supersedes_revision": self.supersedes_revision,
             "revision_reason": self.revision_reason, "provenance_kind": self.provenance_kind, "title": self.title,
             "summary": self.summary, "occurrence": self.occurrence.to_dict(), "modes": self.modes,
-            "domains": self.domains, "sections": {k: [s.to_dict() for s in v] for k, v in self.sections.items()},
+            "domains": self.domains, "workspace_entity_id": self.workspace_entity_id,
+            "project_entity_id": self.project_entity_id,
+            "sections": {k: [s.to_dict() for s in v] for k, v in self.sections.items()},
             "state_mutations": [m.to_dict() for m in self.state_mutations], "entity_refs": self.entity_refs,
             "artifact_refs": self.artifact_refs, "source_refs": self.source_refs,
         }
