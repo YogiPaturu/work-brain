@@ -108,10 +108,11 @@ the existing LLD-01 lock or make concurrent writes safe.
 ## 5. Capture contract
 
 Hooks are passive for ordinary coding conversations. A host conversation is
-durably activated only when the initial user-prompt hook observes either:
-
-- a host-neutral prompt beginning with `work brain:`; or
-- an explicit Work Brain Skill invocation visible in the host event.
+durably activated only when the initial user-prompt hook observes an explicit
+activation boundary: a normalized leading `work brain` prompt, a narrow natural
+activation alias, or an explicitly marked user Skill invocation. Skill
+discovery/loading alone is not activation. Development prompts such as “edit
+the Work Brain capture tests” remain ordinary coding work.
 
 Activation happens before the host model responds, so the triggering prompt is
 captured exactly. While active, user-prompt and visible-assistant hooks append

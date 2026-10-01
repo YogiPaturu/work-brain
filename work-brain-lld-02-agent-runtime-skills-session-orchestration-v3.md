@@ -130,6 +130,12 @@ the normalized remainder while the exact raw prompt is persisted. Subsequent
 visible user and assistant turns are captured by host lifecycle hooks. The
 model does not need to call a Work Brain model adapter.
 
+Skill availability or automatic loading does not itself activate capture. When
+the user is inspecting, editing, testing, documenting, packaging, or installing
+Work Brain, the task remains ordinary development work unless the user also
+gives an explicit activation boundary for a genuine professional-memory
+session.
+
 The logical state machine remains:
 
 ```text
@@ -143,8 +149,10 @@ not activate it. `SessionEnd` or `Interrupt` removes the active mapping, does
 not fabricate an assistant turn, and leaves an unfinished session recoverable.
 `close my day` routes an active session to `close-day`; after the workflow
 finishes, the host mapping is explicitly deactivated even when the SOP says no
-new SessionEntry is needed. Commit/close explicitly deactivates the host
-mapping.
+new SessionEntry is needed. An ordinary CommitDraft closes the bounded logical
+session and rotates the mapping to a fresh bounded session while keeping host
+capture active. `finish this`, `that's enough`, and `save this` preserve that
+active envelope; `stop work brain` and `close my day` deactivate it.
 
 Only one Work Brain writer may operate on a vault at a time. Existing LLD-01
 lock and source-first semantics remain authoritative.

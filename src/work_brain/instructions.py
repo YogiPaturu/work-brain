@@ -17,7 +17,8 @@ WORKFLOW_SOPS = {workflow: f"{workflow}.sop.md" for workflow in WORKFLOWS}
 DOMAIN_ALIASES = {
     "eng": "engineering", "software": "engineering", "debug": "debugging",
     "product-management": "product", "customers": "customer", "bizdev": "sales",
-    "exec": "leadership",
+    "exec": "leadership", "architecture": "architecture", "people": "people-management",
+    "management": "people-management", "hiring": "people-management", "founders": "founder",
 }
 
 

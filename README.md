@@ -119,7 +119,7 @@ work-brain evidence get --entry-id ENTRY_ID
 work-brain recoverable
 
 # CommitDraft may be read from stdin, avoiding shell quoting problems.
-work-brain commit-draft --session-id SESSION_ID --workflow think < commit-draft.json
+work-brain commit-draft --session-id SESSION_ID < commit-draft.json
 ```
 
 `evidence search` is the stable LLD-03 operation surface. It searches current
@@ -310,7 +310,8 @@ overwrite it. Review the reported warning and resolve it manually.
    first relevant prompt: `start my day` and `open my work journal` select
    `open-day`; `start work brain` starts a general Work Brain session. The
    explicit mid-conversation aliases `capture this` and `journal this` also
-   activate capture without requiring a colon. Speech
+   activate capture without requiring a colon; their remaining text is routed
+   normally rather than being forced into THINK. Speech
    input may omit punctuation or change capitalization: `Work Brain, start my
    day` routes exactly like `work brain: start my day`.
 8. During an active Work Brain session, ordinary follow-up prompts are captured
@@ -370,6 +371,18 @@ Cursor capture uses `sessionStart`, `beforeSubmitPrompt.prompt`,
 directory. It initially sees the Skill name and description, then loads the
 main instructions and relevant SOP/probe references progressively.
 
+The canonical repository directory is also the installed development Skill
+when setup creates a symlink. That makes edits immediately available to future
+loads, but an already-running agent may still hold older instructions in its
+context. After substantial Skill/SOP or routing changes, validate in a fresh
+Codex/host session.
+
+Skill discovery/loading is not capture activation. Editing, testing,
+documenting, packaging, or installing Work Brain remains ordinary development
+work and does not create a durable Work Brain session merely because the
+repository or Skill is mentioned. Only an observed activation boundary starts
+capture.
+
 **Tool execution.** The Skill tells the agent which sanctioned logical Work
 Brain operation to use. The harness already owns shell/terminal execution, so
 the agent calls `work-brain state ...`, `work-brain evidence ...`, or
@@ -384,6 +397,26 @@ work journal`, `start work brain`, `capture this`, `journal this`) at the
 activation boundary. Ambiguous
 phrases such as `think about this` remain inactive. Implicit behavior that a
 hook did not observe is never labeled verbatim source.
+
+Capture activation is separate from bounded-session completion. A normal
+`commit-draft` closes the current logical session and advances the host mapping
+to a fresh bounded session, so one `start my day` activation can cover several
+conversations. `finish this`, `that's enough`, and `save this` are completion
+signals that keep capture active. `close my day` and `stop work brain` close the
+current lifecycle and deactivate the host mapping, even when the close-day gap
+check finds no new evidence.
+
+**Probing and behavioral reminders.** Every session receives the core
+conversation SOP plus one workflow SOP. The host may select zero, one, or two
+domain probes based on the actual target and replace them when the topic
+materially changes. Probes are compact conditional guides, not questionnaires;
+the core SOP supplies cross-cutting reminders for decisions, outcomes,
+ownership, open loops, changed beliefs, and useful artifacts. The repository
+also includes transcript-style behavioral fixtures for architecture thinking,
+explicit work-state updates, scoped communication drafts, multi-candidate
+interview practice, uncertain backfill, and no-op close-day behavior. These are
+contract/eval fixtures for a host model, not a claim that a fixed script is an
+LLM benchmark.
 
 **Storage and retrieval.** The CLI delegates to application/domain services.
 LLD-03 keeps the same chunk corpus in FTS5 and local vectors, applies explicit
@@ -455,7 +488,9 @@ and LLD-04 Career behavior: deterministic chunk/index generation, FTS/vector
 corpus alignment, current-revision search, filters, pagination, hydration,
 degraded behavior, reindexing, no-score EvidenceCards, tagged question parsing,
 explicit candidate marks, revision-stable preferences, and prepare/mock
-boundaries. The default vector adapter is a
+boundaries. Transcript-style behavioral contract fixtures cover bounded
+thinking, explicit state updates, scoped communication, career selection,
+uncertain backfill, and no-op close-day behavior. The default vector adapter is a
 dependency-free deterministic local baseline; a higher-quality local embedding
 provider can be injected behind the same adapter contract.
 
@@ -469,7 +504,9 @@ Manual checks should be run separately for each available local harness:
 5. send an ordinary follow-up without a prefix and confirm it is captured;
 6. send `close my day` with no durable evidence and confirm the mapping closes
    while existing evidence remains unchanged;
-7. complete a CommitDraft and confirm the session is committed/deactivated;
+7. complete an ordinary CommitDraft and confirm the bounded session rotates
+   while capture remains active; use `close my day` or `stop work brain` to
+   confirm explicit deactivation;
 8. terminate the host and confirm the session is recoverable without a fake
    assistant response;
 9. run `work-brain setup HOST` twice and confirm no duplicate hook entries;

@@ -45,14 +45,15 @@ describe an unavailable search as proof that no history exists.
 work-brain capture-hook --host codex < hook.json
 work-brain capture-hook --host claude-code < hook.json
 work-brain capture-hook --host cursor < hook.json
-work-brain commit-draft --session-id SESSION_ID --workflow think < draft.json
+work-brain commit-draft --session-id SESSION_ID < draft.json
 work-brain recoverable
 ```
 
 Structured CommitDraft input may be supplied on stdin or with `--file PATH`.
 The application validates and resolves IDs, revisions, provenance, and
-persistence. Do not write `turns.jsonl`, SQLite, journals, state, or vector
-data directly.
+persistence. An ordinary commit rotates to a fresh bounded session while the
+host capture mapping stays active. A close-day commit deactivates the mapping.
+Do not write `turns.jsonl`, SQLite, journals, state, or vector data directly.
 
 ## Capture activation
 
@@ -66,3 +67,11 @@ routes an active mapping to close-day and deactivates it after the visible
 workflow response, even if no new CommitDraft is needed. Ambiguous phrases such
 as `think about this` remain inactive. Implicit Skill behavior that was not
 observed by a hook is never relabeled as verbatim capture.
+
+Skill discovery or loading alone is not activation. A hook may observe that
+the Skill is available while a user is editing Work Brain source; that event
+must remain inactive unless the user also supplies an activation boundary.
+
+`finish this`, `that's enough`, and `save this` are bounded-session completion
+signals; they preserve the active host capture boundary. `stop work brain` and
+`close my day` explicitly turn that boundary off.

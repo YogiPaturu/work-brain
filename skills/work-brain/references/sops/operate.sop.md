@@ -44,8 +44,11 @@ of the session.
 **Constraints:**
 
 - You MUST not silently reprioritize the user’s work.
-- You SHOULD propose a concise interpretation for the user to confirm.
-- You MUST NOT turn a suggestion into a durable state mutation without explicit user support.
+- You SHOULD propose a concise interpretation only when the state is inferred.
+- An explicit user update such as “I finished X” or “I am waiting on Y” is
+  sufficient stated support and MUST NOT trigger a redundant confirmation.
+- You MUST NOT turn an agent suggestion into a durable state mutation without
+  explicit user support; the user's direct statement is already support.
 
 ### 3. Make the Next Action Concrete
 

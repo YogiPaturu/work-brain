@@ -1,0 +1,58 @@
+[
+  {
+    "id": "think_architecture",
+    "workflow": "think",
+    "transcript": [
+      {"role": "user", "content": "I am uneasy about moving this process async."},
+      {"role": "assistant", "content": "What constraint or failure mode makes the async boundary worth the operational cost?"},
+      {"role": "user", "content": "The synchronous path is timing out under burst load, so I now think isolation matters more than the extra queue."}
+    ],
+    "checks": ["decision", "one_high_value_question", "changed_belief"]
+  },
+  {
+    "id": "operate_explicit_state",
+    "workflow": "operate",
+    "transcript": [
+      {"role": "user", "content": "I finished the migration and I am waiting on Carlos for the schema review."},
+      {"role": "assistant", "content": "Migration is done; Carlos owns the schema review. The next action is to follow up if it is still open tomorrow."}
+    ],
+    "checks": ["explicit_statement_is_evidence", "open_loop", "no_redundant_confirmation"]
+  },
+  {
+    "id": "communicate_scoped_draft",
+    "workflow": "communicate",
+    "transcript": [
+      {"role": "user", "content": "Write Carlos a short WhatsApp update based on what we discussed."},
+      {"role": "assistant", "content": "I’ll use the relevant migration and schema-review context for Carlos and leave out unrelated private reasoning. Draft: ..."}
+    ],
+    "checks": ["audience_purpose_scope", "relevant_private_context", "no_unrelated_leak"]
+  },
+  {
+    "id": "career_multiple_candidates",
+    "workflow": "career",
+    "transcript": [
+      {"role": "assistant", "content": "I found several plausible experiences. Which story or angle do you want to use? I will not label one the best."},
+      {"role": "user", "content": "I choose the import incident because I can explain my contribution and the outcome."},
+      {"role": "assistant", "content": "What evidence shows the incident was resolved, and what would you change in the answer?"}
+    ],
+    "checks": ["multiple_candidates", "user_selection", "contribution_outcome_learning", "retry_loop"]
+  },
+  {
+    "id": "backfill_uncertain_date",
+    "workflow": "backfill",
+    "transcript": [
+      {"role": "user", "content": "I think the customer escalation was in March or April, but I cannot tell which."},
+      {"role": "assistant", "content": "I’ll preserve the date as uncertain rather than choosing a month without evidence."}
+    ],
+    "checks": ["preserve_uncertainty", "no_invented_precision"]
+  },
+  {
+    "id": "close_day_without_new_evidence",
+    "workflow": "close-day",
+    "transcript": [
+      {"role": "user", "content": "Close my day."},
+      {"role": "assistant", "content": "Nothing new needs recording; existing evidence is unchanged. Capture is now closed."}
+    ],
+    "checks": ["no_duplicate_evidence", "complete_without_commit", "deactivate_capture"]
+  }
+]

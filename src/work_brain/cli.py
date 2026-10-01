@@ -65,7 +65,7 @@ def _parser() -> argparse.ArgumentParser:
     commit.add_argument("--file", required=True, help="JSON file containing the resolved SessionEntry payload")
     draft = sub.add_parser("commit-draft", help="validate and resolve an LLD2 CommitDraft")
     draft.add_argument("--session-id", required=True)
-    draft.add_argument("--workflow", default="think")
+    draft.add_argument("--workflow", help="workflow; defaults to the session's active workflow")
     draft.add_argument("--file", help="JSON file; omit or use - to read CommitDraft from stdin")
     skills = sub.add_parser("skills", help="show progressively loaded Skill/SOP resources")
     skills.add_argument("--workflow", default="think")
@@ -211,6 +211,16 @@ def _career_service(vault: Vault, specs: list[str]) -> CareerService:
     return CareerService(vault, banks=banks or None)
 
 
+def _finish_capture_after_commit(vault: Vault, session_id: str, workflow: str | None = None) -> dict[str, Any]:
+    """Keep ordinary host capture active, but close lifecycle workflows."""
+    session = vault.read_session(session_id)
+    chosen = workflow or (session.get("runtime") or {}).get("workflow") or "think"
+    capture = HarnessCaptureService(vault)
+    if chosen == "close-day":
+        return capture.stop_session(session_id)
+    return capture.rotate_session(session_id)
+
+
 def _question_filters(args: argparse.Namespace) -> QuestionFilters:
     return QuestionFilters.from_values(
         tags_all=getattr(args, "tag_all", []), tags_any=getattr(args, "tag_any", []),
@@ -290,12 +300,14 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         return vault.append_turn(args.session_id, args.role, content, recorded_at=args.recorded_at), True
     if command == "commit":
         entry = vault.commit_entry(args.session_id, _read_payload(args.file))
-        HarnessCaptureService(vault).stop_session(args.session_id)
-        return {"entry_id": entry.entry_id, "revision": entry.revision, "commit_id": entry.commit_id}, True
+        continuation = _finish_capture_after_commit(vault, args.session_id)
+        return {"entry_id": entry.entry_id, "revision": entry.revision, "commit_id": entry.commit_id, "capture": continuation}, True
     if command == "commit-draft":
-        entry = CommitResolver(vault).publish(args.session_id, _read_payload(args.file), workflow=args.workflow)
-        HarnessCaptureService(vault).stop_session(args.session_id)
-        return {"entry_id": entry.entry_id, "revision": entry.revision, "commit_id": entry.commit_id}, True
+        session = vault.read_session(args.session_id)
+        workflow = args.workflow or (session.get("runtime") or {}).get("workflow") or "think"
+        entry = CommitResolver(vault).publish(args.session_id, _read_payload(args.file), workflow=workflow)
+        continuation = _finish_capture_after_commit(vault, args.session_id, workflow)
+        return {"entry_id": entry.entry_id, "revision": entry.revision, "commit_id": entry.commit_id, "capture": continuation}, True
     if command == "skills":
         loaded = SkillLoader().load(args.workflow, args.domain)
         return {"resources": loaded.identities, "missing": list(loaded.missing)}, True

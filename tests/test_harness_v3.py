@@ -36,6 +36,27 @@ class HarnessV3Tests(unittest.TestCase):
         self.assertEqual(("cursor", "assistant_message", "c3"), (cursor.host, cursor.kind, cursor.host_session_id))
         self.assertTrue(normalize_capture_event("claude-code", {"hook_event_name": "UserPromptSubmit", "session_id": "c4", "prompt": "/work-brain"}).explicit_activation)
 
+    def test_skill_loading_does_not_activate_development_capture(self) -> None:
+        prompts = (
+            "edit the Work Brain think SOP",
+            "fix the Work Brain capture tests",
+            "change the Work Brain skill package",
+        )
+        service = HarnessCaptureService(self.vault)
+        for index, prompt in enumerate(prompts):
+            payload = {"event": "UserPromptSubmit", "session_id": f"development-{index}", "prompt": prompt,
+                       "skill": "work-brain", "skill_invoked": True}
+            event = normalize_capture_event("codex", payload)
+            self.assertFalse(event.explicit_activation, prompt)
+            result = service.handle(event)
+            self.assertEqual("inactive", result["status"], prompt)
+        self.assertEqual([], self.vault.all_sessions())
+        explicit = normalize_capture_event("codex", {
+            "event": "UserPromptSubmit", "session_id": "explicit-skill", "prompt": "inspect this",
+            "skill": "work-brain", "skill_invocation_explicit": True,
+        })
+        self.assertTrue(explicit.explicit_activation)
+
     def test_speech_friendly_activation_is_table_driven_and_raw_safe(self) -> None:
         prompts = (
             "work brain start my day",
@@ -78,6 +99,12 @@ class HarnessV3Tests(unittest.TestCase):
         self.assertFalse(route_prompt("brainstorm this").activation)
         self.assertFalse(route_prompt("this is a brain teaser").activation)
         self.assertEqual("think with me about queues.", route_prompt("WORK BRAIN, think with me about queues.").routed_content)
+        capture = route_prompt("Capture This: I fixed the authentication issue")
+        self.assertTrue(capture.activation)
+        self.assertEqual("I fixed the authentication issue", capture.routed_content)
+        self.assertIsNone(capture.lifecycle)
+        self.assertEqual("commit-keep-active", route_prompt("That's Enough").lifecycle)
+        self.assertEqual("deactivate", route_prompt("STOP WORK BRAIN").lifecycle)
 
     def test_inactive_chat_is_not_captured_and_explicit_capture_is_exact(self) -> None:
         service = HarnessCaptureService(self.vault)
@@ -144,6 +171,43 @@ class HarnessV3Tests(unittest.TestCase):
         self.assertTrue(closed["deactivated"])
         self.assertEqual("closed", self.vault.read_session(started["session_id"])["runtime"]["capture_status"])
         self.assertEqual({}, json.loads((self.vault.root / "context/capture-mappings.json").read_text(encoding="utf-8")))
+
+    def test_commit_rotation_keeps_host_capture_active_for_next_bounded_session(self) -> None:
+        service = HarnessCaptureService(self.vault)
+        started = service.handle(normalize_capture_event("codex", {
+            "event": "UserPromptSubmit", "session_id": "day-long", "prompt": "start my day"
+        }))
+        rotated = service.rotate_session(started["session_id"])
+        self.assertTrue(rotated["rotated"])
+        self.assertNotEqual(started["session_id"], rotated["session_id"])
+        follow_up = service.handle(normalize_capture_event("codex", {
+            "event": "UserPromptSubmit", "session_id": "day-long", "prompt": "I am now deciding the migration boundary."
+        }))
+        self.assertEqual(rotated["session_id"], follow_up["session_id"])
+        self.assertEqual(["I am now deciding the migration boundary."], [
+            turn["content"] for turn in self.vault.list_turns(rotated["session_id"])
+        ])
+        mapping = json.loads((self.vault.root / "context/capture-mappings.json").read_text(encoding="utf-8"))
+        self.assertEqual(rotated["session_id"], mapping["codex:day-long"]["session_id"])
+
+    def test_stop_work_brain_deactivates_after_visible_response(self) -> None:
+        service = HarnessCaptureService(self.vault)
+        started = service.handle(normalize_capture_event("codex", {
+            "event": "UserPromptSubmit", "session_id": "stop-speech", "prompt": "start work brain"
+        }))
+        requested = service.handle(normalize_capture_event("codex", {
+            "event": "UserPromptSubmit", "session_id": "stop-speech", "prompt": "STOP WORK BRAIN"
+        }))
+        self.assertTrue(requested["captured"])
+        self.assertEqual("deactivate", normalize_capture_event("codex", {
+            "event": "UserPromptSubmit", "session_id": "stop-speech", "prompt": "STOP WORK BRAIN"
+        }).lifecycle)
+        finished = service.handle(normalize_capture_event("codex", {
+            "event": "Stop", "session_id": "stop-speech", "last_assistant_message": "Capture is closed."
+        }))
+        self.assertTrue(finished["deactivated"])
+        self.assertEqual({}, json.loads((self.vault.root / "context/capture-mappings.json").read_text(encoding="utf-8")))
+        self.assertEqual("closed", self.vault.read_session(started["session_id"])["runtime"]["capture_status"])
 
     def test_setup_is_idempotent_and_preserves_unrelated_settings(self) -> None:
         settings = self.home / ".codex/hooks.json"

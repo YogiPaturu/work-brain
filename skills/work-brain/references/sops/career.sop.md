@@ -9,6 +9,15 @@ own professional evidence. Keep question-bank lookup, evidence retrieval,
 pagination, and durable candidate marks behind their configured application
 interfaces; the agent must not invent those LLD4 contracts.
 
+Career practice has three explicit modes:
+
+- **Mock interview:** ask the question and let the user answer before revealing
+  retrieved candidates or coaching.
+- **Coached answer construction:** retrieve plausible candidates, let the user
+  choose an angle, and build an answer together.
+- **Story exploration:** investigate one experience for contribution, evidence,
+  outcome, trade-off, or learning without pretending it is already the answer.
+
 ## Parameters
 
 - **user_message** (required): The interview-practice request or story the user wants to rehearse.
@@ -69,11 +78,23 @@ missing or weakly supported parts.
   stated during the current practice, missing details, and model suggestions.
 - You MUST NOT invent a metric, outcome, stakeholder reaction, or ownership claim.
 
+For coached practice and mock follow-up, use this loop:
+
+`question → retrieve plausible experiences → user chooses story → answer →
+interviewer probe or challenge → critique evidence, contribution, outcome, and
+learning → retry`
+
+Do not skip the user's selection step or call one candidate “best.” In mock
+mode, the first loop is `question → answer`; retrieval and critique follow the
+user's answer.
+
 ### 4. Record the User’s Selection
 
-Ask the user which story, angle, wording, or candidate they prefer. If the
-configured career-mark interface is available, propose the explicit mark for
-user confirmation; otherwise leave the preference in the conversation.
+Ask the user which story, angle, wording, or candidate they prefer. An explicit
+selection is sufficient user intent for a candidate mark; do not ask for a
+second confirmation of the same selection. If the configured career-mark
+interface is available, persist only that selected mark; otherwise leave the
+preference in the conversation.
 
 **Constraints:**
 

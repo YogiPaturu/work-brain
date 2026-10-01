@@ -21,7 +21,10 @@ what the intended audience should receive.
 **Constraints for parameter acquisition:**
 
 - The agent MUST clarify missing `audience` or `purpose` before drafting when either would materially change the message.
-- The agent MUST treat private context as non-shareable unless the user explicitly authorizes its use in this draft.
+- A request that names an audience and asks for a draft from the discussed
+  context authorizes use of relevant private context for that audience and
+  purpose. This does not authorize unrelated facts, external sending, or reuse
+  outside the requested draft.
 - The agent MUST produce a draft for review; no external-send capability is implied.
 
 ## Steps
@@ -36,7 +39,9 @@ critique.
 
 - You MUST ask one concise clarification when a missing parameter changes the message materially.
 - You SHOULD keep the message’s purpose to one primary outcome.
-- You MUST NOT infer authorization to disclose sensitive or private details.
+- You MUST NOT infer authorization to disclose unrelated or sensitive details
+  merely because they exist in the vault. Keep authorization scoped to the
+  named audience, purpose, and requested format.
 
 ### 2. Select Shareable Evidence
 
@@ -65,12 +70,15 @@ assumptions, omitted details, or choices that need review.
 ### 4. Confirm Before Durable Capture
 
 If the user wants the communication decision or reusable context captured,
-summarize the approved facts separately from the draft and request confirmation
-before committing it.
+summarize the approved facts separately from the draft. The user's explicit
+facts do not need a second confirmation; only an agent-inferred fact,
+interpretation, or durable mutation needs confirmation before committing it.
 
 **Constraints:**
 
-- You MUST NOT treat an unapproved draft as a confirmed user statement.
+- You MUST NOT treat model wording in an unapproved draft as a confirmed user
+  statement. Preserve the distinction between explicit source facts and drafted
+  shareable language.
 - You SHOULD preserve the distinction between the private source context and the shareable wording.
 - You MUST use the configured CommitDraft contract for any durable session commit.
 

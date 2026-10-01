@@ -1,6 +1,6 @@
 ---
 name: work-brain
-description: Use for bounded professional thinking, daily work state, communication, career evidence, interview practice, and related Work Brain workflows.
+description: Use when recovering work context, reasoning through professional decisions, preserving exact work evidence, starting or closing a work day, updating work state, drafting from relevant private work context, or practising interview and career stories. Work Brain uses explicit activation and bounded sessions; ordinary coding chats remain outside durable capture.
 ---
 
 WORK-BRAIN-SKILL v2
@@ -9,7 +9,8 @@ WORK-BRAIN-SKILL v2
 
 Use this Skill for bounded professional-thinking sessions over a private Work
 Brain vault. The application selects one workflow and loads only the core SOP,
-that workflow SOP, and up to two relevant domain probes.
+that workflow SOP, and up to two relevant domain probes. Select probes for the
+actual target (not keyword presence), and replace them when the target changes.
 
 ## Routing
 
@@ -30,6 +31,22 @@ data, internal vault files, or generated projections directly. Do not construct
 ad-hoc SQL or mutate the vault through arbitrary shell commands. The harness
 may use its normal shell to execute sanctioned `work-brain` commands.
 
+## Development / authoring boundary
+
+When the user's task is to inspect, edit, test, document, package, install, or
+otherwise develop Work Brain itself, treat it as Work Brain development, not as
+a Work Brain professional-memory session. Do not activate durable capture solely
+because the task mentions Work Brain. Do not retrieve or mutate the user's
+private Work Brain vault unless the task explicitly requires a fixture or
+integration test against it. Use repository files, tests, and design documents
+as the development context.
+
+An explicit user activation such as “work brain think with me about this
+architecture” still overrides this boundary when the user genuinely wants a
+Work Brain session. Skill discovery or loading is not activation: the Skill may
+be available while repository work remains an ordinary coding task, and hooks
+must keep capture inactive until an activation boundary is observed.
+
 Activation is speech-friendly: a leading `work brain` is case-insensitive and
 does not require punctuation; the raw prompt remains unchanged. Explicit
 natural aliases include `start my day`, `open my work journal`, `start work
@@ -43,6 +60,8 @@ Work Brain LLM call and no MCP server in v1. At close, emit only the CommitDraft
 shape when durable new evidence exists and let the application supply IDs,
 timestamps, revisions, provenance, and persistence. A close-day gap check may
 complete without a commit; capture deactivation is a separate lifecycle action.
+“Finish this,” “that’s enough,” and “save this” may finish one bounded session
+while keeping capture active; “stop Work Brain” and “close my day” deactivate it.
 
 Resources:
 

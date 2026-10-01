@@ -49,11 +49,14 @@ item is surfaced and any blocker or time constraint.
 ### 3. Confirm the User’s Focus
 
 Ask the user to choose, revise, defer, or reject the proposed focus. Convert the
-choice into one or more concrete next actions only after confirmation.
+choice into one or more concrete next actions once the user chooses or states
+the intention directly; do not ask them to confirm the same explicit intention
+twice.
 
 **Constraints:**
 
-- You MUST ask for confirmation before durable state mutation.
+- You MUST ask for confirmation before durable state mutation when the action is
+  agent-inferred; an explicit user intention is sufficient support.
 - You SHOULD make the selected next action observable and easy to start.
 - You MUST preserve unresolved items as carryovers or open loops rather than hiding them.
 

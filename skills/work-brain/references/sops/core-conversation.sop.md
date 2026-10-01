@@ -25,6 +25,10 @@ SOP adds domain-specific emphasis.
 - The agent MUST use the documented Work Brain CLI operations for private evidence, state, retrieval, and maintenance. It MUST NOT access SQLite, vector data, internal vault files, generated projections, or construct ad-hoc SQL. The host harness may execute sanctioned `work-brain` commands through its normal shell.
 - The agent MUST NOT treat Skill instructions as a security boundary: the host agent may have independent access to files permitted by the host.
 - The agent SHOULD ask one high-value question at a time unless a small set of questions is required to unblock a clear decision.
+- The host MAY select zero, one, or two domain probes at the start of a
+  bounded target. Selection should follow the target's actual nature, not a
+  keyword hit. If the target materially changes, replace a probe rather than
+  accumulating a larger stack.
 
 ## Steps
 
@@ -79,10 +83,35 @@ ownership, causality, or outcomes are incomplete.
 
 - You MUST label or phrase uncertainty so it cannot be mistaken for a fact.
 - You MUST NOT invent dates, metrics, outcomes, ownership, quotes, or confidence.
-- You SHOULD ask the user to correct an interpretation before treating it as durable evidence.
+- An explicit user statement such as “I finished X” or “today I am working on
+  X” is stated evidence and MUST NOT trigger a redundant confirmation question.
+- An agent-inferred interpretation, mutation, or commitment MUST be surfaced
+  for correction or confirmation before it is treated as user intent.
 - You MUST treat an explicit user correction as authoritative source material.
 
-### 5. Close Without Pressure
+### 5. Notice Durable Moments
+
+At natural transitions, check the smallest useful reminder without turning it
+into a form:
+
+- **Decision:** why this choice, which alternative, expected result, and revisit signal.
+- **Outcome:** expected versus actual, evidence, impact, and why they differed.
+- **Ownership:** what the user personally did versus what the group did.
+- **Open loop:** owner, next action, blocker or waiting-on, and closure signal.
+- **Changed belief:** prior belief, evidence or challenge, and current belief.
+- **Artifact:** whether a PR, document, ticket, or other durable reference would
+  make the claim easier to verify later.
+
+Ask only the highest-value missing question. These reminders are behavioral
+checks, not a checklist to recite.
+
+**Constraints:**
+
+- You MUST NOT recite all reminders or ask every associated question.
+- You SHOULD use a reminder only when the current turn makes it materially
+  useful to the bounded target.
+
+### 6. Close Without Pressure
 
 Stop when the user says skip, enough, move on, or equivalent, or when further
 questions would repeat without improving the result. Before a normal close, ask:
@@ -95,6 +124,9 @@ or impossible to reconstruct from artifacts later?”
 - You MUST ask the closing memory-gap question at most once per coherent session.
 - You SHOULD summarize the decision, evidence, open questions, and next action in user-visible language.
 - You MUST emit only the configured CommitDraft shape when the application requests a commit; the application owns IDs, timestamps, revisions, provenance, and persistence.
+- Explicit lifecycle phrases have distinct meanings: “finish this,” “that’s
+  enough,” or “save this” finish the bounded session and keep host capture
+  active; “stop Work Brain” and “close my day” finish and deactivate capture.
 
 ## Examples
 

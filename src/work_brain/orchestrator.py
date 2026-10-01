@@ -33,6 +33,7 @@ class PromptRoute:
     normalized_content: str
     workflow: str
     recognized: bool
+    lifecycle: str | None = None
 
 
 # Keep this table as the single conversational control vocabulary. Matching is
@@ -50,8 +51,6 @@ WORKFLOW_ALIASES: tuple[tuple[str, str], ...] = (
     ("help me think through", "think"),
     ("challenge my thinking", "think"),
     ("think with me", "think"),
-    ("capture this", "think"),
-    ("journal this", "think"),
     ("think", "think"),
     ("reason", "think"),
     ("where did i leave off", "operate"),
@@ -81,6 +80,16 @@ WORKFLOW_ALIASES: tuple[tuple[str, str], ...] = (
 # explicit `work brain` prefix.
 NATURAL_ACTIVATION_ALIASES = frozenset({"start my day", "open my work journal", "start work brain", "capture this", "journal this"})
 
+LIFECYCLE_ALIASES: tuple[tuple[str, str], ...] = (
+    ("that s enough", "commit-keep-active"),
+    ("thats enough", "commit-keep-active"),
+    ("finish this", "commit-keep-active"),
+    ("save this", "commit-keep-active"),
+    ("done with this", "commit-keep-active"),
+    ("close this session", "commit-keep-active"),
+    ("stop work brain", "deactivate"),
+)
+
 
 def normalize_routing_text(value: str) -> str:
     """Normalize only command/routing text; never use this for persistence."""
@@ -102,6 +111,17 @@ def _strip_work_brain_prefix(raw: str) -> tuple[bool, str]:
     return True, remainder
 
 
+def _strip_capture_prefix(raw: str) -> tuple[bool, str]:
+    """Recognize explicit mid-conversation capture without choosing a workflow."""
+    candidate = raw.strip()
+    match = re.match(r"(?:capture\s+this|journal\s+this)(?=$|[^\w])", candidate, flags=re.IGNORECASE)
+    if not match:
+        return False, raw
+    remainder = candidate[match.end():]
+    remainder = re.sub(r"^[\s,.:;!?/\\|_\-–—]+", "", remainder)
+    return True, remainder
+
+
 def _workflow_for_normalized(normalized: str, current: str | None = None) -> tuple[str, bool]:
     for phrase, workflow in sorted(WORKFLOW_ALIASES, key=lambda item: len(item[0]), reverse=True):
         if normalized == phrase or normalized.startswith(phrase + " "):
@@ -111,14 +131,27 @@ def _workflow_for_normalized(normalized: str, current: str | None = None) -> tup
     return "think", False
 
 
+def _lifecycle_for_normalized(normalized: str) -> str | None:
+    for phrase, lifecycle in sorted(LIFECYCLE_ALIASES, key=lambda item: len(item[0]), reverse=True):
+        if normalized == phrase or normalized.startswith(phrase + " "):
+            return lifecycle
+    if normalized in {"close my day", "finish my day", "wrap up my day", "close day"}:
+        return "deactivate"
+    return None
+
+
 def route_prompt(intent: str | None, current: str | None = None) -> PromptRoute:
     raw = intent if isinstance(intent, str) else ""
     activation, routed = _strip_work_brain_prefix(raw)
+    capture_activation, routed = _strip_capture_prefix(routed)
+    activation = activation or capture_activation
     normalized = normalize_routing_text(routed)
     workflow, recognized = _workflow_for_normalized(normalized, current)
     if not activation and normalized in NATURAL_ACTIVATION_ALIASES:
         activation = True
-    return PromptRoute(raw=raw, activation=activation, routed_content=routed, normalized_content=normalized, workflow=workflow, recognized=recognized)
+    lifecycle = _lifecycle_for_normalized(normalized)
+    return PromptRoute(raw=raw, activation=activation, routed_content=routed, normalized_content=normalized,
+                       workflow=workflow, recognized=recognized, lifecycle=lifecycle)
 
 
 # Backwards-compatible alias mapping for callers that imported the old table.
@@ -140,7 +173,9 @@ class ContextPlanner:
     def plan(self, messages: list[Mapping[str, Any]], instructions: str, model: ConversationModel) -> ContextPlan:
         estimated = (len(instructions) + sum(len(message.get("content", "")) for message in messages)) // 4
         usable = max(model.context_window - model.output_reserve, 1)
-        return ContextPlan(estimated, usable, estimated >= int(usable * 0.70))
+        # Keep enough headroom for the next model response without making the
+        # bounded-session threshold overly sensitive to compact SOP wording.
+        return ContextPlan(estimated, usable, estimated >= int(usable * 0.85))
 
 
 class SessionOrchestrator:

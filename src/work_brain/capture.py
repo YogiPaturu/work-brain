@@ -25,6 +25,7 @@ class CaptureEvent:
     explicit_activation: bool = False
     workflow_hint: str | None = None
     routed_content: str | None = None
+    lifecycle: str | None = None
 
 
 def _value(payload: Mapping[str, Any], *keys: str) -> Any:
@@ -60,9 +61,15 @@ def _timestamp(payload: Mapping[str, Any]) -> str:
 
 
 def _explicit_skill(payload: Mapping[str, Any]) -> bool:
-    if payload.get("skill_invoked") is True or payload.get("skillInvoked") is True:
+    # Skill discovery/loading is not activation. A host must provide an
+    # explicit user-invocation marker; merely reporting the loaded Skill name
+    # or a generic `skill_invoked` flag is insufficient.
+    if payload.get("work_brain_explicit_activation") is True:
         return True
-    for key in ("skill", "skill_name", "skillName", "invoked_skill", "invokedSkill", "invocation"):
+    explicit_marker = payload.get("skill_invocation_explicit") is True or payload.get("skillInvocationExplicit") is True
+    if not explicit_marker:
+        return False
+    for key in ("skill", "skill_name", "skillName", "invoked_skill", "invokedSkill"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip().casefold().lstrip("/$") == "work-brain":
             return True
@@ -109,6 +116,7 @@ def _normalize(host: str, payload: Mapping[str, Any], event_map: Mapping[str, st
         explicit_activation=_explicit_skill(payload) or bool(route and (route.activation or _ACTIVATION_RE.match(text or "") or re.match(r"^\s*(?:/|\$)work-brain(?:\s|$)", text or "", re.IGNORECASE))),
         workflow_hint=route.workflow if route and (route.recognized or route.activation) else None,
         routed_content=route.routed_content if route else None,
+        lifecycle=route.lifecycle if route else None,
     )
 
 
@@ -208,6 +216,7 @@ class HarnessCaptureService:
                             "activation_trigger": event.text,
                             "capture_status": "active",
                             "workflow": workflow,
+                            "lifecycle_action": event.lifecycle,
                         },
                     )
                     session_id = session["session_id"]
@@ -223,6 +232,14 @@ class HarnessCaptureService:
                     session.setdefault("runtime", {}).update({"workflow": requested_workflow, "lifecycle_request": event.text})
                     self.vault.update_session_metadata(session_id, session)
                     mapping["workflow"] = requested_workflow
+                if event.lifecycle:
+                    session = self.vault.read_session(session_id)
+                    session.setdefault("runtime", {}).update({
+                        "lifecycle_request": event.text,
+                        "lifecycle_action": event.lifecycle,
+                    })
+                    self.vault.update_session_metadata(session_id, session)
+                    mapping["lifecycle"] = event.lifecycle
                 self._write_mappings(mappings)
                 return {"captured": True, "status": "active", "session_id": session_id, "role": "user", "workflow": requested_workflow or workflow}
             if mapping is None:
@@ -230,7 +247,7 @@ class HarnessCaptureService:
             session_id = mapping["session_id"]
             if event.kind == "assistant_message":
                 self.vault.append_turn(session_id, "assistant", event.text or "", recorded_at=event.recorded_at)
-                if mapping.get("workflow") == "close-day":
+                if mapping.get("workflow") == "close-day" or mapping.get("lifecycle") == "deactivate":
                     self._deactivate_mapping(mappings, key, session_id, status="closed")
                     return {"captured": True, "status": "closed", "deactivated": True, "session_id": session_id, "role": "assistant", "workflow": "close-day"}
                 return {"captured": True, "status": "active", "session_id": session_id, "role": "assistant"}
@@ -253,13 +270,63 @@ class HarnessCaptureService:
             return {"deactivated": True, "status": "closed", "session_id": actual_session}
 
     def stop_session(self, session_id: str) -> dict[str, Any]:
-        """Deactivate any host mapping for a session after an explicit commit."""
+        """Deactivate any host mapping for a session on an explicit stop."""
         with self.vault.write_lock():
             mappings = self._read_mappings()
             matches = [key for key, mapping in mappings.items() if mapping.get("session_id") == session_id]
             for key in matches:
                 self._deactivate_mapping(mappings, key, session_id, status="closed")
             return {"deactivated": bool(matches), "status": "closed", "session_id": session_id}
+
+    def rotate_session(self, session_id: str) -> dict[str, Any]:
+        """Start the next bounded session while keeping the host capture active.
+
+        A CommitDraft ends the logical session, but ordinary Work Brain commits
+        must not force the user to repeat the activation phrase. The mapping is
+        therefore advanced to a new source session with fresh entry identity.
+        """
+        with self.vault.write_lock():
+            mappings = self._read_mappings()
+            matches = [(key, mapping) for key, mapping in mappings.items()
+                       if mapping.get("session_id") == session_id]
+            if not matches:
+                return {"rotated": False, "status": "inactive", "session_id": session_id}
+            key, mapping = matches[0]
+            previous = self.vault.read_session(session_id)
+            runtime = dict(previous.get("runtime") or {})
+            runtime.update({
+                "capture_status": "active",
+                "capture_continuation": True,
+                "previous_session_id": session_id,
+                "capture_activation": "continued",
+            })
+            next_session = self.vault.create_session(
+                modes=list(previous.get("modes", [])),
+                domains=list(previous.get("domains", [])),
+                runtime=runtime,
+            )
+            previous_runtime = dict(previous.get("runtime") or {})
+            previous_runtime.update({
+                "capture_status": "committed",
+                "capture_continuation_to": next_session["session_id"],
+            })
+            previous["runtime"] = previous_runtime
+            self.vault.update_session_metadata(session_id, previous)
+            mappings[key] = {
+                **mapping,
+                "session_id": next_session["session_id"],
+                "workflow": runtime.get("workflow") or mapping.get("workflow"),
+                "previous_session_id": session_id,
+            }
+            self._write_mappings(mappings)
+            return {
+                "rotated": True,
+                "status": "active",
+                "previous_session_id": session_id,
+                "session_id": next_session["session_id"],
+                "host": mapping.get("host"),
+                "host_session_id": mapping.get("host_session_id"),
+            }
 
     def _deactivate_mapping(self, mappings: dict[str, dict[str, Any]], key: str, session_id: str, *, status: str) -> None:
         try:

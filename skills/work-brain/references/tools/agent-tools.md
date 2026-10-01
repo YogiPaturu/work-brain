@@ -16,6 +16,10 @@ commands through the harness's existing shell capability:
 - `list_interview_candidates`
 - `commit-draft` through stdin or a bounded file during the committing phase
 
+An ordinary `commit-draft` closes only the current bounded logical session and
+keeps the host capture envelope active. `close-day` and explicit stop commands
+close the envelope as well.
+
 Tools return compact typed results and stable references. Work Brain never
 exposes raw SQL, vector primitives, arbitrary vault filesystem mutation, or
 internal persistence operations as part of its supported application

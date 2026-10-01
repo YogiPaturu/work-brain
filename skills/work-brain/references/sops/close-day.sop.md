@@ -64,7 +64,8 @@ CommitDraft; otherwise finish without manufacturing a journal entry.
 
 **Constraints:**
 
-- You MUST commit only what the user actually discussed or explicitly confirmed.
+- You MUST commit only what the user actually discussed, explicitly stated, or
+  explicitly confirmed.
 - You MUST NOT duplicate an earlier session merely to make close-day appear complete.
 - The application MUST own persistence and journal projection.
 
