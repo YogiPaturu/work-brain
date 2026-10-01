@@ -201,12 +201,18 @@ class HarnessCaptureService:
             host_session_id = runtime.get("host_session_id")
         if host is None:
             host = runtime.get("host")
+        entries = [entry for entry in self.vault.all_current_entries() if entry.session_id == session_id]
         if runtime.get("capture_status") == "active":
             lifecycle = "active_capture"
             message = "Capture is active; raw turns are being saved."
-        elif runtime.get("capture_status") == "recoverable":
+        elif runtime.get("commit_status") == "pending_auto_commit" or (
+            session.get("ended_at") is None and runtime.get("capture_status") in {"recoverable", "rolled_over"}
+        ):
             lifecycle = "recoverable_raw"
             message = "Capture is inactive; raw turns are preserved and the structured commit is pending."
+        elif entries:
+            lifecycle = "committed"
+            message = "Structured entry is committed; raw turns remain preserved."
         elif runtime.get("capture_status") == "imported":
             lifecycle = "imported"
             message = "Imported raw transcript is preserved; no structured entry has been committed."
@@ -250,10 +256,10 @@ class HarnessCaptureService:
             mapped_ids = {mapping["session_id"] for mapping in mappings.values()}
             rolled: list[dict[str, Any]] = []
             for session in self.vault.all_sessions():
-                if session.get("ended_at") is not None or session["session_id"] in mapped_ids:
+                if session["session_id"] in mapped_ids:
                     continue
                 runtime = dict(session.get("runtime") or {})
-                if runtime.get("capture_status") not in {"recoverable", "rolled_over"}:
+                if runtime.get("commit_status") not in {"pending_auto_commit", "auto_commit_failed"}:
                     continue
                 age_days = (reference_date - date.fromisoformat(session["local_date"])).days
                 if age_days <= 1:
@@ -268,6 +274,7 @@ class HarnessCaptureService:
                         "commit_status": "pending_auto_commit" if turns else "no_new_evidence",
                     })
                     session["runtime"] = runtime
+                    session["ended_at"] = session.get("ended_at") or reference_at
                     self.vault.update_session_metadata(session["session_id"], session)
                 turns = self.vault.list_turns(session["session_id"])
                 rolled.append({
@@ -532,8 +539,14 @@ class HarnessCaptureService:
     def _deactivate_mapping(self, mappings: dict[str, dict[str, Any]], key: str, session_id: str, *, status: str) -> None:
         try:
             session = self.vault.read_session(session_id)
-            session.setdefault("runtime", {}).update({"capture_status": status})
-            if status == "closed" and session.get("ended_at") is None:
+            runtime = session.setdefault("runtime", {})
+            runtime.update({"capture_status": status, "capture_boundary": "closed"})
+            turns = self.vault.list_turns(session_id)
+            if turns:
+                runtime.setdefault("commit_status", "pending_auto_commit")
+            else:
+                runtime["commit_status"] = "no_new_evidence"
+            if session.get("ended_at") is None:
                 session["ended_at"] = timestamp_now()
             self.vault.update_session_metadata(session_id, session)
         finally:

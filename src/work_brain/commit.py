@@ -227,7 +227,8 @@ class CommitResolver:
         payload = {
             "entry_id": session["entry_id"], "session_id": session_id, "revision": revision, "commit_id": new_uuid7(),
             "created_at": timestamp_now(), "supersedes_revision": revision - 1 if revision > 1 else None,
-            "revision_reason": revision_reason, "provenance_kind": "reconstructed" if workflow == "backfill" else "contemporaneous",
+            "revision_reason": revision_reason,
+            "provenance_kind": "reconstructed" if workflow == "backfill" or (session.get("runtime") or {}).get("capture_fidelity") == "imported" else "contemporaneous",
             "title": draft.title, "summary": draft.summary, "occurrence": occurrence, "modes": modes, "domains": domains,
             "sections": draft.sections, "state_mutations": mutations, "entity_refs": entity_refs,
             "artifact_refs": artifact_refs, "source_refs": source_refs,

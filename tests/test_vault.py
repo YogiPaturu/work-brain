@@ -147,6 +147,16 @@ class VaultTests(unittest.TestCase):
         self.assertEqual("This raw evidence must remain.", self.vault.list_turns(self.session["session_id"])[0]["content"])
         self.assertTrue((self.vault.root / "quarantine/entries/2026-09-30" / self.session["session_id"] / "0001.json").exists())
 
+    def test_archive_preserves_raw_turns_and_hides_session(self) -> None:
+        self.vault.append_turn(self.session["session_id"], "user", "Archive this accidental capture safely.", recorded_at="2026-09-30T10:01:00+01:00")
+        self.vault.commit_entry(self.session["session_id"], entry_payload(self.session))
+        self.vault.archive_session(self.session["session_id"], reason="accidental duplicate session")
+        self.assertEqual([], self.vault.all_sessions())
+        self.assertEqual([self.session["session_id"]], [item["session_id"] for item in self.vault.all_sessions(include_archived=True)])
+        self.assertEqual([], self.vault.all_current_entries())
+        self.assertEqual("Archive this accidental capture safely.", self.vault.list_turns(self.session["session_id"])[0]["content"])
+        self.assertEqual("session", self.vault.read_session(self.session["session_id"])["runtime"]["archive_status"])
+
 
 if __name__ == "__main__":
     unittest.main()

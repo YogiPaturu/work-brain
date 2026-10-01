@@ -165,9 +165,11 @@ class HarnessV3Tests(unittest.TestCase):
         ended = service.handle(normalize_capture_event("cursor", {"event": "sessionEnd", "conversation_id": "cursor-1"}))
         self.assertEqual("recoverable", ended["status"])
         session = self.vault.read_session(started["session_id"])
-        self.assertIsNone(session["ended_at"])
+        self.assertIsNotNone(session["ended_at"])
         self.assertEqual(1, len(self.vault.list_turns(started["session_id"])))
         self.assertEqual("recoverable", session["runtime"]["capture_status"])
+        self.assertEqual("closed", session["runtime"]["capture_boundary"])
+        self.assertEqual("pending_auto_commit", session["runtime"]["commit_status"])
 
     def test_explicit_close_deactivates_mapping(self) -> None:
         service = HarnessCaptureService(self.vault)
@@ -361,7 +363,7 @@ class HarnessV3Tests(unittest.TestCase):
         rolled = service.rollover_stale_sessions(reference_at="2026-10-01T10:00:00+01:00")
         self.assertEqual([old["session_id"]], [item["session_id"] for item in rolled])
         old_session = self.vault.read_session(old["session_id"])
-        self.assertIsNone(old_session["ended_at"])
+        self.assertIsNotNone(old_session["ended_at"])
         self.assertEqual("rolled_over", old_session["runtime"]["capture_status"])
         self.assertEqual("pending_auto_commit", old_session["runtime"]["commit_status"])
         self.assertEqual("work brain: old decision", self.vault.list_turns(old["session_id"])[0]["content"])

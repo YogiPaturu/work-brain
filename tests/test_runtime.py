@@ -212,7 +212,10 @@ class RuntimeTests(unittest.TestCase):
         sessions = self.vault.all_sessions()
         self.assertGreaterEqual(len(sessions), 2)
         self.assertEqual("Short first topic.", self.vault.list_turns(first["session_id"])[0]["content"])
-        self.assertEqual(1, len(self.vault.all_current_entries()))
+        # Each bounded context may commit before opening a continuation.  The
+        # exact number depends on the planner threshold, but the original
+        # work must have produced at least one durable entry.
+        self.assertGreaterEqual(len(self.vault.all_current_entries()), 1)
 
     def test_close_day_can_finish_without_publishing_new_evidence(self) -> None:
         model = ScriptedModel(responses=["The day is already represented; nothing new needs recording."])
@@ -244,6 +247,30 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(1, len(self.vault.all_current_entries()))
         self.assertIsNotNone(self.vault.read_session(old["session_id"])["ended_at"])
         self.assertIsNone(self.vault.read_session(current["session_id"])["ended_at"])
+
+    def test_next_live_start_commits_closed_pending_boundary_without_duplicate_source(self) -> None:
+        capture = HarnessCaptureService(self.vault)
+        old = capture.handle(normalize_capture_event("codex", {
+            "event": "UserPromptSubmit", "session_id": "same-day-host",
+            "prompt": "work brain: preserve this bounded decision",
+            "recorded_at": "2026-10-01T10:00:00+01:00",
+        }))
+        capture.handle(normalize_capture_event("codex", {
+            "event": "SessionEnd", "session_id": "same-day-host",
+            "recorded_at": "2026-10-01T10:01:00+01:00",
+        }))
+        closed = self.vault.read_session(old["session_id"])
+        self.assertIsNotNone(closed["ended_at"])
+        self.assertEqual("pending_auto_commit", closed["runtime"]["commit_status"])
+
+        model = ScriptedModel(drafts=[draft()], responses=["The next bounded session is ready."])
+        orchestrator = SessionOrchestrator(self.vault, model)
+        current = orchestrator.start("start my day", workflow="open-day", started_at="2026-10-01T10:02:00+01:00")
+        self.assertEqual("committed", orchestrator.last_rollover_commits[0]["status"])
+        self.assertEqual(old["session_id"], orchestrator.last_rollover_commits[0]["session_id"])
+        self.assertEqual("committed", self.vault.read_session(old["session_id"])["runtime"]["commit_status"])
+        self.assertIsNone(self.vault.read_session(current["session_id"])["ended_at"])
+        self.assertEqual(1, len(self.vault.all_current_entries()))
 
     def test_active_turn_can_route_to_close_day_without_rewriting_raw_text(self) -> None:
         model = ScriptedModel(responses=["The day is already represented; nothing new needs recording.", "The close-day check is complete."])

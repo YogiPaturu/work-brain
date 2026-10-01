@@ -69,6 +69,9 @@ def _parser() -> argparse.ArgumentParser:
     quarantine = session_sub.add_parser("quarantine", help="hide one bad structured entry while preserving raw turns")
     quarantine.add_argument("--session-id", required=True)
     quarantine.add_argument("--reason", required=True)
+    archive = session_sub.add_parser("archive", help="hide a closed session while preserving all raw turns")
+    archive.add_argument("--session-id", required=True)
+    archive.add_argument("--reason", required=True)
     import_transcript = session_sub.add_parser("import", help="import an explicitly supplied transcript as raw turns")
     import_transcript.add_argument("--file", required=True, help="JSON transcript object containing a turns list")
     commit = sub.add_parser("commit", help="publish a resolved SessionEntry JSON payload")
@@ -235,9 +238,13 @@ def _session_status(vault: Vault, session_id: str) -> dict[str, Any]:
     ]
     entries = [entry for entry in vault.all_current_entries() if entry.session_id == session_id]
     runtime = dict(session.get("runtime") or {})
-    if host_mappings:
+    if runtime.get("archive_status") == "session":
+        lifecycle = "archived"
+    elif host_mappings:
         lifecycle = "active_capture"
-    elif session.get("ended_at") is None and runtime.get("capture_status") in {"recoverable", "rolled_over"}:
+    elif runtime.get("commit_status") == "pending_auto_commit" or (
+        session.get("ended_at") is None and runtime.get("capture_status") in {"recoverable", "rolled_over"}
+    ):
         lifecycle = "recoverable_raw"
     elif runtime.get("commit_status") == "no_new_evidence":
         lifecycle = "closed_no_new_evidence"
@@ -246,17 +253,19 @@ def _session_status(vault: Vault, session_id: str) -> dict[str, Any]:
     else:
         lifecycle = "closed_uncommitted"
     last = turns[-1] if turns else None
-    if lifecycle == "active_capture":
+    if lifecycle == "archived":
+        message = "Session is archived from active views; all raw turns are preserved and readable."
+    elif lifecycle == "active_capture":
         message = "Capture is active; raw turns are being saved."
     elif lifecycle == "recoverable_raw":
         message = "Capture is inactive; raw turns are preserved and the structured commit is pending."
-    elif runtime.get("capture_status") == "imported":
-        lifecycle = "imported"
-        message = "Imported raw transcript is preserved; no structured entry has been committed."
     elif lifecycle == "closed_no_new_evidence":
         message = "Capture is closed; no new structured evidence was committed."
     elif lifecycle == "committed":
         message = "Structured entry is committed; raw turns remain preserved."
+    elif runtime.get("capture_status") == "imported":
+        lifecycle = "imported"
+        message = "Imported raw transcript is preserved; no structured entry has been committed."
     else:
         message = "Capture is closed; raw turns are preserved but no structured entry is committed."
     active_mapping = host_mappings[0] if host_mappings else None
@@ -417,6 +426,9 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     if command == "session" and args.session_command == "quarantine":
         vault.quarantine_entry(args.session_id, reason=args.reason)
         return {"session_id": args.session_id, "status": "structured_entry_quarantined", "raw_turns_preserved": True}, True
+    if command == "session" and args.session_command == "archive":
+        vault.archive_session(args.session_id, reason=args.reason)
+        return {"session_id": args.session_id, "status": "session_archived", "raw_turns_preserved": True}, True
     if command == "session" and args.session_command == "import":
         return HarnessCaptureService(vault).import_transcript(_read_transcript(args.file)), True
     if command == "commit":
@@ -433,7 +445,11 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         loaded = SkillLoader().load(args.workflow, args.domain)
         return {"resources": loaded.identities, "missing": list(loaded.missing)}, True
     if command == "recoverable":
-        return [session for session in vault.all_sessions() if session.get("ended_at") is None], True
+        return [
+            session for session in vault.all_sessions()
+            if session.get("ended_at") is None
+            or (session.get("runtime") or {}).get("commit_status") in {"pending_auto_commit", "auto_commit_failed"}
+        ], True
     if command == "state" and args.state_command == "current":
         return _current_state(vault), True
     if command == "work" and args.work_command == "recent":

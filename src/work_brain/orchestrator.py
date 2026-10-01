@@ -208,6 +208,12 @@ class SessionOrchestrator:
         self._domains = list(domains or [])
         self.instructions = self.loader.load(self.workflow, self._domains)
         self._modes = [self.workflow]
+        # Host capture closes raw boundaries even when the host/model exits
+        # before it can emit a CommitDraft.  Resolve stale boundaries before
+        # opening the next logical session so a live start is the durable
+        # recovery point rather than another source of duplicates.
+        from .capture import HarnessCaptureService
+        HarnessCaptureService(self.vault).rollover_stale_sessions(reference_at=started_at)
         self.last_rollover_commits = self._commit_pending_rollovers()
         session = self.vault.create_session(
             started_at=started_at, modes=self._modes, domains=self._domains,
@@ -229,12 +235,20 @@ class SessionOrchestrator:
         handoff; failures leave the raw session in place for another attempt.
         """
         results: list[dict[str, Any]] = []
-        pending = [
-            session for session in self.vault.all_sessions()
-            if session.get("ended_at") is None
-            and (session.get("runtime") or {}).get("capture_status") == "rolled_over"
-            and (session.get("runtime") or {}).get("commit_status") == "pending_auto_commit"
-        ]
+        pending = []
+        for session in self.vault.all_sessions():
+            runtime = session.get("runtime") or {}
+            explicitly_pending = (
+                runtime.get("commit_status") == "pending_auto_commit"
+                and runtime.get("capture_boundary") == "closed"
+            )
+            legacy_recoverable = (
+                session.get("ended_at") is None
+                and runtime.get("capture_status") in {"recoverable", "rolled_over"}
+                and runtime.get("commit_status") is None
+            )
+            if explicitly_pending or legacy_recoverable:
+                pending.append(session)
         for session in pending:
             session_id = session["session_id"]
             runtime = dict(session.get("runtime") or {})
@@ -259,6 +273,7 @@ class SessionOrchestrator:
                             "commit_attempts": attempt + 1,
                             "commit_status": "committed",
                             "capture_status": "closed",
+                            "capture_boundary": "closed",
                         })
                         self.vault.update_session_metadata(session_id, current)
                         results.append({"session_id": session_id, "entry_id": entry.entry_id, "status": "committed"})

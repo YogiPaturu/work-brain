@@ -231,12 +231,14 @@ class Vault:
     def _session_paths(self) -> list[Path]:
         return sorted(self.root.glob("sessions/*/*/*/*/session.json"))
 
-    def all_sessions(self) -> list[dict[str, Any]]:
+    def all_sessions(self, *, include_archived: bool = False) -> list[dict[str, Any]]:
         sessions = []
         for path in self._session_paths():
             value = validate_session(read_json(path))
             if path.parent.name != value["session_id"]:
                 raise IntegrityError(f"session path/ID mismatch: {path}")
+            if not include_archived and (value.get("runtime") or {}).get("archive_status") == "session":
+                continue
             sessions.append(value)
         return sessions
 
@@ -448,6 +450,32 @@ class Vault:
                 EvidenceRetriever(self).reindex()
             except Exception as exc:
                 raise PersistenceError(f"entry quarantined but derived state is stale: {exc}") from exc
+
+    def archive_session(self, session_id: str, *, reason: str) -> None:
+        """Hide a closed session from active views while preserving all source data."""
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValidationError("archive reason must be a non-empty string")
+        with self._require_or_lock():
+            session = self.read_session(session_id)
+            if session.get("ended_at") is None:
+                raise ValidationError("cannot archive an active session; close it first")
+            runtime = dict(session.get("runtime") or {})
+            if runtime.get("archive_status") == "session":
+                raise IntegrityError(f"session is already archived: {session_id}")
+            runtime.update({
+                "archive_status": "session",
+                "archive_reason": reason.strip(),
+                "archived_at": timestamp_now(),
+            })
+            session["runtime"] = runtime
+            atomic_replace_json(self.session_dir(session_id) / "session.json", session)
+            try:
+                self.rebuild_projections()
+                self.reconcile_database()
+                from .retrieval import EvidenceRetriever
+                EvidenceRetriever(self).reindex()
+            except Exception as exc:
+                raise PersistenceError(f"session archived but derived state is stale: {exc}") from exc
 
     def apply_amendment(self, amendment_id: str, payload: Mapping[str, Any] | None = None) -> SessionEntry:
         """Publish a new user-correction revision linked to an amendment."""
@@ -673,7 +701,7 @@ class Vault:
         diagnostics: list[str] = []
         sessions: list[dict[str, Any]] = []
         try:
-            sessions = self.all_sessions()
+            sessions = self.all_sessions(include_archived=True)
         except Exception as exc:
             diagnostics.append(f"session metadata error: {exc}")
         for session in sessions:
