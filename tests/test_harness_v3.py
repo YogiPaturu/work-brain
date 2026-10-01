@@ -294,6 +294,72 @@ class HarnessV3Tests(unittest.TestCase):
             self.assertEqual(0, main(["--config", str(config_path), "state", "current"]))
         self.assertEqual({"items": []}, json.loads(config_output.getvalue().splitlines()[-1]))
 
+    def test_cli_reads_persisted_session_turns(self) -> None:
+        service = HarnessCaptureService(self.vault)
+        started = service.handle(normalize_capture_event("codex", {
+            "event": "UserPromptSubmit", "session_id": "read-turns", "prompt": "work brain: inspect this"
+        }))
+        service.handle(normalize_capture_event("codex", {
+            "event": "Stop", "session_id": "read-turns", "last_assistant_message": "Here is the persisted response."
+        }))
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(0, main([
+                "--vault", str(self.vault.root), "session", "turns",
+                "--session-id", started["session_id"], "--limit", "1",
+            ]))
+        value = json.loads(output.getvalue())
+        self.assertEqual(2, value["turn_count"])
+        self.assertTrue(value["has_more"])
+        self.assertEqual("work brain: inspect this", value["turns"][0]["content"])
+
+    def test_session_status_reports_capture_health_without_raw_content(self) -> None:
+        service = HarnessCaptureService(self.vault)
+        started = service.handle(normalize_capture_event("codex", {
+            "event": "UserPromptSubmit", "session_id": "status-view", "prompt": "work brain: inspect this"
+        }))
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(0, main([
+                "--vault", str(self.vault.root), "session", "status",
+                "--session-id", started["session_id"],
+            ]))
+        value = json.loads(output.getvalue())
+        self.assertEqual("active_capture", value["lifecycle"])
+        self.assertEqual(1, value["turn_count"])
+        self.assertEqual(1, value["last_captured_turn"]["sequence"])
+        self.assertEqual("active", value["capture_status"])
+        self.assertEqual("status-view", value["host_mappings"][0]["host_session_id"])
+        self.assertNotIn("content", value["last_captured_turn"])
+
+    def test_stale_rollover_closes_inactive_boundary_but_preserves_turns(self) -> None:
+        service = HarnessCaptureService(self.vault)
+        old = service.handle(normalize_capture_event("codex", {
+            "event": "UserPromptSubmit", "session_id": "old-host", "prompt": "work brain: old decision",
+            "recorded_at": "2026-09-29T10:00:00+01:00",
+        }))
+        service.handle(normalize_capture_event("codex", {
+            "event": "SessionEnd", "session_id": "old-host",
+            "recorded_at": "2026-09-29T10:01:00+01:00",
+        }))
+        yesterday = service.handle(normalize_capture_event("codex", {
+            "event": "UserPromptSubmit", "session_id": "yesterday-host", "prompt": "work brain: yesterday",
+            "recorded_at": "2026-09-30T10:00:00+01:00",
+        }))
+        service.handle(normalize_capture_event("codex", {
+            "event": "SessionEnd", "session_id": "yesterday-host",
+            "recorded_at": "2026-09-30T10:01:00+01:00",
+        }))
+
+        rolled = service.rollover_stale_sessions(reference_at="2026-10-01T10:00:00+01:00")
+        self.assertEqual([old["session_id"]], [item["session_id"] for item in rolled])
+        old_session = self.vault.read_session(old["session_id"])
+        self.assertIsNone(old_session["ended_at"])
+        self.assertEqual("rolled_over", old_session["runtime"]["capture_status"])
+        self.assertEqual("pending_auto_commit", old_session["runtime"]["commit_status"])
+        self.assertEqual("work brain: old decision", self.vault.list_turns(old["session_id"])[0]["content"])
+        self.assertEqual("recoverable", self.vault.read_session(yesterday["session_id"])["runtime"]["capture_status"])
+
     def test_codex_capture_hook_emits_only_valid_host_output(self) -> None:
         payloads = (
             {"hook_event_name": "SessionStart", "session_id": "hook-session", "source": "startup"},

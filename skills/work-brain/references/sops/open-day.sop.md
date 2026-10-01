@@ -13,12 +13,17 @@ silently create a plan or claim that yesterday’s work is complete.
 - **user_message** (required): The start-of-day request or stated intention.
 - **current_state** (required): Compact active state from the application.
 - **recent_work** (required): Bounded recent committed work.
+- **session_status** (required): Read-only lifecycle status for active and
+  recoverable capture sessions.
+- **rollover_sessions** (optional): Sessions older than one full intervening
+  calendar day whose capture boundaries were automatically closed.
 - **local_date** (optional): The application’s local date for the session.
 - **user_constraints** (optional): Time, energy, meetings, or other constraints supplied by the user.
 
 **Constraints for parameter acquisition:**
 
-- The application MUST provide `current_state` and `recent_work` when starting this workflow.
+- The application MUST provide `current_state`, `recent_work`, and
+  `session_status` when starting this workflow.
 - The agent MUST say when either source is missing or stale.
 - The agent MUST let the user choose or revise priorities.
 
@@ -26,14 +31,24 @@ silently create a plan or claim that yesterday’s work is complete.
 
 ### 1. Read the Compact Working Set
 
-Review current state and recent work before broader historical retrieval. Group
-items into carryovers, waiting items, commitments, and possible priorities.
+Review lifecycle status, current state, and recent work before broader
+historical retrieval. Group items into carryovers, waiting items, commitments,
+and possible priorities. Clearly distinguish no committed entries, recoverable
+raw sessions, active capture, and closed/no-new-evidence sessions.
 
 **Constraints:**
 
 - You MUST prefer the supplied compact sources over an unbounded history dump.
 - You SHOULD identify dependencies and stale items without declaring them resolved.
 - You MUST NOT infer that an item is complete merely because it is absent from recent work.
+- If rollover sessions are present, read their bounded turns, create and publish
+  a CommitDraft automatically when they contain meaningful evidence, and close
+  them as `no_new_evidence` when they do not. Do not ask the user to say
+  “save” for this recovery step.
+- A session exactly one calendar day old is a midnight edge case and MUST remain
+  recoverable unless the host explicitly closed it. Sessions more than one day
+  old may be rolled over only when their host mapping is inactive/recoverable;
+  never silently close an active same-day session.
 
 ### 2. Surface Focus Options
 
@@ -59,6 +74,9 @@ twice.
   agent-inferred; an explicit user intention is sufficient support.
 - You SHOULD make the selected next action observable and easy to start.
 - You MUST preserve unresolved items as carryovers or open loops rather than hiding them.
+- Beginning this workflow is also a workflow boundary: any prior recoverable
+  session selected for rollover is committed or explicitly closed before the
+  new day’s focus is presented.
 
 ## Examples
 

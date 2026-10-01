@@ -15,10 +15,13 @@ commands through the harness's existing shell capability:
 - `unmark_interview_candidate` only after explicit user confirmation
 - `list_interview_candidates`
 - `commit-draft` through stdin or a bounded file during the committing phase
+- `session status` for read-only capture health and lifecycle inspection
 
 An ordinary `commit-draft` closes only the current bounded logical session and
 keeps the host capture envelope active. `close-day` and explicit stop commands
-close the envelope as well.
+close the envelope as well. At a live workflow boundary, meaningful evidence
+is committed automatically; if the host/model is gone, raw turns are preserved
+for the next start-of-day rollover.
 
 Tools return compact typed results and stable references. Work Brain never
 exposes raw SQL, vector primitives, arbitrary vault filesystem mutation, or

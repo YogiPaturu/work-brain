@@ -78,6 +78,8 @@ class CommitDraftValidator:
         if not isinstance(value, Mapping):
             raise ValidationError(f"sections.{section} items must be objects")
         statement = Statement.from_dict(value)
+        if not statement.source_turns:
+            raise ValidationError(f"sections.{section} statements must reference supporting source_turns")
         if any(turn > turn_count for turn in statement.source_turns):
             raise ValidationError(f"sections.{section} references a missing source turn")
         return statement.to_dict()
@@ -99,6 +101,8 @@ class CommitDraftValidator:
     def _turns(value: Any, turn_count: int, field: str) -> list[int]:
         if not isinstance(value, list) or any(not isinstance(item, int) or item < 1 or item > turn_count for item in value):
             raise ValidationError(f"{field} must reference existing positive turn sequences")
+        if not value:
+            raise ValidationError(f"{field} must reference at least one supporting source turn")
         return value
 
     def _state_change(self, value: Any, turn_count: int) -> dict[str, Any]:

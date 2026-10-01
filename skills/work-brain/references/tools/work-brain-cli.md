@@ -49,6 +49,9 @@ work-brain evidence get --entry-id ENTRY_ID
 work-brain evidence search --query "import reliability" --page-size 10
 work-brain evidence hydrate < refs.json
 work-brain recoverable
+work-brain session turns --session-id SESSION_ID
+work-brain session turns --session-id SESSION_ID --offset 0 --limit 100
+work-brain session status --session-id SESSION_ID
 ```
 
 `evidence search` is the retrieval application operation. It returns bounded
@@ -72,6 +75,18 @@ The application validates and resolves IDs, revisions, provenance, and
 persistence. An ordinary commit rotates to a fresh bounded session while the
 host capture mapping stays active. A close-day commit deactivates the mapping.
 Do not write `turns.jsonl`, SQLite, journals, state, or vector data directly.
+
+Starting a new Work Brain session automatically rolls over inactive recoverable
+sessions more than one calendar day old. It preserves their raw turns and marks
+them `pending_auto_commit`; the live start-of-day workflow publishes a summary
+when meaningful evidence exists, or closes them as `no_new_evidence`. A session
+from exactly yesterday is left alone for the midnight edge case, and an active
+host mapping is never silently closed.
+
+`session status` is read-only and reports lifecycle state, turn count, last
+captured turn, capture/commit status, and host-session mappings. `session close`
+is the explicit no-new-evidence/abandoned boundary when no structured entry is
+being published.
 
 ## Capture activation
 

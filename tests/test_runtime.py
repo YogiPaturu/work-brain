@@ -19,6 +19,7 @@ from work_brain import (
     select_workflow,
 )
 from work_brain.model import ModelResponse
+from work_brain.capture import HarnessCaptureService, normalize_capture_event
 
 
 def draft(*, workflow: str = "think", bad_runtime_field: bool = False) -> dict:
@@ -136,6 +137,12 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             validator.validate(draft(bad_runtime_field=True), turn_count=1, workflow="think")
 
+    def test_commit_statements_require_exact_source_turns(self) -> None:
+        value = draft()
+        value["sections"]["context"][0]["source_turns"] = []
+        with self.assertRaises(ValidationError):
+            CommitDraftValidator().validate(value, turn_count=1, workflow="think")
+
     def test_commit_repair_is_bounded_and_raw_session_remains_recoverable(self) -> None:
         model = ScriptedModel(drafts=[draft(bad_runtime_field=True)], repairs=[])
         orchestrator = SessionOrchestrator(self.vault, model)
@@ -168,7 +175,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual("operate", self.vault.get_current_entry(session["entry_id"]).modes[0])
 
     def test_context_pressure_rolls_to_a_new_session(self) -> None:
-        model = ScriptedModel(drafts=[draft(), draft()], context_window=5_500, output_reserve=300)
+        model = ScriptedModel(drafts=[draft(), draft()], context_window=5_700, output_reserve=300)
         orchestrator = SessionOrchestrator(self.vault, model)
         first = orchestrator.start("Short first topic.", workflow="think")
         orchestrator.turn("x" * 2_000)
@@ -187,6 +194,27 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual([], self.vault.all_current_entries())
         self.assertIsNotNone(self.vault.read_session(session["session_id"])["ended_at"])
         self.assertEqual("no_new_evidence", self.vault.read_session(session["session_id"])["runtime"]["commit_status"])
+
+    def test_start_commits_a_stale_capture_before_opening_new_session(self) -> None:
+        capture = HarnessCaptureService(self.vault)
+        old = capture.handle(normalize_capture_event("codex", {
+            "event": "UserPromptSubmit", "session_id": "rollover-host",
+            "prompt": "work brain: capture the old decision",
+            "recorded_at": "2026-09-29T10:00:00+01:00",
+        }))
+        capture.handle(normalize_capture_event("codex", {
+            "event": "SessionEnd", "session_id": "rollover-host",
+            "recorded_at": "2026-09-29T10:01:00+01:00",
+        }))
+        capture.rollover_stale_sessions(reference_at="2026-10-01T10:00:00+01:00")
+        model = ScriptedModel(drafts=[draft()])
+        orchestrator = SessionOrchestrator(self.vault, model)
+        current = orchestrator.start("start my day", workflow="open-day", started_at="2026-10-01T10:00:00+01:00")
+        self.assertEqual("committed", orchestrator.last_rollover_commits[0]["status"])
+        self.assertEqual(old["session_id"], orchestrator.last_rollover_commits[0]["session_id"])
+        self.assertEqual(1, len(self.vault.all_current_entries()))
+        self.assertIsNotNone(self.vault.read_session(old["session_id"])["ended_at"])
+        self.assertIsNone(self.vault.read_session(current["session_id"])["ended_at"])
 
     def test_active_turn_can_route_to_close_day_without_rewriting_raw_text(self) -> None:
         model = ScriptedModel(responses=["The day is already represented; nothing new needs recording.", "The close-day check is complete."])

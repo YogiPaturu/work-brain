@@ -124,6 +124,12 @@ or impossible to reconstruct from artifacts later?”
 - You MUST ask the closing memory-gap question at most once per coherent session.
 - You SHOULD summarize the decision, evidence, open questions, and next action in user-visible language.
 - You MUST emit only the configured CommitDraft shape when the application requests a commit; the application owns IDs, timestamps, revisions, provenance, and persistence.
+- Closing a bounded workflow with meaningful evidence MUST invoke the
+  application’s CommitDraft path automatically. An explicit “save this” is an
+  optional early commit, not a prerequisite. If the host/model is already
+  gone, preserve raw turns and defer the structured commit to the next live
+  workflow boundary.
+- Every non-empty statement and state change in a CommitDraft MUST include the exact persisted raw turn sequence numbers that support it. If the evidence is not in the captured turns, omit the claim or keep the session recoverable rather than guessing.
 - Explicit lifecycle phrases have distinct meanings: “finish this,” “that’s
   enough,” or “save this” finish the bounded session and keep host capture
   active; “stop Work Brain” and “close my day” finish and deactivate capture.

@@ -56,10 +56,13 @@ sessions to `close-day` and may finish without a CommitDraft.
 Work Brain v1 is hosted by the active local agent harness. The harness owns the
 conversation, model, context, and agent loop; Work Brain owns the private vault,
 evidence, projections, retrieval, and deterministic CLI. There is no second
-Work Brain LLM call and no MCP server in v1. At close, emit only the CommitDraft
-shape when durable new evidence exists and let the application supply IDs,
-timestamps, revisions, provenance, and persistence. A close-day gap check may
+Work Brain LLM call and no MCP server in v1. At a live workflow boundary, emit
+only the CommitDraft shape when durable new evidence exists and let the
+application validate and publish it automatically. A close-day gap check may
 complete without a commit; capture deactivation is a separate lifecycle action.
+If the host/model disappears first, raw turns remain durable and the next live
+start-of-day boundary rolls them over and commits them when meaningful evidence
+exists.
 “Finish this,” “that’s enough,” and “save this” may finish one bounded session
 while keeping capture active; “stop Work Brain” and “close my day” deactivate it.
 

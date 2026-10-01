@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 import re
 from typing import Any, Mapping
 
 from .errors import ValidationError
 from .fsutil import atomic_replace_json, ensure_private_file, read_json
 from .orchestrator import PromptRoute, route_prompt, select_workflow
-from .timeutil import timestamp_now
+from .timeutil import date_for_timestamp, timestamp_now
 
 
 HOSTS = {"codex", "claude-code", "cursor"}
@@ -192,6 +193,52 @@ class HarnessCaptureService:
     def _write_mappings(self, value: Mapping[str, Any]) -> None:
         atomic_replace_json(self.mapping_path, dict(value))
 
+    def rollover_stale_sessions(self, *, reference_at: str | None = None) -> list[dict[str, Any]]:
+        """Close stale host capture boundaries without discarding raw turns.
+
+        A session is eligible only when its host explicitly reported a
+        recoverable/end condition and its mapping is no longer active.  The
+        strict ``> 1`` calendar-day threshold deliberately leaves yesterday's
+        session alone around midnight, where a user may simply be continuing
+        work across the date boundary.
+        """
+        reference_at = reference_at or timestamp_now()
+        reference_date = date.fromisoformat(date_for_timestamp(reference_at))
+        with self.vault.write_lock():
+            mappings = self._read_mappings()
+            mapped_ids = {mapping["session_id"] for mapping in mappings.values()}
+            rolled: list[dict[str, Any]] = []
+            for session in self.vault.all_sessions():
+                if session.get("ended_at") is not None or session["session_id"] in mapped_ids:
+                    continue
+                runtime = dict(session.get("runtime") or {})
+                if runtime.get("capture_status") not in {"recoverable", "rolled_over"}:
+                    continue
+                age_days = (reference_date - date.fromisoformat(session["local_date"])).days
+                if age_days <= 1:
+                    continue
+                if runtime.get("capture_status") != "rolled_over":
+                    turns = self.vault.list_turns(session["session_id"])
+                    runtime.update({
+                        "capture_status": "rolled_over",
+                        "capture_boundary": "closed",
+                        "rollover_reason": "stale_prior_day",
+                        "rollover_at": reference_at,
+                        "commit_status": "pending_auto_commit" if turns else "no_new_evidence",
+                    })
+                    session["runtime"] = runtime
+                    self.vault.update_session_metadata(session["session_id"], session)
+                turns = self.vault.list_turns(session["session_id"])
+                rolled.append({
+                    "session_id": session["session_id"],
+                    "entry_id": session["entry_id"],
+                    "local_date": session["local_date"],
+                    "age_days": age_days,
+                    "turn_count": len(turns),
+                    "status": "pending_auto_commit" if turns else "no_new_evidence",
+                })
+            return rolled
+
     def handle(self, event: CaptureEvent) -> dict[str, Any]:
         with self.vault.write_lock():
             mappings = self._read_mappings()
@@ -202,6 +249,7 @@ class HarnessCaptureService:
             if event.kind == "user_prompt":
                 if mapping is None and not event.explicit_activation:
                     return {"captured": False, "status": "inactive", "host": event.host, "host_session_id": event.host_session_id}
+                rollover = self.rollover_stale_sessions(reference_at=event.recorded_at) if mapping is None else []
                 if mapping is None:
                     workflow = event.workflow_hint or select_workflow(event.text)
                     session = self.vault.create_session(
@@ -241,7 +289,10 @@ class HarnessCaptureService:
                     self.vault.update_session_metadata(session_id, session)
                     mapping["lifecycle"] = event.lifecycle
                 self._write_mappings(mappings)
-                return {"captured": True, "status": "active", "session_id": session_id, "role": "user", "workflow": requested_workflow or workflow}
+                result = {"captured": True, "status": "active", "session_id": session_id, "role": "user", "workflow": requested_workflow or workflow}
+                if rollover:
+                    result["rolled_over"] = rollover
+                return result
             if mapping is None:
                 return {"captured": False, "status": "inactive", "host": event.host, "host_session_id": event.host_session_id}
             session_id = mapping["session_id"]

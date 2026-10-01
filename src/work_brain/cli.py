@@ -55,6 +55,17 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--started-at")
     start.add_argument("--mode", action="append", default=[])
     start.add_argument("--domain", action="append", default=[])
+    session = sub.add_parser("session", help="inspect persisted conversation sessions")
+    session_sub = session.add_subparsers(dest="session_command", required=True)
+    turns = session_sub.add_parser("turns", help="read the raw persisted turns for a session")
+    turns.add_argument("--session-id", required=True)
+    turns.add_argument("--offset", type=int, default=0)
+    turns.add_argument("--limit", type=int)
+    status = session_sub.add_parser("status", help="read capture and persistence status for a session")
+    status.add_argument("--session-id", required=True)
+    close = session_sub.add_parser("close", help="close a session without publishing a structured entry")
+    close.add_argument("--session-id", required=True)
+    close.add_argument("--reason", choices=["no_new_evidence", "abandoned"], default="no_new_evidence")
     turn = sub.add_parser("turn", help="append one durable user or assistant turn")
     turn.add_argument("--session-id", required=True)
     turn.add_argument("--role", required=True, choices=["user", "assistant"])
@@ -179,6 +190,74 @@ def _recent_work(vault: Vault, limit: int) -> list[dict[str, Any]]:
     return [{"entry_id": e.entry_id, "revision": e.revision, "title": e.title, "summary": e.summary} for e in entries[:limit]]
 
 
+def _session_turns(vault: Vault, session_id: str, *, offset: int, limit: int | None) -> dict[str, Any]:
+    if not isinstance(offset, int) or offset < 0:
+        raise ValidationError("offset must be a non-negative integer")
+    if limit is not None and (not isinstance(limit, int) or not 1 <= limit <= 1000):
+        raise ValidationError("limit must be an integer between 1 and 1000")
+    session = vault.read_session(session_id)
+    turns = vault.list_turns(session_id)
+    selected = turns[offset:] if limit is None else turns[offset:offset + limit]
+    return {
+        "session_id": session["session_id"],
+        "entry_id": session["entry_id"],
+        "local_date": session["local_date"],
+        "ended_at": session.get("ended_at"),
+        "turn_count": len(turns),
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + len(selected) < len(turns),
+        "turns": selected,
+    }
+
+
+def _session_status(vault: Vault, session_id: str) -> dict[str, Any]:
+    session = vault.read_session(session_id)
+    turns = vault.list_turns(session_id)
+    mappings_path = vault.root / HarnessCaptureService.MAP_RELATIVE
+    mappings = read_json(mappings_path) if mappings_path.exists() else {}
+    host_mappings = [
+        {
+            "host": value.get("host"),
+            "host_session_id": value.get("host_session_id"),
+            "workflow": value.get("workflow"),
+            "active": value.get("session_id") == session_id,
+        }
+        for value in mappings.values()
+        if isinstance(value, dict) and value.get("session_id") == session_id
+    ]
+    entries = [entry for entry in vault.all_current_entries() if entry.session_id == session_id]
+    runtime = dict(session.get("runtime") or {})
+    if host_mappings:
+        lifecycle = "active_capture"
+    elif session.get("ended_at") is None and runtime.get("capture_status") in {"recoverable", "rolled_over"}:
+        lifecycle = "recoverable_raw"
+    elif runtime.get("commit_status") == "no_new_evidence":
+        lifecycle = "closed_no_new_evidence"
+    elif entries:
+        lifecycle = "committed"
+    else:
+        lifecycle = "closed_uncommitted"
+    last = turns[-1] if turns else None
+    return {
+        "session_id": session["session_id"],
+        "entry_id": session["entry_id"],
+        "local_date": session["local_date"],
+        "started_at": session["started_at"],
+        "ended_at": session.get("ended_at"),
+        "lifecycle": lifecycle,
+        "capture_status": runtime.get("capture_status", "not_captured"),
+        "commit_status": runtime.get("commit_status"),
+        "turn_count": len(turns),
+        "last_captured_turn": None if last is None else {
+            "sequence": last["sequence"], "role": last["role"], "recorded_at": last["recorded_at"],
+        },
+        "host_mappings": host_mappings,
+        "has_committed_entry": bool(entries),
+        "current_revision": max((entry.revision for entry in entries), default=None),
+    }
+
+
 def _open_loops(vault: Vault, limit: int) -> list[dict[str, Any]]:
     if not isinstance(limit, int) or not 0 < limit <= 100:
         raise ValidationError("limit must be an integer between 1 and 100")
@@ -239,7 +318,7 @@ def _question_ref(value: str | None) -> QuestionRef | None:
 
 def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     command = args.command
-    machine = bool(args.json or command in {"state", "work", "evidence", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "turn", "commit", "commit-draft", "setup", "reindex"})
+    machine = bool(args.json or command in {"state", "work", "evidence", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "turn", "commit", "commit-draft", "setup", "reindex", "session"})
     if command == "config":
         if args.config_command == "set-vault":
             path = set_vault_path(args.path, args.config)
@@ -299,7 +378,17 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
             "embedding": retriever.embedding_status(retriever.health()),
         }, machine
     if command == "session-start":
-        return vault.create_session(started_at=args.started_at, modes=args.mode, domains=args.domain), True
+        started_at = args.started_at
+        rollover = HarnessCaptureService(vault).rollover_stale_sessions(reference_at=started_at)
+        session = vault.create_session(started_at=started_at, modes=args.mode, domains=args.domain)
+        return {"session": session, "rollover": rollover}, True
+    if command == "session" and args.session_command == "turns":
+        return _session_turns(vault, args.session_id, offset=args.offset, limit=args.limit), True
+    if command == "session" and args.session_command == "status":
+        return _session_status(vault, args.session_id), True
+    if command == "session" and args.session_command == "close":
+        HarnessCaptureService(vault).stop_session(args.session_id)
+        return vault.close_session(args.session_id, commit_status=args.reason), True
     if command == "turn":
         content = args.content if args.content is not None else sys.stdin.read()
         return vault.append_turn(args.session_id, args.role, content, recorded_at=args.recorded_at), True

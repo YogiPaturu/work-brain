@@ -241,10 +241,17 @@ work-brain work recent --limit 8
 work-brain work loops --limit 20
 work-brain evidence get --entry-id ENTRY_ID
 work-brain recoverable
+work-brain session turns --session-id SESSION_ID
+work-brain session status --session-id SESSION_ID
 
 # CommitDraft may be read from stdin, avoiding shell quoting problems.
 work-brain commit-draft --session-id SESSION_ID < commit-draft.json
 ```
+
+`session turns` is a read-only view of the append-only raw conversation for a
+session. Use `--offset` and `--limit` to page through long sessions.
+`session status` is a read-only health view showing lifecycle, turn count, last
+captured turn, capture/commit status, and host-session mappings.
 
 `evidence search` is the stable retrieval operation. It searches current
 structured entries with deterministic chunks, SQLite FTS5, a local vector
@@ -381,7 +388,8 @@ work-brain --vault "$HOME/work-brain-vault" career candidates unmark --entry-id 
 
 For advanced/manual integration, the CLI also supports `init`, `rebuild`,
 `reindex`, `session-start`, `turn`, `commit`, `commit-draft`, `recoverable`,
-and `capture-hook`. Use `work-brain --help` for the complete syntax.
+`session status`, `session close`, and `capture-hook`. Use `work-brain --help`
+for the complete syntax.
 
 ## Install the one canonical Skill
 

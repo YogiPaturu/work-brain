@@ -198,6 +198,7 @@ class SessionOrchestrator:
         self._messages: list[dict[str, Any]] = []
         self._modes: list[str] = []
         self._domains: list[str] = []
+        self.last_rollover_commits: list[dict[str, Any]] = []
 
     def start(self, user_text: str | None = None, *, workflow: str | None = None,
               domains: list[str] | None = None, started_at: str | None = None) -> dict[str, Any]:
@@ -207,6 +208,7 @@ class SessionOrchestrator:
         self._domains = list(domains or [])
         self.instructions = self.loader.load(self.workflow, self._domains)
         self._modes = [self.workflow]
+        self.last_rollover_commits = self._commit_pending_rollovers()
         session = self.vault.create_session(
             started_at=started_at, modes=self._modes, domains=self._domains,
             runtime={"model": self.model.model_id, "app_revision": "runtime-v1", "workflow": self.workflow,
@@ -218,6 +220,62 @@ class SessionOrchestrator:
         if user_text:
             self.turn(user_text)
         return session
+
+    def _commit_pending_rollovers(self) -> list[dict[str, Any]]:
+        """Commit stale capture sessions before opening a new live session.
+
+        The capture layer marks only inactive sessions older than the strict
+        calendar-day threshold. This method is the model-aware half of the
+        handoff; failures leave the raw session in place for another attempt.
+        """
+        results: list[dict[str, Any]] = []
+        pending = [
+            session for session in self.vault.all_sessions()
+            if session.get("ended_at") is None
+            and (session.get("runtime") or {}).get("capture_status") == "rolled_over"
+            and (session.get("runtime") or {}).get("commit_status") == "pending_auto_commit"
+        ]
+        for session in pending:
+            session_id = session["session_id"]
+            runtime = dict(session.get("runtime") or {})
+            chosen = select_workflow(runtime.get("workflow"), (session.get("modes") or [None])[0])
+            domains = list(session.get("domains", []))
+            instructions = self.loader.load(chosen, domains)
+            messages = [{"role": turn["role"], "content": turn["content"]} for turn in self.vault.list_turns(session_id)]
+            if not messages:
+                self.vault.close_session(session_id, commit_status="no_new_evidence")
+                results.append({"session_id": session_id, "status": "no_new_evidence"})
+                continue
+            try:
+                draft = self.model.emit_commit_draft(messages, instructions=instructions.text)
+                for attempt in range(3):
+                    try:
+                        entry = self.resolver.publish(session_id, draft, workflow=chosen, revision_reason="initial_commit")
+                        current = self.vault.read_session(session_id)
+                        current.setdefault("runtime", {}).update({
+                            "model": self.model.model_id,
+                            "sops": instructions.identities,
+                            "workflow": chosen,
+                            "commit_attempts": attempt + 1,
+                            "commit_status": "committed",
+                            "capture_status": "closed",
+                        })
+                        self.vault.update_session_metadata(session_id, current)
+                        results.append({"session_id": session_id, "entry_id": entry.entry_id, "status": "committed"})
+                        break
+                    except ValidationError as exc:
+                        if attempt == 2:
+                            raise
+                        draft = self.model.repair_commit_draft(draft, str(exc), instructions=instructions.text)
+            except Exception as exc:
+                current = self.vault.read_session(session_id)
+                current.setdefault("runtime", {}).update({
+                    "commit_status": "auto_commit_failed",
+                    "auto_commit_error": str(exc),
+                })
+                self.vault.update_session_metadata(session_id, current)
+                results.append({"session_id": session_id, "status": "recoverable", "error": str(exc)})
+        return results
 
     def turn(self, user_text: str) -> ModelResponse:
         if self.state != RuntimeState.ACTIVE or self.session_id is None or self.instructions is None or self.workflow is None:

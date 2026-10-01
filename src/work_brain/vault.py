@@ -213,6 +213,19 @@ class Vault:
             append_jsonl(self.session_dir(session_id) / "turns.jsonl", candidate)
             return candidate
 
+    def close_session(self, session_id: str, *, commit_status: str = "no_new_evidence") -> dict[str, Any]:
+        """Close a capture boundary when no structured entry will be published."""
+        if commit_status not in {"no_new_evidence", "abandoned"}:
+            raise ValidationError("unsupported close-session commit status")
+        with self._require_or_lock():
+            session = self.read_session(session_id)
+            if session.get("ended_at") is None:
+                session["ended_at"] = timestamp_now()
+            runtime = dict(session.get("runtime") or {})
+            runtime.update({"capture_status": "closed", "capture_boundary": "closed", "commit_status": commit_status})
+            session["runtime"] = runtime
+            return self.update_session_metadata(session_id, session)
+
     # ----- source scans ----------------------------------------------------------
 
     def _session_paths(self) -> list[Path]:
