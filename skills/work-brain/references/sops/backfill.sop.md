@@ -18,7 +18,7 @@ the time, what is remembered now, and what hindsight suggests.
 
 **Constraints for parameter acquisition:**
 
-- The agent MUST establish an LLD-01-compatible historical occurrence before commit; approximate or unknown time is valid when represented honestly.
+- The agent MUST establish a persistence-compatible historical occurrence before commit; approximate or unknown time is valid when represented honestly.
 - The agent MUST treat this as one coherent historical experience.
 - The agent MUST retrieve related evidence when available to reduce accidental duplication, but MUST continue transparently if retrieval is unavailable.
 

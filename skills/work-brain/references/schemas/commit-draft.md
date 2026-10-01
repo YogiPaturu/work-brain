@@ -6,10 +6,10 @@ The model emits only semantic fields:
 
 - `title`: non-empty string, at most 240 characters.
 - `summary`: string, at most 4000 characters.
-- `historical_occurrence`: `null` for normal sessions; an LLD1 occurrence for
+- `historical_occurrence`: `null` for normal sessions; a historical occurrence for
   `backfill`.
 - `domains`: lowercase tokens.
-- `sections`: exactly the LLD1 entry section names; each statement has `text`,
+- `sections`: exactly the supported entry section names; each statement has `text`,
   `basis` (`stated` or `inferred`), and existing `source_turns`.
 - `state_changes`, `entity_candidates`, `artifact_candidates`, and
   `source_entry_refs`.

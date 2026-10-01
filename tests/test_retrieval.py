@@ -30,7 +30,7 @@ def payload(session: dict, *, title: str, summary: str, revision: int = 1, super
     }
 
 
-class LLD3Tests(unittest.TestCase):
+class RetrievalTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.vault = Vault(Path(self.tempdir.name) / "vault").initialize()

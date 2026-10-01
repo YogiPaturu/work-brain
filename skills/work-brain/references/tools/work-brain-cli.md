@@ -33,7 +33,7 @@ work-brain evidence hydrate < refs.json
 work-brain recoverable
 ```
 
-`evidence search` is the LLD-03 application operation. It returns bounded
+`evidence search` is the retrieval application operation. It returns bounded
 EvidenceCards with stable entry/revision refs and an opaque continuation
 cursor. Use `evidence hydrate` for selected refs and `reindex` for explicit
 retrieval maintenance. Search may report degraded or incomplete state; never

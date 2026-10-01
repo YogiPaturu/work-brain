@@ -1,9 +1,9 @@
 # Work Brain — LLD-003 v3: Retrieval and Index Lifecycle
 
 **Status:** implemented; verification and benchmark work continue
-**Supersedes:** `work-brain-lld-03-retrieval-fts-embeddings-index-lifecycle-v2.md`  
-**Parent:** [`work-brain-hld-v3.md`](work-brain-hld-v3.md)  
-**Sibling:** [`work-brain-lld-02-agent-runtime-skills-session-orchestration-v3.md`](work-brain-lld-02-agent-runtime-skills-session-orchestration-v3.md)
+**Supersedes:** [`archive/retrieval-and-indexing-v2.md`](archive/retrieval-and-indexing-v2.md)  
+**Parent:** [`architecture.md`](architecture.md)  
+**Sibling:** [`runtime-and-capture.md`](runtime-and-capture.md)
 
 ## 1. Purpose and unchanged retrieval contract
 

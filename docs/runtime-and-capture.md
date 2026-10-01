@@ -1,8 +1,8 @@
 # Work Brain — LLD-002 v3: Harness Runtime, Skills, Capture, and CLI
 
 **Status:** implemented contract consumed by LLD-03
-**Supersedes:** `work-brain-lld-02-agent-runtime-skills-session-orchestration-v2.md`  
-**Parent:** [`work-brain-hld-v3.md`](work-brain-hld-v3.md)  
+**Supersedes:** [`archive/runtime-and-capture-v2.md`](archive/runtime-and-capture-v2.md)  
+**Parent:** [`architecture.md`](architecture.md)  
 **Sibling contracts:** LLD-01 remains source authority; LLD-03 v3 consumes the
   application retrieval boundary; LLD-04 remains deferred.
 

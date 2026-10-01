@@ -1,7 +1,7 @@
 # Work Brain — HLD-001 v3
 
 **Status:** v1 architecture baseline with LLD-03 implementation
-**Supersedes:** `work-brain-hld-v2.md`  
+**Supersedes:** [`archive/architecture-v2.md`](archive/architecture-v2.md)  
 **Scope:** local Work Brain hosted by an existing coding-agent harness
 
 ## 1. Decision summary

@@ -26,7 +26,7 @@ def entry_payload(session: dict, *, commit_id: str | None = None, reason: str = 
     }
 
 
-class LLD1Tests(unittest.TestCase):
+class VaultTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.vault = Vault(Path(self.tempdir.name) / "career-vault").initialize()

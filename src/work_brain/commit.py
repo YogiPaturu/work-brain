@@ -53,7 +53,7 @@ class CommitDraftValidator:
         domains = self._domains(raw.get("domains", []))
         sections_raw = raw.get("sections")
         if not isinstance(sections_raw, Mapping) or set(sections_raw) != set(ENTRY_SECTIONS):
-            raise ValidationError("sections must contain exactly the LLD1 section names")
+            raise ValidationError("sections must contain exactly the supported entry section names")
         sections: dict[str, list[dict[str, Any]]] = {}
         for section in ENTRY_SECTIONS:
             values = sections_raw[section]

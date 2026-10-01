@@ -50,19 +50,24 @@ Codex / Claude Code / Cursor
 It is not a hosted SaaS product, team project-management system, CRM, meeting
 transcriber, or generic personal-life knowledge base.
 
-## Implementation status
+## What is implemented
 
-| Layer | Responsibility | Status |
-|---|---|---|
-| HLD-001 v3 | Harness-hosted local architecture, trust boundaries, capture, and future decisions | Implemented as design contract |
-| LLD-01 | Vault, raw turns, revisions, amendments, entities, artifacts, WorkState, journals, SQLite, rebuilds, locking | Implemented |
-| LLD-02 v3 | Portable Skill/SOPs, workflow contracts, CommitDraft validation/recovery, CLI boundary, harness capture, setup | Implemented |
-| LLD-03 v3 | FTS5, local embeddings, vector search, hybrid retrieval, pagination, hydration, index lifecycle | Implemented as a rebuildable local projection; optional BGE semantic profile |
-| LLD-04 | Question-bank normalization, interview practice, career retrieval, candidate marks | Implemented as a local Career projection |
+The release includes one source-first evidence model with rebuildable journals,
+current work state, and retrieval projections. It also includes:
 
-The four LLDs consume one LLD-01 evidence model. Journals, WorkState, SQLite,
-FTS, vectors, and career views are projections; raw turns and structured source
-entries remain authoritative.
+- a local vault for exact conversation turns, structured evidence, revisions,
+  amendments, entities, artifacts, and open work state;
+- a host-integrated Skill, SOPs, bounded capture sessions, lifecycle aliases,
+  CommitDraft validation, recovery, and setup for Codex, Claude Code, and
+  Cursor;
+- deterministic lexical search, optional local semantic embeddings, hybrid
+  retrieval, pagination, hydration, and reindexing;
+- deterministic question-bank lookup, interview preparation, mock practice,
+  evidence retrieval, and explicit candidate marks.
+
+The raw conversation and structured source entries remain authoritative.
+Journals, WorkState, SQLite, retrieval indexes, and career views are
+rebuildable projections.
 
 ## Install
 
@@ -122,7 +127,7 @@ work-brain recoverable
 work-brain commit-draft --session-id SESSION_ID < commit-draft.json
 ```
 
-`evidence search` is the stable LLD-03 operation surface. It searches current
+`evidence search` is the stable retrieval operation. It searches current
 structured entries with deterministic chunks, SQLite FTS5, a local vector
 adapter, and entry-level hybrid fusion:
 
@@ -189,7 +194,8 @@ PYTHONPATH=src python3 examples/benchmark_retrieval.py \
 ```
 
 The benchmark is diagnostic only. A resident daemon is intentionally not part
-of LLD-03; model startup should be justified by measured user-facing latency.
+of the local runtime; model startup should be justified by measured
+user-facing latency.
 
 For a broader, report-only evaluation, use the checked-in synthetic fixture:
 
@@ -208,7 +214,7 @@ corpus or a quality threshold is warranted.
 
 ### Interview practice and Career retrieval
 
-LLD-04 keeps two corpora separate: question banks answer “what might I be
+Career retrieval keeps two corpora separate: question banks answer “what might I be
 asked?”, while committed Work Brain evidence answers “what actually happened?”
 Question lookup is deterministic and never calls an LLM. The repository's
 synthetic bank is safe for public smoke tests; private banks belong in the
@@ -248,7 +254,7 @@ work-brain --vault "$HOME/work-brain-vault" career candidates list
 work-brain --vault "$HOME/work-brain-vault" career candidates unmark --entry-id ENTRY_ID
 ```
 
-For low-level/manual integration, the CLI also supports `init`, `rebuild`,
+For advanced/manual integration, the CLI also supports `init`, `rebuild`,
 `reindex`, `session-start`, `turn`, `commit`, `commit-draft`, `recoverable`,
 and `capture-hook`. Use `work-brain --help` for the complete syntax.
 
@@ -419,7 +425,7 @@ contract/eval fixtures for a host model, not a claim that a fixed script is an
 LLM benchmark.
 
 **Storage and retrieval.** The CLI delegates to application/domain services.
-LLD-03 keeps the same chunk corpus in FTS5 and local vectors, applies explicit
+The retrieval layer keeps the same chunk corpus in FTS5 and local vectors, applies explicit
 filters, fuses lexical and semantic candidates deterministically, and hydrates
 only from authoritative source files. Harnesses and Skills do not choose FTS
 versus vectors or receive raw scores, SQL, vectors, or internal paths.
@@ -483,8 +489,8 @@ repair, or close it through the supported Work Brain workflow.
 
 ## Testing and manual smoke checklist
 
-Automated tests cover LLD-01 durability, LLD-02 v3 contracts, LLD-03 retrieval,
-and LLD-04 Career behavior: deterministic chunk/index generation, FTS/vector
+Automated tests cover vault durability, runtime contracts, retrieval, and
+Career behavior: deterministic chunk/index generation, FTS/vector
 corpus alignment, current-revision search, filters, pagination, hydration,
 degraded behavior, reindexing, no-score EvidenceCards, tagged question parsing,
 explicit candidate marks, revision-stable preferences, and prepare/mock
@@ -515,11 +521,8 @@ Manual checks should be run separately for each available local harness:
 Fixture-based support for Claude Code or Cursor is not a claim of runtime
 testing on a machine where those hosts were not available.
 
-## Design references
+## Maintainer documentation
 
-- [HLD-001 v3: Harness-hosted architecture](work-brain-hld-v3.md)
-- [LLD-01: Core domain, vault, and persistence](work-brain-lld-01-core-domain-vault-persistence-v2.md)
-- [LLD-002 v3: Runtime, Skill, capture, and CLI](work-brain-lld-02-agent-runtime-skills-session-orchestration-v3.md)
-- [LLD-003 v3: Retrieval and index lifecycle](work-brain-lld-03-retrieval-fts-embeddings-index-lifecycle-v3.md)
-- [LLD-04: Interview practice and career retrieval](work-brain-lld-04-interview-practice-career-retrieval-v1.md)
-- [Future considerations](work-brain-future-considerations.md)
+Design notes, implementation history, and future considerations live in
+[`docs/`](docs/). They are optional reading for users who only want to install
+and use Work Brain.

@@ -9,7 +9,7 @@ from .questions import MarkdownQuestionBankProvider, QuestionBank, QuestionFilte
 
 
 class CareerService:
-    """Application boundary for LLD-04; never mutates professional evidence."""
+    """Application boundary for career workflows; never mutates professional evidence."""
 
     def __init__(self, vault: Any, *, banks: Iterable[QuestionBank] | None = None, retriever: EvidenceRetriever | None = None):
         self.vault = vault

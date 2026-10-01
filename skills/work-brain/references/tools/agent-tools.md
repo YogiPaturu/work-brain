@@ -24,7 +24,7 @@ Tools return compact typed results and stable references. Work Brain never
 exposes raw SQL, vector primitives, arbitrary vault filesystem mutation, or
 internal persistence operations as part of its supported application
 interface. Retrieval implementation belongs behind the application adapter
-and LLD3 contract.
+and retrieval contract.
 
 The host agent can read other files that its own permissions allow. A Skill is
 not a security boundary; the documented CLI is the supported Work Brain

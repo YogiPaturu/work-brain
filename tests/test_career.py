@@ -27,7 +27,7 @@ def entry_payload(session: dict, *, revision: int = 1, supersedes: int | None = 
     }
 
 
-class LLD4Tests(unittest.TestCase):
+class CareerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)

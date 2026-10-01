@@ -186,7 +186,7 @@ class SessionEntry:
         modes, domains = _string_list(_required(raw, "modes"), "modes"), _string_list(_required(raw, "domains"), "domains")
         sections_raw = _required(raw, "sections")
         if not isinstance(sections_raw, dict) or set(sections_raw) != set(ENTRY_SECTIONS):
-            raise ValidationError("sections must contain exactly the LLD1 section names")
+            raise ValidationError("sections must contain exactly the supported entry section names")
         sections = {}
         for name in ENTRY_SECTIONS:
             if not isinstance(sections_raw[name], list):

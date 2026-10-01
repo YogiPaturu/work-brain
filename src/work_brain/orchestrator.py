@@ -209,7 +209,7 @@ class SessionOrchestrator:
         self._modes = [self.workflow]
         session = self.vault.create_session(
             started_at=started_at, modes=self._modes, domains=self._domains,
-            runtime={"model": self.model.model_id, "app_revision": "lld2-v1", "workflow": self.workflow,
+            runtime={"model": self.model.model_id, "app_revision": "runtime-v1", "workflow": self.workflow,
                      "sops": self.instructions.identities, "missing_resources": list(self.instructions.missing)},
         )
         self.session_id = session["session_id"]

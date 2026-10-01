@@ -166,7 +166,7 @@ def normalize_capture_event(host: str, payload: Mapping[str, Any]) -> CaptureEve
 
 
 class HarnessCaptureService:
-    """Normalizes host lifecycle events into the existing LLD-01 vault API."""
+    """Normalizes host lifecycle events into the vault persistence API."""
 
     MAP_RELATIVE = "context/capture-mappings.json"
 

@@ -7,7 +7,7 @@ WORK-BRAIN-SOP-CAREER v2
 Practise one interview question or one coherent career story using the user’s
 own professional evidence. Keep question-bank lookup, evidence retrieval,
 pagination, and durable candidate marks behind their configured application
-interfaces; the agent must not invent those LLD4 contracts.
+interfaces; the agent must not invent those application contracts.
 
 Career practice has three explicit modes:
 

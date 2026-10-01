@@ -1,4 +1,4 @@
-"""LLD-04 Career projection: questions, evidence discovery, practice, and marks."""
+"""Career projection: questions, evidence discovery, practice, and marks."""
 
 from .marks import CareerCandidateMarkStore
 from .questions import (

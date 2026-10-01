@@ -30,7 +30,7 @@ from .timeutil import date_for_timestamp, parse_timestamp, timestamp_now, valida
 
 
 class Vault:
-    """Authoritative source store plus rebuildable LLD-01 projections."""
+    """Authoritative source store plus rebuildable projections."""
 
     def __init__(
         self,
@@ -341,7 +341,7 @@ class Vault:
                 self.reconcile_database()
                 # Source publication remains authoritative; retrieval is a
                 # rebuildable sibling projection.  Indexing happens only
-                # after the source and LLD-01 projections are durable.
+                # after the source and derived projections are durable.
                 from .retrieval import EvidenceRetriever
                 EvidenceRetriever(self).index_entry(entry.entry_id)
                 if self.entry_publish_hook is not None:
@@ -544,7 +544,7 @@ class Vault:
             self.rebuild_projections()
             self.reconcile_database()
             # Retrieval is a derived sibling projection.  Rebuild it only
-            # after source projections and the LLD-01 SQLite projection are
+            # after source projections and the SQLite projection are
             # complete, so a failed index never mutates authoritative files.
             from .retrieval import EvidenceRetriever
             EvidenceRetriever(self).reindex()

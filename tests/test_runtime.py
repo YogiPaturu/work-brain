@@ -42,7 +42,7 @@ def draft(*, workflow: str = "think", bad_runtime_field: bool = False) -> dict:
     return value
 
 
-class LLD2Tests(unittest.TestCase):
+class RuntimeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.vault = Vault(Path(self.tempdir.name) / "vault").initialize()
