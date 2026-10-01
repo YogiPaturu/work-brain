@@ -58,7 +58,7 @@ transcriber, or generic personal-life knowledge base.
 | LLD-01 | Vault, raw turns, revisions, amendments, entities, artifacts, WorkState, journals, SQLite, rebuilds, locking | Implemented |
 | LLD-02 v3 | Portable Skill/SOPs, workflow contracts, CommitDraft validation/recovery, CLI boundary, harness capture, setup | Implemented |
 | LLD-03 v3 | FTS5, local embeddings, vector search, hybrid retrieval, pagination, hydration, index lifecycle | Implemented as a rebuildable local projection; optional BGE semantic profile |
-| LLD-04 | Question-bank normalization, interview practice, career retrieval, candidate marks | Contract documented; deferred |
+| LLD-04 | Question-bank normalization, interview practice, career retrieval, candidate marks | Implemented as a local Career projection |
 
 The four LLDs consume one LLD-01 evidence model. Journals, WorkState, SQLite,
 FTS, vectors, and career views are projections; raw turns and structured source
@@ -205,6 +205,48 @@ answers. It reports mean recall@3 and recall@5 plus each query's retrieved
 titles. It is deliberately not a pass/fail benchmark: its purpose is to make
 retrieval behavior inspectable before deciding whether a larger evaluation
 corpus or a quality threshold is warranted.
+
+### Interview practice and Career retrieval
+
+LLD-04 keeps two corpora separate: question banks answer “what might I be
+asked?”, while committed Work Brain evidence answers “what actually happened?”
+Question lookup is deterministic and never calls an LLM. The repository's
+synthetic bank is safe for public smoke tests; private banks belong in the
+vault's `questions/` directory or can be supplied with `--bank BANK_ID=PATH`.
+
+```bash
+work-brain --vault "$HOME/work-brain-vault" career \
+  --bank synthetic=resources/questions/synthetic.md \
+  questions search --tag-all conflict
+
+work-brain --vault "$HOME/work-brain-vault" career \
+  questions choose --tag-all ambiguity --seed 7
+```
+
+`career prepare` retrieves a bounded first page of plausible evidence and
+returns an opaque continuation cursor. The user chooses the story and angle;
+the system does not declare a “best story” or persist a story-quality score.
+`career mock` asks the question first and does not reveal evidence suggestions
+before the answer.
+
+```bash
+work-brain --vault "$HOME/work-brain-vault" career prepare \
+  --question-text "Tell me about a difficult technical problem" --page-size 5
+work-brain --vault "$HOME/work-brain-vault" career mock \
+  --question-text "Tell me about a difficult technical problem"
+```
+
+Candidate marks are explicit private preferences, not evidence or model
+judgments. The Skill may suggest one, but the application requires explicit
+user intent before saving it; marks follow the stable entry ID across later
+revisions:
+
+```bash
+work-brain --vault "$HOME/work-brain-vault" career candidates mark \
+  --entry-id ENTRY_ID --note "Use the trade-off angle"
+work-brain --vault "$HOME/work-brain-vault" career candidates list
+work-brain --vault "$HOME/work-brain-vault" career candidates unmark --entry-id ENTRY_ID
+```
 
 For low-level/manual integration, the CLI also supports `init`, `rebuild`,
 `reindex`, `session-start`, `turn`, `commit`, `commit-draft`, `recoverable`,
@@ -384,7 +426,7 @@ work-brain-vault/
   state/current.json                   # generated WorkState projection
   context/capture-mappings.json       # private operational host mapping
   questions/                            # private question banks
-  career/marks.jsonl                   # future LLD-04 preference metadata
+  career/marks.jsonl                   # append-only user-authored career marks
   index/work-brain.sqlite              # rebuildable private index
 ```
 
@@ -408,10 +450,12 @@ repair, or close it through the supported Work Brain workflow.
 
 ## Testing and manual smoke checklist
 
-Automated tests cover LLD-01 durability, LLD-02 v3 contracts, and LLD-03
-retrieval: deterministic chunk/index generation, FTS/vector corpus alignment,
-current-revision search, filters, pagination, hydration, degraded behavior,
-reindexing, and no-score EvidenceCards. The default vector adapter is a
+Automated tests cover LLD-01 durability, LLD-02 v3 contracts, LLD-03 retrieval,
+and LLD-04 Career behavior: deterministic chunk/index generation, FTS/vector
+corpus alignment, current-revision search, filters, pagination, hydration,
+degraded behavior, reindexing, no-score EvidenceCards, tagged question parsing,
+explicit candidate marks, revision-stable preferences, and prepare/mock
+boundaries. The default vector adapter is a
 dependency-free deterministic local baseline; a higher-quality local embedding
 provider can be injected behind the same adapter contract.
 

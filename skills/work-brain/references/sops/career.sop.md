@@ -39,9 +39,12 @@ to practise. Bound the session to one question or one coherent story.
 
 ### 2. Gather Plausible Evidence
 
-Use the configured question-bank or evidence interfaces when available. Retrieve
-a bounded set of plausible experiences and hydrate only the candidates needed
-for comparison or practice.
+For preparation, use the configured question-bank interface, then search
+professional evidence with the selected question text or a user-approved
+refinement. Retrieve a bounded page and use its opaque continuation cursor when
+the user asks for more. Hydrate only the candidates needed for comparison or
+practice. For mock practice, do not reveal these candidates before the user
+answers unless they explicitly ask for help.
 
 **Constraints:**
 
@@ -62,6 +65,9 @@ missing or weakly supported parts.
 - You MUST NOT invent metrics, ownership, outcomes, or polished claims that the evidence does not support.
 - You SHOULD give feedback tied to the stated practice goal.
 - You MAY offer a structure or rewrite, but the user remains the final author.
+- In mock practice, distinguish facts supported by hydrated evidence, facts
+  stated during the current practice, missing details, and model suggestions.
+- You MUST NOT invent a metric, outcome, stakeholder reaction, or ownership claim.
 
 ### 4. Record the User’s Selection
 

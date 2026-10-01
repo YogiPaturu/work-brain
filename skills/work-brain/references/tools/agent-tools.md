@@ -8,6 +8,12 @@ commands through the harness's existing shell capability:
 - `get_recent_work`
 - `search_evidence`
 - `hydrate_evidence`
+- `search_questions`
+- `get_question`
+- `choose_question`
+- `mark_interview_candidate` only after explicit user confirmation
+- `unmark_interview_candidate` only after explicit user confirmation
+- `list_interview_candidates`
 - `commit-draft` through stdin or a bounded file during the committing phase
 
 Tools return compact typed results and stable references. Work Brain never
@@ -31,6 +37,9 @@ For example, the host may execute:
 work-brain state current
 work-brain work recent --limit 5
 work-brain evidence search --query "import reliability" --page-size 10
+work-brain career questions search --tag-all conflict
+work-brain career prepare --question-text "Tell me about a difficult decision"
+work-brain career mock --question-text "Tell me about a difficult decision"
 ```
 
 Structured CommitDraft input MAY be an object on stdin or a JSON file. The
@@ -38,6 +47,14 @@ application validates the request, applies the active workflow contract, and
 returns a compact JSON result. Unknown, malformed, or failed calls become
 stable structured errors; they MUST NOT mutate the vault. Tool payloads and
 host shell details are not appended to the raw visible-turn transcript.
+
+Career question lookup is deterministic and does not require a model call.
+Question banks are separate from professional evidence. `prepare` may show a
+bounded page of plausible EvidenceCards and an opaque continuation cursor;
+`mock` asks the question first and does not reveal evidence suggestions before
+the answer. The user chooses the story/angle. Candidate marks are private
+preference events and require explicit confirmation; a model suggestion alone
+must never persist one.
 
 The existing `ToolRegistry` and bounded standalone model/tool loop remain
 available for provider-free tests and future standalone mode. They are not a

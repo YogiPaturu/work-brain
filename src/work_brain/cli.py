@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .capture import HarnessCaptureService, normalize_capture_event
+from .career import CareerService, QuestionBank, QuestionFilters, QuestionRef
 from .commit import CommitResolver
 from .config import default_config_path, read_config, resolve_vault_path, set_vault_path
 from .errors import FeatureUnavailable, IntegrityError, LockError, PersistenceError, ValidationError
@@ -93,6 +94,57 @@ def _parser() -> argparse.ArgumentParser:
     get.add_argument("--entry-id", required=True)
     get.add_argument("--revision", type=int)
 
+    career = sub.add_parser("career", help="LLD-04 interview practice and career retrieval")
+    career.add_argument("--bank", action="append", default=[], metavar="BANK_ID=PATH", help="question bank; repeat for multiple banks")
+    career_sub = career.add_subparsers(dest="career_command", required=True)
+    questions = career_sub.add_parser("questions", help="query configured question banks")
+    questions_sub = questions.add_subparsers(dest="questions_command", required=True)
+    question_search = questions_sub.add_parser("search")
+    question_search.add_argument("--text")
+    question_search.add_argument("--tag-all", action="append", default=[])
+    question_search.add_argument("--tag-any", action="append", default=[])
+    question_search.add_argument("--exclude-tag", action="append", default=[])
+    question_search.add_argument("--bank-id", action="append", default=[])
+    question_search.add_argument("--limit", type=int, default=20)
+    question_choose = questions_sub.add_parser("choose")
+    question_choose.add_argument("--text")
+    question_choose.add_argument("--tag-all", action="append", default=[])
+    question_choose.add_argument("--tag-any", action="append", default=[])
+    question_choose.add_argument("--exclude-tag", action="append", default=[])
+    question_choose.add_argument("--bank-id", action="append", default=[])
+    question_choose.add_argument("--seed", type=int)
+    question_get = questions_sub.add_parser("get")
+    question_get.add_argument("--bank-id", required=True)
+    question_get.add_argument("--question-id", required=True)
+    candidates = career_sub.add_parser("candidates", help="manage explicit interview candidate marks")
+    candidates_sub = candidates.add_subparsers(dest="candidates_command", required=True)
+    candidates_sub.add_parser("list")
+    mark = candidates_sub.add_parser("mark")
+    mark.add_argument("--entry-id", required=True)
+    mark.add_argument("--note")
+    mark.add_argument("--question-ref", action="append", default=[], metavar="BANK_ID/QUESTION_ID")
+    unmark = candidates_sub.add_parser("unmark")
+    unmark.add_argument("--entry-id", required=True)
+    prepare = career_sub.add_parser("prepare", help="select a question and retrieve plausible evidence")
+    prepare.add_argument("--question-text")
+    prepare.add_argument("--question-ref", metavar="BANK_ID/QUESTION_ID")
+    prepare.add_argument("--query")
+    prepare.add_argument("--tag-all", action="append", default=[])
+    prepare.add_argument("--tag-any", action="append", default=[])
+    prepare.add_argument("--exclude-tag", action="append", default=[])
+    prepare.add_argument("--bank-id", action="append", default=[])
+    prepare.add_argument("--page-size", type=int, default=8)
+    prepare.add_argument("--cursor")
+    prepare.add_argument("--seed", type=int)
+    mock = career_sub.add_parser("mock", help="select a question without revealing evidence before the answer")
+    mock.add_argument("--question-text")
+    mock.add_argument("--question-ref", metavar="BANK_ID/QUESTION_ID")
+    mock.add_argument("--tag-all", action="append", default=[])
+    mock.add_argument("--tag-any", action="append", default=[])
+    mock.add_argument("--exclude-tag", action="append", default=[])
+    mock.add_argument("--bank-id", action="append", default=[])
+    mock.add_argument("--seed", type=int)
+
     capture = sub.add_parser("capture-hook", help="normalize one host hook JSON object from stdin")
     capture.add_argument("--host", required=True, choices=["codex", "claude-code", "cursor"])
     stop = sub.add_parser("capture-stop", help="deactivate an explicitly captured host conversation")
@@ -149,9 +201,35 @@ def _hydrate(vault: Vault, entry_id: str, revision: int | None) -> dict[str, Any
     return {"entry": entry.to_dict(), "source_turns": turns}
 
 
+def _career_service(vault: Vault, specs: list[str]) -> CareerService:
+    banks = []
+    for spec in specs:
+        if "=" not in spec:
+            raise ValidationError("--bank must be BANK_ID=PATH")
+        bank_id, path = spec.split("=", 1)
+        banks.append(QuestionBank(bank_id, Path(path).expanduser().resolve(), "public_shared"))
+    return CareerService(vault, banks=banks or None)
+
+
+def _question_filters(args: argparse.Namespace) -> QuestionFilters:
+    return QuestionFilters.from_values(
+        tags_all=getattr(args, "tag_all", []), tags_any=getattr(args, "tag_any", []),
+        exclude_tags=getattr(args, "exclude_tag", []), bank_ids=getattr(args, "bank_id", []),
+    )
+
+
+def _question_ref(value: str | None) -> QuestionRef | None:
+    if value is None:
+        return None
+    if "/" not in value:
+        raise ValidationError("--question-ref must be BANK_ID/QUESTION_ID")
+    bank_id, question_id = value.split("/", 1)
+    return QuestionRef(bank_id, question_id)
+
+
 def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     command = args.command
-    machine = bool(args.json or command in {"state", "work", "evidence", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "turn", "commit", "commit-draft", "setup", "reindex"})
+    machine = bool(args.json or command in {"state", "work", "evidence", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "turn", "commit", "commit-draft", "setup", "reindex"})
     if command == "config":
         if args.config_command == "set-vault":
             path = set_vault_path(args.path, args.config)
@@ -170,6 +248,29 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         return HarnessCaptureService(_vault(args)).stop(host=args.host, host_session_id=args.host_session_id, session_id=args.session_id), True
 
     vault = _vault(args)
+    if command == "career":
+        service = _career_service(vault, args.bank)
+        if args.career_command == "questions":
+            if args.questions_command == "search":
+                return service.search_questions(filters=_question_filters(args), text=args.text, limit=args.limit), True
+            if args.questions_command == "choose":
+                return service.choose_question(filters=_question_filters(args), text=args.text, seed=args.seed), True
+            return service.get_question(QuestionRef(args.bank_id, args.question_id)), True
+        if args.career_command == "candidates":
+            if args.candidates_command == "list":
+                return {"marks": service.marks.list()}, True
+            if args.candidates_command == "mark":
+                refs = []
+                for raw in args.question_ref:
+                    ref = _question_ref(raw)
+                    refs.append(ref.to_dict())
+                return service.marks.mark(args.entry_id, note=args.note, question_refs=refs), True
+            return service.marks.unmark(args.entry_id), True
+        ref = _question_ref(args.question_ref)
+        question = service.get_question(ref) if ref else None
+        if args.career_command == "prepare":
+            return service.prepare(question=question, question_text=args.question_text, query=args.query, filters=_question_filters(args), page_size=args.page_size, cursor=args.cursor, seed=args.seed), True
+        return service.mock(question=question, question_text=args.question_text, filters=_question_filters(args), seed=args.seed), True
     if command == "init":
         vault.initialize()
         EvidenceRetriever(vault).reindex()

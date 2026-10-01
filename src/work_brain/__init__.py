@@ -11,6 +11,7 @@ from .tools import ToolDefinition, ToolRegistry, ToolResult
 from .capture import CaptureEvent, HarnessCaptureService, normalize_capture_event
 from .setup import HarnessSetup
 from .retrieval import EvidenceRetriever, EvidenceRef, FastEmbedEmbeddingProvider, LocalHashEmbeddingProvider
+from .career import CareerCandidateMarkStore, CareerService, InterviewQuestion, MarkdownQuestionBankProvider, QuestionBank, QuestionFilters, QuestionRef
 
 __all__ = [
     "IntegrityError",
@@ -45,4 +46,11 @@ __all__ = [
     "EvidenceRef",
     "FastEmbedEmbeddingProvider",
     "LocalHashEmbeddingProvider",
+    "CareerCandidateMarkStore",
+    "CareerService",
+    "InterviewQuestion",
+    "MarkdownQuestionBankProvider",
+    "QuestionBank",
+    "QuestionFilters",
+    "QuestionRef",
 ]

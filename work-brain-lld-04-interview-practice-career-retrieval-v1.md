@@ -2,7 +2,7 @@
 
 **Document ID:** `WORK-BRAIN-LLD-004`
 **Version:** `1`
-**Status:** Draft for sibling cross-review
+**Status:** Implemented v1; retained as the normative contract
 **Date:** `2026-09-30`
 **Parent HLD:** `WORK-BRAIN-HLD-001` v2
 **Sibling contracts:** `WORK-BRAIN-LLD-001` v2, `WORK-BRAIN-LLD-002` v2, `WORK-BRAIN-LLD-003` v2
