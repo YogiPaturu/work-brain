@@ -5,6 +5,41 @@ It helps you reason through decisions, recover current work state, prepare
 communication, and practice interviews while preserving the underlying
 conversation and structured evidence in a private vault.
 
+## Quick start
+
+From macOS or Linux, clone the repository and install it into a virtual
+environment:
+
+```bash
+git clone https://github.com/YogiPaturu/work-brain.git
+cd work-brain
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+```
+
+Create a private vault outside the repository, initialize it, and connect your
+coding-agent host. For Codex:
+
+```bash
+work-brain config set-vault "$HOME/work-brain-vault"
+work-brain init
+work-brain doctor
+work-brain setup codex
+```
+
+Start a fresh Codex session, then try:
+
+```text
+work brain think with me about whether we should move this process async
+```
+
+Once Work Brain is active, ordinary follow-up messages are captured without a
+prefix. You can also begin a day with `start my day` and finish with
+`close my day`. See [Using Work Brain with Codex](#using-work-brain-with-codex)
+for the exact capture and lifecycle behavior, or [Install the one canonical
+Skill](#install-the-one-canonical-skill) for Claude Code and Cursor.
+
 Work Brain v1 is hosted by an existing local coding-agent harness—Codex,
 Claude Code, or the local Cursor Agent. The harness owns the model,
 conversation, context, agent loop, and shell. Work Brain owns the private
@@ -76,7 +111,8 @@ From a checkout:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -e .
+source .venv/bin/activate
+python -m pip install -e .
 ```
 
 Choose a private vault outside this public repository. You can configure it
