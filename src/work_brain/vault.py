@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
 from .database import Database
-from .domain import SessionEntry, normalize_alias, validate_session
+from .domain import SessionEntry, normalize_alias, normalize_domain_tags, validate_session
 from .errors import IntegrityError, PersistenceError, ValidationError
 from .fsutil import (
     append_jsonl,
@@ -410,18 +410,35 @@ class Vault:
             raw.update({
                 "workspace_entity_id": workspace_id,
                 "project_entity_id": project_id,
-                "revision": current.revision + 1,
-                "commit_id": new_uuid7(),
-                "created_at": timestamp_now(),
-                "supersedes_revision": current.revision,
-                "revision_reason": "metadata_backfill",
             })
-            refs = list(raw.get("source_refs", []))
-            previous_ref = {"kind": "entry", "id": current.entry_id, "revision": current.revision}
-            if previous_ref not in refs:
-                refs.append(previous_ref)
-            raw["source_refs"] = refs
-            return self.commit_entry(current.session_id, raw)
+            return self._publish_metadata_backfill(current, raw)
+
+    def backfill_entry_domain_tags(self, entry_id: str, *, domain_tags: list[str]) -> SessionEntry:
+        """Add domain tags as an immutable metadata-only revision."""
+        with self._require_or_lock():
+            current = self.get_current_entry(entry_id)
+            additions = normalize_domain_tags(domain_tags)
+            merged = normalize_domain_tags([*current.domains, *additions])
+            if merged == current.domains:
+                return current
+            raw = current.to_dict()
+            raw["domains"] = merged
+            return self._publish_metadata_backfill(current, raw)
+
+    def _publish_metadata_backfill(self, current: SessionEntry, raw: dict[str, Any]) -> SessionEntry:
+        raw.update({
+            "revision": current.revision + 1,
+            "commit_id": new_uuid7(),
+            "created_at": timestamp_now(),
+            "supersedes_revision": current.revision,
+            "revision_reason": "metadata_backfill",
+        })
+        refs = list(raw.get("source_refs", []))
+        previous_ref = {"kind": "entry", "id": current.entry_id, "revision": current.revision}
+        if previous_ref not in refs:
+            refs.append(previous_ref)
+        raw["source_refs"] = refs
+        return self.commit_entry(current.session_id, raw)
 
     def _resolve_context_entity(self, kind: str, value: str | Mapping[str, Any] | None) -> str | None:
         if value is None:

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 import json
 
-from .domain import ENTRY_SECTIONS, ENTITY_KINDS, STATE_KINDS, MUTATION_OPS, Occurrence, Statement
+from .domain import ENTRY_SECTIONS, ENTITY_KINDS, STATE_KINDS, MUTATION_OPS, Occurrence, Statement, normalize_domain_tags
 from .errors import IntegrityError, ValidationError
 from .fsutil import read_json
 from .ids import new_uuid7, validate_uuid7
@@ -96,16 +96,7 @@ class CommitDraftValidator:
 
     @staticmethod
     def _domains(value: Any) -> list[str]:
-        if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
-            raise ValidationError("domains must be a list of non-empty strings")
-        result: list[str] = []
-        for item in value:
-            token = item.strip().casefold().replace(" ", "-").replace("_", "-")
-            if any(ch.isspace() for ch in token) or token not in {token.strip()}:
-                raise ValidationError("domains must contain lowercase tokens")
-            if token not in result:
-                result.append(token)
-        return result
+        return normalize_domain_tags(value, "domain_tags")
 
     @staticmethod
     def _turns(value: Any, turn_count: int, field: str) -> list[int]:

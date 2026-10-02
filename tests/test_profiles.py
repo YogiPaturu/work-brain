@@ -318,6 +318,30 @@ class CommunicationProfileTests(unittest.TestCase):
         finally:
             Path(mapping.name).unlink(missing_ok=True)
 
+    def test_cli_backfill_tags_is_additive_and_immutable(self) -> None:
+        subject = self.vault.upsert_entity(
+            kind="workspace", canonical_name="Tagged workspace",
+            created_at="2026-09-30T09:00:00+01:00", updated_at="2026-09-30T09:00:00+01:00",
+        )
+        self._commit(
+            title="Auth tags", summary="Reviewed login and authorization boundaries.",
+            started_at="2026-10-01T14:00:00+01:00", entity_id=subject["entity_id"],
+        )
+        entry = self.vault.all_current_entries()[0]
+        mapping = tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False)
+        try:
+            json.dump({"entries": {entry.entry_id: {"domain_tags": ["Authentication", "access_control", "security"]}}}, mapping)
+            mapping.close()
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(0, main(["--vault", str(self.vault.root), "backfill-tags", "--file", mapping.name]))
+            updated = self.vault.get_current_entry(entry.entry_id)
+            self.assertEqual(["founder", "authentication", "access-control", "security"], updated.domains)
+            self.assertEqual(2, updated.revision)
+            self.assertEqual("metadata_backfill", updated.revision_reason)
+            self.assertEqual([1, 2], [item.revision for item, _ in self.vault.all_entry_revisions()])
+        finally:
+            Path(mapping.name).unlink(missing_ok=True)
+
 
 if __name__ == "__main__":
     unittest.main()

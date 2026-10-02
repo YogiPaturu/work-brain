@@ -71,6 +71,8 @@ work-brain capture-hook --host codex < hook.json
 work-brain capture-hook --host claude-code < hook.json
 work-brain capture-hook --host cursor < hook.json
 work-brain commit-draft --session-id SESSION_ID < draft.json
+work-brain backfill-tags --file domain-tags.json --dry-run
+work-brain backfill-tags --file domain-tags.json
 work-brain recoverable
 ```
 
@@ -79,6 +81,14 @@ The application validates and resolves IDs, revisions, provenance, and
 persistence. An ordinary commit rotates to a fresh bounded session while the
 host capture mapping stays active. A close-day commit deactivates the mapping.
 Do not write `turns.jsonl`, SQLite, journals, state, or vector data directly.
+
+`backfill-tags` is the documented historical-maintenance operation for adding
+domain tags to existing current entries. Its JSON input is an explicit mapping
+with optional `defaults.domain_tags` and per-entry `entries[ENTRY_ID].domain_tags`
+lists. The lists are additive, have no upper bound, and are normalized to
+lowercase hyphenated tokens while preserving existing tags. Run `--dry-run`
+first; an applied change publishes a new immutable `metadata_backfill` revision
+and retains the prior revision and source reference.
 
 Starting a new Work Brain session automatically rolls over inactive recoverable
 sessions more than one calendar day old. It preserves their raw turns and marks
