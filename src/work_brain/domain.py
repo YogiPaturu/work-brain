@@ -258,3 +258,17 @@ def validate_session(raw: Mapping[str, Any]) -> dict[str, Any]:
 def normalize_alias(value: str) -> str:
     import unicodedata
     return unicodedata.normalize("NFKC", value).casefold()
+
+
+def normalize_domain_tags(value: Any, field: str = "domain_tags") -> list[str]:
+    """Validate and canonicalize the unbounded domain-tag list."""
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+        raise ValidationError(f"{field} must be a list of non-empty strings")
+    result: list[str] = []
+    for item in value:
+        token = item.strip().casefold().replace(" ", "-").replace("_", "-")
+        if any(ch.isspace() for ch in token) or token != token.strip():
+            raise ValidationError(f"{field} must contain lowercase hyphenated tokens")
+        if token not in result:
+            result.append(token)
+    return result

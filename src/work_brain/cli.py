@@ -11,6 +11,7 @@ from .capture import HarnessCaptureService, normalize_capture_event
 from .career import CareerService, QuestionBank, QuestionFilters, QuestionRef
 from .commit import CommitResolver
 from .config import default_config_path, read_config, resolve_vault_path, set_vault_path
+from .domain import normalize_domain_tags
 from .errors import FeatureUnavailable, IntegrityError, LockError, PersistenceError, ValidationError
 from .fsutil import read_json
 from .instructions import SkillLoader
@@ -51,6 +52,9 @@ def _parser() -> argparse.ArgumentParser:
     backfill_context = sub.add_parser("backfill-context", help="add workspace/project metadata as new entry revisions")
     backfill_context.add_argument("--file", required=True, help="JSON mapping with defaults and entry assignments")
     backfill_context.add_argument("--dry-run", action="store_true")
+    backfill_tags = sub.add_parser("backfill-tags", help="add domain tags as new entry revisions")
+    backfill_tags.add_argument("--file", required=True, help="JSON mapping with defaults and entry assignments")
+    backfill_tags.add_argument("--dry-run", action="store_true")
 
     config = sub.add_parser("config", help="manage local user configuration")
     config_sub = config.add_subparsers(dest="config_command", required=True)
@@ -257,6 +261,57 @@ def _backfill_context(vault: Vault, payload: dict[str, Any], *, dry_run: bool) -
         entry = vault.backfill_entry_context(entry_id, **changes)
         if entry.revision == before.revision:
             unchanged.append(entry_id)
+        else:
+            updated.append({"entry_id": entry.entry_id, "revision": entry.revision, "commit_id": entry.commit_id})
+    return {"dry_run": False, "updated": updated, "unchanged": unchanged, "count": len(updated)}
+
+
+def _backfill_tags(vault: Vault, payload: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:
+    defaults = payload.get("defaults", {})
+    assignments = payload.get("entries", {})
+    if not isinstance(defaults, dict):
+        raise ValidationError("backfill-tags defaults must be an object")
+    if not isinstance(assignments, dict):
+        raise ValidationError("backfill-tags entries must be an object keyed by entry_id")
+    allowed = {"domain_tags"}
+    unknown = sorted(set(defaults) - allowed)
+    if unknown:
+        raise ValidationError(f"backfill-tags defaults has unknown field: {unknown[0]}")
+    current = {entry.entry_id: entry for entry in vault.all_current_entries()}
+    unknown_entries = sorted(set(assignments) - set(current))
+    if unknown_entries:
+        raise ValidationError(f"backfill-tags entry does not exist: {unknown_entries[0]}")
+    plan = []
+    for entry in sorted(current.values(), key=lambda item: (item.created_at, item.entry_id)):
+        override = assignments.get(entry.entry_id)
+        if override is not None and not isinstance(override, dict):
+            raise ValidationError(f"backfill-tags assignment for {entry.entry_id} must be an object")
+        override = override or {}
+        unknown = sorted(set(override) - allowed)
+        if unknown:
+            raise ValidationError(f"backfill-tags assignment has unknown field: {unknown[0]}")
+        requested = dict(defaults)
+        requested.update(override)
+        if "domain_tags" not in requested:
+            continue
+        additions = normalize_domain_tags(requested["domain_tags"])
+        merged = normalize_domain_tags([*entry.domains, *additions])
+        plan.append({
+            "entry_id": entry.entry_id,
+            "title": entry.title,
+            "from": entry.domains,
+            "add": [tag for tag in merged if tag not in entry.domains],
+            "result": merged,
+        })
+    if dry_run:
+        return {"dry_run": True, "planned": plan, "count": len(plan)}
+    updated = []
+    unchanged = []
+    for item in plan:
+        before = vault.get_current_entry(item["entry_id"])
+        entry = vault.backfill_entry_domain_tags(item["entry_id"], domain_tags=item["result"])
+        if entry.revision == before.revision:
+            unchanged.append(item["entry_id"])
         else:
             updated.append({"entry_id": entry.entry_id, "revision": entry.revision, "commit_id": entry.commit_id})
     return {"dry_run": False, "updated": updated, "unchanged": unchanged, "count": len(updated)}
@@ -591,7 +646,7 @@ def _question_ref(value: str | None) -> QuestionRef | None:
 
 def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     command = args.command
-    machine = bool(args.json or command in {"state", "work", "evidence", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session", "profiles", "backfill-context"})
+    machine = bool(args.json or command in {"state", "work", "evidence", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session", "profiles", "backfill-context", "backfill-tags"})
     if command == "status":
         snapshot = _live_status(_vault(args))
         return snapshot, bool(args.json)
@@ -661,6 +716,8 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         return EvidenceRetriever(vault).reindex(), True
     if command == "backfill-context":
         return _backfill_context(vault, _read_payload(args.file), dry_run=args.dry_run), True
+    if command == "backfill-tags":
+        return _backfill_tags(vault, _read_payload(args.file), dry_run=args.dry_run), True
     if command == "doctor":
         diagnostics = vault.doctor()
         retriever = EvidenceRetriever(vault)
