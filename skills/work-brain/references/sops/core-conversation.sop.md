@@ -17,6 +17,8 @@ SOP adds domain-specific emphasis.
 - **current_state** (optional): Compact active-work state supplied by the application.
 - **retrieved_evidence** (optional): Bounded evidence cards or hydrated records returned by configured tools.
 - **domain_probes** (optional): One or two relevant public probe references.
+- **domain_tags** (optional): Any number of retrieval tags describing the
+  subject matter and capabilities materially supported by the conversation.
 
 **Constraints for parameter acquisition:**
 
@@ -29,6 +31,8 @@ SOP adds domain-specific emphasis.
   bounded target. Selection should follow the target's actual nature, not a
   keyword hit. If the target materially changes, replace a probe rather than
   accumulating a larger stack.
+- Domain probes and `domain_tags` are different: the probe limit protects
+  conversation context, while committed `domain_tags` have no count limit.
 
 ## Steps
 
@@ -112,6 +116,14 @@ checks, not a checklist to recite.
 - You SHOULD use a reminder only when the current turn makes it materially
   useful to the bounded target.
 
+### Domain-tag guidance
+
+When preparing a CommitDraft, follow the loaded `WORK-BRAIN-DOMAIN-TAGS@1`
+reference. Assign any number of `domain_tags`; there is no count limit. The
+reference defines the extraction procedure, starter vocabulary, technical
+identity/access examples, and distinction between evidence tags and
+question-bank metadata.
+
 ### 6. Close Without Pressure
 
 Stop when the user says skip, enough, move on, or equivalent, or when further
@@ -133,14 +145,14 @@ or impossible to reconstruct from artifacts later?”
 - Every non-empty statement and state change in a CommitDraft MUST include the exact persisted raw turn sequence numbers that support it. If the evidence is not in the captured turns, omit the claim or keep the session recoverable rather than guessing.
 - Each statement and state change MUST reference at least one user-authored source turn. An assistant-only or synthetic turn cannot support a durable entry.
 - Before emitting a CommitDraft, the agent MUST classify the bounded evidence
-  with both a `workspace` and `project` field. It SHOULD infer these from the
+  with both required non-empty string fields: `workspace` and `project`. It SHOULD infer these from the
   user’s explicit words, the active work item, an active communication profile,
   or supplied retrieved context; it MUST NOT invent a name when the context is
   genuinely ambiguous.
 - If workspace or project classification is materially ambiguous, the agent
   MUST ask one concise clarification question before committing. It MUST always
-  emit both keys in the final draft; `project: null` is allowed only when the
-  work is explicitly cross-cutting or not project-scoped.
+  emit both required names in the final draft. Missing, empty, or null values
+  are invalid.
 - A revision is allowed only for additional evidence in the same bounded session. Evidence from another session must be committed as a separate entry, optionally linked with `source_entry_refs`.
 - If validation rejects a draft, inspect the target session and repair the source references. Do not create a new session or use the low-level `turn` command as a workaround.
 - Explicit lifecycle phrases have distinct meanings: “finish this,” “that’s

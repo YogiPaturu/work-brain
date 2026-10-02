@@ -38,9 +38,9 @@ def draft(*, workflow: str = "think", bad_runtime_field: bool = False) -> dict:
         "historical_occurrence": {
             "start": "2026-09-29", "end": None, "precision": "day", "label": "historical"
         } if workflow == "backfill" else None,
-        "domains": ["engineering"],
-        "workspace": {"canonical_name": "Work Brain", "aliases": ["workbrain"]},
-        "project": {"canonical_name": "Import boundary", "aliases": ["imports"]},
+        "domain_tags": ["engineering"],
+        "workspace": "Work Brain",
+        "project": "Import boundary",
         "sections": sections,
         "state_changes": [], "entity_candidates": [], "artifact_candidates": [], "source_entry_refs": [],
     }
@@ -60,7 +60,14 @@ class RuntimeTests(unittest.TestCase):
     def test_skill_loader_is_progressive_and_versioned(self) -> None:
         loaded = SkillLoader().load("think", ["engineering", "product", "leadership"])
         self.assertEqual(["WORK-BRAIN-SKILL@2", "WORK-BRAIN-SOP-CORE@2", "WORK-BRAIN-SOP-THINK@2", "WORK-BRAIN-PROBE-ENGINEERING@2", "WORK-BRAIN-PROBE-PRODUCT@2"], loaded.identities)
-        self.assertNotIn("leadership", loaded.text)
+        self.assertNotIn("WORK-BRAIN-PROBE-LEADERSHIP@2", loaded.identities)
+
+    def test_commit_instruction_load_includes_schema_and_tag_reference(self) -> None:
+        loaded = SkillLoader().load("think", ["engineering"], include_commit_schema=True)
+        self.assertIn("WORK-BRAIN-SCHEMA-COMMIT-DRAFT@1", loaded.identities)
+        self.assertIn("WORK-BRAIN-DOMAIN-TAGS@1", loaded.identities)
+        self.assertIn("`domain_tags`", loaded.text)
+        self.assertIn("authentication", loaded.text)
 
     def test_new_probe_packs_are_selectable_and_still_bounded(self) -> None:
         loaded = SkillLoader().load("think", ["architecture", "founder", "people"])
@@ -112,7 +119,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(1, entry.revision)
         self.assertEqual(RuntimeState.COMMITTED, orchestrator.state)
         self.assertEqual(["respond", "commit_draft"], [call["kind"] for call in model.calls])
-        self.assertEqual(["WORK-BRAIN-SKILL@2", "WORK-BRAIN-SOP-CORE@2", "WORK-BRAIN-SOP-THINK@2", "WORK-BRAIN-PROBE-ENGINEERING@2"], self.vault.read_session(session["session_id"])["runtime"]["sops"])
+        self.assertEqual(["WORK-BRAIN-SKILL@2", "WORK-BRAIN-SOP-CORE@2", "WORK-BRAIN-SOP-THINK@2", "WORK-BRAIN-SCHEMA-COMMIT-DRAFT@1", "WORK-BRAIN-DOMAIN-TAGS@1", "WORK-BRAIN-PROBE-ENGINEERING@2"], self.vault.read_session(session["session_id"])["runtime"]["sops"])
 
     def test_cli_commit_draft_finalizes_lifecycle_and_status_ignores_stale_pending_flag(self) -> None:
         session = self.vault.create_session(
@@ -252,8 +259,26 @@ class RuntimeTests(unittest.TestCase):
 
         value = draft()
         value["project"] = None
+        with self.assertRaisesRegex(ValidationError, "project must be a required non-empty string"):
+            CommitDraftValidator().validate(value, turn_count=1, workflow="think")
+
+    def test_domain_tags_have_no_artificial_count_limit(self) -> None:
+        value = draft()
+        value["domain_tags"] = [f"topic-{index}" for index in range(25)]
         validated = CommitDraftValidator().validate(value, turn_count=1, workflow="think")
-        self.assertIsNone(validated.project_candidate)
+        self.assertEqual(25, len(validated.domain_tags))
+
+    def test_domain_tags_normalize_technical_terms_for_retrieval(self) -> None:
+        value = draft()
+        value["domain_tags"] = ["Security", "authentication", "login", "access control", "authentication"]
+        validated = CommitDraftValidator().validate(value, turn_count=1, workflow="think")
+        self.assertEqual(["security", "authentication", "login", "access-control"], validated.domain_tags)
+
+    def test_commit_draft_rejects_legacy_domains_field(self) -> None:
+        value = draft()
+        value["domains"] = ["engineering"]
+        with self.assertRaisesRegex(ValidationError, "uses domain_tags"):
+            CommitDraftValidator().validate(value, turn_count=1, workflow="think")
 
     def test_commit_statements_require_exact_source_turns(self) -> None:
         value = draft()
@@ -310,8 +335,8 @@ class RuntimeTests(unittest.TestCase):
 
     def test_resolver_owns_catalog_and_state_ids(self) -> None:
         model_draft = draft()
-        model_draft["workspace"] = {"canonical_name": "Ranq", "aliases": ["ranq"]}
-        model_draft["project"] = {"canonical_name": "Import Service", "aliases": []}
+        model_draft["workspace"] = "Ranq"
+        model_draft["project"] = "Import Service"
         model_draft["state_changes"] = [{"operation": "create", "kind": "task", "fields": {"title": "Run import experiment"}, "source_turns": [1]}]
         model = ScriptedModel(drafts=[model_draft])
         orchestrator = SessionOrchestrator(self.vault, model)
