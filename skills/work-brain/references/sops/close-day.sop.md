@@ -87,10 +87,10 @@ CommitDraft; otherwise finish without manufacturing a journal entry.
 - You MUST NOT duplicate an earlier session merely to make close-day appear complete.
 - The application MUST own persistence and journal projection.
 - Before producing the CommitDraft, classify each durable work item with its
-  workspace and project. Reuse classifications already established in the
-  supplied recent work when the item is clearly continuing it; otherwise infer
-  from the user’s reflection or ask one concise clarification question. Never
-  silently emit an unclassified item.
+  required `workspace` and `project` names. Reuse classifications already
+  established in the supplied recent work when the item is clearly continuing
+  it; otherwise infer from the user’s reflection or ask one concise clarification
+  question. Never silently emit an unclassified item.
 - A post-close communication offer MUST use only profiles supplied by the
   application and MUST remain separate from close-day evidence. The user must
   choose the profile before drafting.

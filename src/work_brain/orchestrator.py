@@ -264,7 +264,7 @@ class SessionOrchestrator:
             runtime = dict(session.get("runtime") or {})
             chosen = select_workflow(runtime.get("workflow"), (session.get("modes") or [None])[0])
             domains = list(session.get("domains", []))
-            instructions = self.loader.load(chosen, domains)
+            instructions = self.loader.load(chosen, domains, include_commit_schema=True)
             messages = [{"role": turn["role"], "content": turn["content"]} for turn in self.vault.list_turns(session_id)]
             if not messages:
                 self.vault.close_session(session_id, commit_status="no_new_evidence")
@@ -417,7 +417,8 @@ class SessionOrchestrator:
             raise ValidationError("session is not active")
         self.state = RuntimeState.COMMITTING
         try:
-            draft = self.model.emit_commit_draft(self._messages, instructions=self.instructions.text)
+            commit_instructions = self.loader.load(self.workflow, self._domains, include_commit_schema=True)
+            draft = self.model.emit_commit_draft(self._messages, instructions=commit_instructions.text)
             last_error = ""
             for attempt in range(3):
                 try:
@@ -425,7 +426,7 @@ class SessionOrchestrator:
                     session = self.vault.read_session(self.session_id)
                     session["modes"] = self._merge(session.get("modes", []), self._modes)
                     session["domains"] = self._merge(session.get("domains", []), self._domains)
-                    session.setdefault("runtime", {}).update({"model": self.model.model_id, "sops": self.instructions.identities,
+                    session.setdefault("runtime", {}).update({"model": self.model.model_id, "sops": commit_instructions.identities,
                                                                "workflow": self.workflow, "commit_attempts": attempt + 1,
                                                                "commit_status": "committed"})
                     self.vault.update_session_metadata(self.session_id, session)
@@ -435,7 +436,7 @@ class SessionOrchestrator:
                     last_error = str(exc)
                     if attempt == 2:
                         raise
-                    draft = self.model.repair_commit_draft(draft, last_error, instructions=self.instructions.text)
+                    draft = self.model.repair_commit_draft(draft, last_error, instructions=commit_instructions.text)
             raise ValidationError(last_error or "CommitDraft validation failed")
         except Exception:
             self.state = RuntimeState.RECOVERABLE
@@ -484,7 +485,7 @@ class SessionOrchestrator:
         """Explicitly create a new revision from immutable raw turns."""
         session = self.vault.read_session(session_id)
         chosen = select_workflow(workflow, (session.get("runtime") or {}).get("workflow"))
-        instructions = self.loader.load(chosen, session.get("domains", []))
+        instructions = self.loader.load(chosen, session.get("domains", []), include_commit_schema=True)
         messages = [{"role": turn["role"], "content": turn["content"]} for turn in self.vault.list_turns(session_id)]
         draft = self.model.emit_commit_draft(messages, instructions=instructions.text)
         for attempt in range(3):

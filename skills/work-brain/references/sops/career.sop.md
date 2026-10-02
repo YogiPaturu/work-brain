@@ -62,6 +62,13 @@ answers unless they explicitly ask for help.
 - You MUST NOT select a “best” story for the user or hide later candidates behind an unexplained cap.
 - You MUST treat unavailable retrieval as an explicit limitation, not as evidence that no story exists.
 
+#### Domain tags for career evidence
+
+When career evidence is committed, follow the loaded
+`WORK-BRAIN-DOMAIN-TAGS@1` reference. Preserve every materially useful subject
+area and demonstrated capability; there is no upper limit. Do not turn a
+question-bank tag or an unsupported capability into an evidence tag.
+
 ### 3. Practise the Answer
 
 Help the user produce and refine a concise answer covering the relevant context,

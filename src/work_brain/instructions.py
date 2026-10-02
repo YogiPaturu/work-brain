@@ -60,12 +60,15 @@ class SkillLoader:
         )
         self.skill_dir = self.skills_root / "work-brain"
 
-    def load(self, workflow: str, domains: Iterable[str] = ()) -> LoadedInstructions:
+    def load(self, workflow: str, domains: Iterable[str] = (), *, include_commit_schema: bool = False) -> LoadedInstructions:
         if workflow not in WORKFLOWS:
             raise ValidationError(f"unknown workflow: {workflow}")
         skill = self._resource(self.skill_dir / "SKILL.md")
         resources = [skill, self._resource(self.skill_dir / "references/sops/core-conversation.sop.md")]
         resources.append(self._resource(self.skill_dir / "references/sops" / WORKFLOW_SOPS[workflow]))
+        if include_commit_schema:
+            resources.append(self._resource(self.skill_dir / "references/schemas/commit-draft.md"))
+            resources.append(self._resource(self.skill_dir / "references/domain-tags.md"))
         missing: list[str] = []
         seen_domains: set[str] = set()
         for raw_domain in domains:

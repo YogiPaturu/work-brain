@@ -130,5 +130,6 @@ Resources:
 - the selected file under `references/sops/`
 - zero, one, or two files under `references/probes/`
 - `references/schemas/commit-draft.md` when producing a commit
+- `references/domain-tags.md` when producing a commit
 - `references/tools/agent-tools.md` when using application tools
 - `references/tools/work-brain-cli.md` when executing Work Brain operations
