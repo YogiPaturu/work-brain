@@ -29,17 +29,17 @@ class ToolDefinition:
 
 
 PROFILES: dict[str, tuple[str, ...]] = {
-    "think": ("search_evidence", "hydrate_evidence", "get_current_state"),
+    "think": ("search_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "get_current_state"),
     "operate": ("get_current_state", "get_recent_work", "search_evidence", "hydrate_evidence", "list_work_item_communication_profiles"),
-    "communicate": ("get_current_state", "get_recent_work", "search_evidence", "search_profile_evidence", "hydrate_evidence", "get_communication_profile"),
+    "communicate": ("get_current_state", "get_recent_work", "search_evidence", "search_profile_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "get_communication_profile"),
     "career": (
         "search_questions", "get_question", "choose_question",
-        "search_evidence", "hydrate_evidence",
+        "search_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience",
         "mark_interview_candidate", "unmark_interview_candidate", "list_interview_candidates",
     ),
     "open-day": ("get_current_state", "get_recent_work"),
     "close-day": ("get_current_state", "get_close_day_record", "list_post_close_communication_profiles"),
-    "backfill": ("search_evidence", "hydrate_evidence"),
+    "backfill": ("search_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience"),
 }
 
 
@@ -56,6 +56,9 @@ class ToolRegistry:
         "search_evidence": ToolDefinition("search_evidence", "Search evidence through the configured retrieval adapter."),
         "search_profile_evidence": ToolDefinition("search_profile_evidence", "Search evidence using a validated communication profile's exact scope."),
         "hydrate_evidence": ToolDefinition("hydrate_evidence", "Hydrate selected stable evidence references."),
+        "search_experiences": ToolDefinition("search_experiences", "Search or list source-backed professional Experiences."),
+        "get_experience": ToolDefinition("get_experience", "Read one bounded source-backed Experience card."),
+        "hydrate_experience": ToolDefinition("hydrate_experience", "Hydrate an Experience and bounded supporting evidence."),
         "get_communication_profile": ToolDefinition("get_communication_profile", "Read one validated user-owned communication profile."),
         "list_post_close_communication_profiles": ToolDefinition("list_post_close_communication_profiles", "List user-owned communication profiles configured to be offered after close-day."),
         "list_work_item_communication_profiles": ToolDefinition("list_work_item_communication_profiles", "List user-owned communication profiles configured for meaningful work-item completion."),
@@ -195,6 +198,29 @@ class ToolRegistry:
             try:
                 return ToolResult(True, handler(**arguments))
             except (ValidationError, ValueError) as exc:
+                return ToolResult(False, error=str(exc))
+        if name in {"search_experiences", "get_experience", "hydrate_experience"}:
+            try:
+                from .experiences import ExperienceService
+                service = ExperienceService(self.vault)
+                if name == "search_experiences":
+                    query = arguments.get("query")
+                    if query:
+                        return ToolResult(True, service.search(
+                            query,
+                            filters=arguments.get("filters"),
+                            page_size=arguments.get("page_size", 8),
+                            cursor=arguments.get("cursor"),
+                        ))
+                    return ToolResult(True, service.list(
+                        limit=arguments.get("limit", 8),
+                        filters=arguments.get("filters"),
+                    ))
+                if name == "get_experience":
+                    return ToolResult(True, service.get(arguments["experience_id"]))
+                refs = arguments.get("refs")
+                return ToolResult(True, service.hydrate(arguments["experience_id"], refs=refs))
+            except (ValidationError, ValueError, FileNotFoundError) as exc:
                 return ToolResult(False, error=str(exc))
         if name == "search_profile_evidence":
             handler = self.retrieval.get("search_evidence")

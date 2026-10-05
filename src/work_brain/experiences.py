@@ -1,0 +1,252 @@
+"""Source-backed professional Experience read models.
+
+Experiences are stable catalog entities.  This module never stores a second
+copy of professional facts: cards and hydrated views are derived from linked
+SessionEntry revisions and can be rebuilt at any time.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Iterable, Mapping
+
+from .domain import SessionEntry
+from .domain import normalize_alias
+from .errors import IntegrityError, ValidationError
+from .fsutil import read_json
+from .ids import validate_uuid7
+from .retrieval import EvidenceRetriever
+
+
+MAX_EXPERIENCE_CARD_REFS = 12
+MAX_EXPERIENCE_RESULTS = 20
+
+
+@dataclass(frozen=True)
+class ExperienceCard:
+    experience_id: str
+    title: str
+    workspace: dict[str, Any] | None
+    project: dict[str, Any] | None
+    first_occurrence: str | None
+    last_occurrence: str | None
+    entry_count: int
+    domain_tags: list[str]
+    supporting_entry_refs: list[dict[str, Any]]
+    evidence_signals: dict[str, bool]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "experience_id": self.experience_id,
+            "title": self.title,
+            "workspace": self.workspace,
+            "project": self.project,
+            "first_occurrence": self.first_occurrence,
+            "last_occurrence": self.last_occurrence,
+            "entry_count": self.entry_count,
+            "domain_tags": list(self.domain_tags),
+            "supporting_entry_refs": list(self.supporting_entry_refs),
+            "evidence_signals": dict(self.evidence_signals),
+        }
+
+
+class ExperienceService:
+    """Deterministic Experience listing, search, and hydration boundary."""
+
+    def __init__(self, vault: Any, *, retriever: EvidenceRetriever | None = None):
+        self.vault = vault
+        self.retriever = retriever or EvidenceRetriever(vault)
+
+    def list(self, *, limit: int = 8, filters: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        if not isinstance(limit, int) or not 1 <= limit <= MAX_EXPERIENCE_RESULTS:
+            raise ValidationError(f"limit must be between 1 and {MAX_EXPERIENCE_RESULTS}")
+        groups = self._groups(filters=filters)
+        cards = [self._card(experience_id, entries).to_dict() for experience_id, entries in groups.items()]
+        cards.sort(key=lambda card: (card["last_occurrence"] or "", card["experience_id"]), reverse=True)
+        return {"status": "ok", "experiences": cards[:limit]}
+
+    def search(
+        self,
+        query: str,
+        *,
+        filters: Mapping[str, Any] | None = None,
+        page_size: int = 8,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        evidence = self.retriever.search(query, filters=filters, page_size=page_size, cursor=cursor)
+        cards = self.candidates_from_evidence(evidence).get("experiences", [])
+        return {
+            "status": evidence.get("status", "ok"),
+            "degraded_components": evidence.get("degraded_components", []),
+            "incomplete": evidence.get("incomplete", False),
+            "experiences": cards,
+            "next_cursor": evidence.get("next_cursor"),
+            "embedding": evidence.get("embedding"),
+        }
+
+    def get(self, experience_id: str) -> dict[str, Any]:
+        experience_id = validate_uuid7(experience_id, "experience_id")
+        groups = self._groups()
+        entries = groups.get(experience_id)
+        if entries is None:
+            raise FileNotFoundError(f"experience not found: {experience_id}")
+        return self._card(experience_id, entries).to_dict()
+
+    def hydrate(self, experience_id: str, *, refs: list[Mapping[str, Any]] | None = None) -> dict[str, Any]:
+        card = self.get(experience_id)
+        selected = refs or card["supporting_entry_refs"][:4]
+        if not selected:
+            return {"experience": card, "evidence": {"items": []}}
+        for ref in selected:
+            if ref.get("entry_id") not in {item["entry_id"] for item in card["supporting_entry_refs"]}:
+                raise ValidationError("experience hydration refs must belong to the experience")
+        return {"experience": card, "evidence": self.retriever.hydrate(list(selected)[:4])}
+
+    def candidates_from_evidence(self, evidence: Mapping[str, Any]) -> dict[str, Any]:
+        """Aggregate ranked evidence cards without inventing story quality."""
+        raw_cards = evidence.get("cards", [])
+        if not isinstance(raw_cards, list):
+            return {"experiences": [], "ungrouped": []}
+        current = {entry.entry_id: entry for entry in self.vault.all_current_entries()}
+        grouped: dict[str, dict[str, Any]] = {}
+        ungrouped: list[dict[str, Any]] = []
+        for rank, card in enumerate(raw_cards, 1):
+            if not isinstance(card, Mapping):
+                continue
+            ref = card.get("ref")
+            if not isinstance(ref, Mapping) or not isinstance(ref.get("entry_id"), str):
+                continue
+            entry = current.get(ref["entry_id"])
+            if entry is None:
+                continue
+            experience_ids = self._experience_ids(entry)
+            if not experience_ids:
+                ungrouped.append({
+                    "candidate_type": "ungrouped_entry",
+                    "title": entry.title,
+                    "supporting_entry_refs": [{"entry_id": entry.entry_id, "revision": entry.revision}],
+                    "matched_evidence": dict(card),
+                })
+                continue
+            for experience_id in experience_ids:
+                item = grouped.setdefault(experience_id, {"best_rank": rank, "matched_refs": [], "matches": []})
+                item["best_rank"] = min(item["best_rank"], rank)
+                item["matched_refs"].append({"entry_id": entry.entry_id, "revision": entry.revision})
+                item["matches"].append(dict(card))
+        experiences: list[dict[str, Any]] = []
+        all_groups = self._groups()
+        for experience_id, item in grouped.items():
+            entries = all_groups.get(experience_id, [])
+            if not entries:
+                continue
+            candidate = self._card(experience_id, entries).to_dict()
+            candidate["candidate_type"] = "experience"
+            candidate["matched_entry_refs"] = item["matched_refs"]
+            candidate["matched_evidence"] = item["matches"][:3]
+            candidate["_best_rank"] = item["best_rank"]
+            experiences.append(candidate)
+        experiences.sort(key=lambda item: (item.pop("_best_rank"), item["experience_id"]))
+        return {"experiences": experiences, "ungrouped": ungrouped}
+
+    def _groups(self, *, filters: Mapping[str, Any] | None = None) -> dict[str, list[SessionEntry]]:
+        groups: dict[str, list[SessionEntry]] = {}
+        for entry in self.vault.all_current_entries():
+            if not self._matches(entry, filters or {}):
+                continue
+            for experience_id in self._experience_ids(entry):
+                groups.setdefault(experience_id, []).append(entry)
+        return groups
+
+    def _experience_ids(self, entry: SessionEntry) -> list[str]:
+        result: list[str] = []
+        for ref in entry.entity_refs:
+            if ref["relation"] != "experience":
+                continue
+            path = self.vault.root / "catalog/entities" / f"{ref['entity_id']}.json"
+            if not path.exists():
+                raise IntegrityError(f"missing experience entity: {ref['entity_id']}")
+            entity = read_json(path)
+            if entity.get("kind") != "experience":
+                raise IntegrityError(f"entry relation points to a non-experience entity: {ref['entity_id']}")
+            if ref["entity_id"] not in result:
+                result.append(ref["entity_id"])
+        return result
+
+    def _card(self, experience_id: str, entries: Iterable[SessionEntry]) -> ExperienceCard:
+        ordered = sorted(entries, key=lambda entry: (entry.created_at, entry.entry_id))
+        path = self.vault.root / "catalog/entities" / f"{experience_id}.json"
+        if not path.exists():
+            raise IntegrityError(f"missing experience entity: {experience_id}")
+        entity = read_json(path)
+        if entity.get("kind") != "experience":
+            raise IntegrityError(f"entity is not an experience: {experience_id}")
+        workspace = self._context(ordered, "workspace_entity_id")
+        project = self._context(ordered, "project_entity_id")
+        tags: list[str] = []
+        for entry in ordered:
+            for tag in entry.domain_tags:
+                if tag not in tags:
+                    tags.append(tag)
+        starts = [entry.occurrence.start or entry.created_at for entry in ordered]
+        ends = [entry.occurrence.end or entry.occurrence.start or entry.created_at for entry in ordered]
+        signals = {
+            section: any(bool(entry.sections[section]) for entry in ordered)
+            for section in ("contribution", "alternatives_tradeoffs", "decisions_actions", "outcomes", "learning", "open_questions")
+        }
+        refs = [{"entry_id": entry.entry_id, "revision": entry.revision} for entry in ordered]
+        return ExperienceCard(
+            experience_id=experience_id,
+            title=entity["canonical_name"],
+            workspace=workspace,
+            project=project,
+            first_occurrence=min(starts) if starts else None,
+            last_occurrence=max(ends) if ends else None,
+            entry_count=len(ordered),
+            domain_tags=sorted(tags),
+            supporting_entry_refs=refs[:MAX_EXPERIENCE_CARD_REFS],
+            evidence_signals=signals,
+        )
+
+    def _context(self, entries: list[SessionEntry], field: str) -> dict[str, Any] | None:
+        for entry in entries:
+            entity_id = getattr(entry, field)
+            if entity_id is None:
+                continue
+            path = self.vault.root / "catalog/entities" / f"{entity_id}.json"
+            if not path.exists():
+                raise IntegrityError(f"missing context entity: {entity_id}")
+            entity = read_json(path)
+            return {"entity_id": entity["entity_id"], "kind": entity["kind"], "name": entity["canonical_name"]}
+        return None
+
+    def _matches(self, entry: SessionEntry, filters: Mapping[str, Any]) -> bool:
+        allowed = {"workspaces", "projects", "domain_tags", "occurred_after", "occurred_before"}
+        unknown = sorted(set(filters) - allowed)
+        if unknown:
+            raise ValidationError(f"unknown experience filter: {unknown[0]}")
+        for field, entity_id in (("workspaces", entry.workspace_entity_id), ("projects", entry.project_entity_id)):
+            values = filters.get(field, [])
+            if not isinstance(values, list) or any(not isinstance(value, str) or not value.strip() for value in values):
+                raise ValidationError(f"{field} must be a list of non-empty strings")
+            if values:
+                if entity_id is None:
+                    return False
+                path = self.vault.root / "catalog/entities" / f"{entity_id}.json"
+                if not path.exists():
+                    raise IntegrityError(f"missing context entity: {entity_id}")
+                entity = read_json(path)
+                names = {entity["entity_id"], normalize_alias(entity["canonical_name"])}
+                names.update(normalize_alias(alias) for alias in entity.get("aliases", []))
+                if not all(value in names or normalize_alias(value) in names for value in values):
+                    return False
+        tags = filters.get("domain_tags", [])
+        if not isinstance(tags, list) or any(not isinstance(tag, str) or not tag.strip() for tag in tags):
+            raise ValidationError("domain_tags must be a list of non-empty strings")
+        if tags and not set(tags).issubset(set(entry.domain_tags)):
+            return False
+        value = entry.occurrence.start or entry.created_at
+        if filters.get("occurred_after") is not None and value < str(filters["occurred_after"]):
+            return False
+        if filters.get("occurred_before") is not None and value >= str(filters["occurred_before"]):
+            return False
+        return True

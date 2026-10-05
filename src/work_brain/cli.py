@@ -14,6 +14,7 @@ from .commit import CommitResolver
 from .config import default_config_path, read_config, resolve_vault_path, set_vault_path
 from .domain import normalize_domain_tags
 from .errors import FeatureUnavailable, IntegrityError, LockError, PersistenceError, ValidationError
+from .experiences import ExperienceService
 from .fsutil import read_json
 from .hook import process as process_capture_hook
 from .instructions import SkillLoader
@@ -138,6 +139,22 @@ def _parser() -> argparse.ArgumentParser:
     get = evidence_sub.add_parser("get")
     get.add_argument("--entry-id", required=True)
     get.add_argument("--revision", type=int)
+
+    experience = sub.add_parser("experience", help="read source-backed professional Experiences")
+    experience_sub = experience.add_subparsers(dest="experience_command", required=True)
+    experience_list = experience_sub.add_parser("list")
+    experience_list.add_argument("--limit", type=int, default=8)
+    experience_list.add_argument("--filters", help="JSON object containing evidence filters")
+    experience_search = experience_sub.add_parser("search")
+    experience_search.add_argument("--query", required=True)
+    experience_search.add_argument("--page-size", type=int, default=8)
+    experience_search.add_argument("--filters", help="JSON object containing evidence filters")
+    experience_search.add_argument("--cursor")
+    experience_get = experience_sub.add_parser("get")
+    experience_get.add_argument("--experience-id", required=True)
+    experience_hydrate = experience_sub.add_parser("hydrate")
+    experience_hydrate.add_argument("--experience-id", required=True)
+    experience_hydrate.add_argument("--file", help="JSON object with optional refs; omit or use - to read stdin")
 
     career = sub.add_parser("career", help="interview practice and career retrieval")
     career.add_argument("--bank", action="append", default=[], metavar="BANK_ID=PATH", help="question bank; repeat for multiple banks")
@@ -465,7 +482,7 @@ def _question_ref(value: str | None) -> QuestionRef | None:
 
 def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     command = args.command
-    machine = bool(args.json or command in {"state", "work", "evidence", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session", "profiles", "backfill-context", "backfill-tags", "migrate-domain-tags"})
+    machine = bool(args.json or command in {"state", "work", "evidence", "experience", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session", "profiles", "backfill-context", "backfill-tags", "migrate-domain-tags"})
     if command == "status":
         snapshot = build_live_status(_vault(args))
         return snapshot, bool(args.json)
@@ -497,6 +514,25 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         return HarnessCaptureService(_vault(args)).stop(host=args.host, host_session_id=args.host_session_id, session_id=args.session_id), True
 
     vault = _vault(args)
+    if command == "experience":
+        service = ExperienceService(vault)
+        if args.experience_command == "list":
+            filters = json.loads(args.filters) if args.filters else None
+            if filters is not None and not isinstance(filters, dict):
+                raise ValidationError("--filters must be a JSON object")
+            return service.list(limit=args.limit, filters=filters), True
+        if args.experience_command == "search":
+            filters = json.loads(args.filters) if args.filters else None
+            if filters is not None and not isinstance(filters, dict):
+                raise ValidationError("--filters must be a JSON object")
+            return service.search(args.query, filters=filters, page_size=args.page_size, cursor=args.cursor), True
+        if args.experience_command == "get":
+            return service.get(args.experience_id), True
+        payload = _read_payload(args.file) if args.file else {}
+        refs = payload.get("refs")
+        if refs is not None and not isinstance(refs, list):
+            raise ValidationError("experience hydration refs must be a list")
+        return service.hydrate(args.experience_id, refs=refs), True
     if command == "career":
         service = _career_service(vault, args.bank)
         if args.career_command == "questions":

@@ -62,7 +62,7 @@ class CareerTests(unittest.TestCase):
         result = service.search_questions(filters=QuestionFilters.from_values(tags_all=["conflict"]))
         self.assertEqual(1, len(result["questions"]))
         self.assertEqual([], self.vault.all_current_entries())
-        self.assertEqual({"search_questions", "get_question", "choose_question", "search_evidence", "hydrate_evidence", "mark_interview_candidate", "unmark_interview_candidate", "list_interview_candidates"}, {item.name for item in ToolRegistry(self.vault).definitions("career")})
+        self.assertEqual({"search_questions", "get_question", "choose_question", "search_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "mark_interview_candidate", "unmark_interview_candidate", "list_interview_candidates"}, {item.name for item in ToolRegistry(self.vault).definitions("career")})
 
     def test_prepare_pages_evidence_but_mock_does_not_reveal_it(self) -> None:
         session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00")
@@ -74,6 +74,7 @@ class CareerTests(unittest.TestCase):
         mocked = service.mock(question=question)
         self.assertEqual("prepare", prepared["mode"])
         self.assertIn("evidence", prepared)
+        self.assertIn("ungrouped_candidates", prepared)
         self.assertTrue(prepared["selection_required"])
         self.assertEqual("mock", mocked["mode"])
         self.assertIsNone(mocked["evidence"])

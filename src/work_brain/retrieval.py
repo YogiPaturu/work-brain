@@ -620,7 +620,7 @@ class EvidenceRetriever:
             return RetrievalHealth("failed", 0, False, False, "")
 
     def _eligible(self, conn: Any, filters: Mapping[str, Any]) -> set[str]:
-        allowed = {"occurred_after", "occurred_before", "entities", "workspaces", "projects", "domain_tags", "modes", "provenance_kind", "has_outcome"}
+        allowed = {"occurred_after", "occurred_before", "entities", "workspaces", "projects", "experiences", "domain_tags", "modes", "provenance_kind", "has_outcome"}
         unknown = sorted(set(filters) - allowed)
         if unknown:
             raise ValidationError(f"unknown evidence filter: {unknown[0]}")
@@ -732,6 +732,35 @@ class EvidenceRetriever:
                 rows = conn.execute(
                     f"SELECT DISTINCT entry_id FROM retrieval_entries WHERE project_entity_id IN ({placeholders})",
                     tuple(project_ids),
+                ).fetchall()
+                match_ids = {row["entry_id"] for row in rows}
+                ids = match_ids if ids is None else ids & match_ids
+            else:
+                ids = set()
+        experience_values = filters.get("experiences", [])
+        if not isinstance(experience_values, list) or any(not isinstance(value, str) or not value.strip() for value in experience_values):
+            raise ValidationError("experiences must be a list of non-empty strings")
+        if experience_values:
+            experience_ids: set[str] = set()
+            for value in experience_values:
+                normalized = normalize_alias(value.strip())
+                rows = conn.execute(
+                    "SELECT entity_id FROM entities WHERE kind = 'experience' AND entity_id = ? "
+                    "UNION SELECT DISTINCT ea.entity_id FROM entity_aliases ea "
+                    "JOIN entities e ON e.entity_id = ea.entity_id "
+                    "WHERE e.kind = 'experience' AND ea.alias_norm = ?",
+                    (value.strip(), normalized),
+                ).fetchall()
+                if not rows:
+                    continue
+                if len(rows) > 1:
+                    raise AmbiguousFilter(value, sorted(row["entity_id"] for row in rows))
+                experience_ids.add(rows[0]["entity_id"])
+            if experience_ids:
+                placeholders = ",".join("?" * len(experience_ids))
+                rows = conn.execute(
+                    f"SELECT DISTINCT entry_id FROM entry_entities WHERE relation = 'experience' AND entity_id IN ({placeholders})",
+                    tuple(experience_ids),
                 ).fetchall()
                 match_ids = {row["entry_id"] for row in rows}
                 ids = match_ids if ids is None else ids & match_ids
@@ -861,14 +890,17 @@ class EvidenceRetriever:
                     workspace_value = read_json(self.vault.root / "catalog/entities" / f"{entry.workspace_entity_id}.json")
                     workspace = {"entity_id": workspace_value["entity_id"], "kind": workspace_value["kind"], "name": workspace_value["canonical_name"]}
                 entities = []
+                experiences = []
                 for ref in entry.entity_refs:
                     entity = read_json(self.vault.root / "catalog/entities" / f"{ref['entity_id']}.json")
                     entities.append({"entity_id": entity["entity_id"], "kind": entity["kind"], "name": entity["canonical_name"]})
+                    if ref["relation"] == "experience" and entity["kind"] == "experience":
+                        experiences.append({"entity_id": entity["entity_id"], "name": entity["canonical_name"]})
                 project = None
                 if entry.project_entity_id is not None:
                     project_value = read_json(self.vault.root / "catalog/entities" / f"{entry.project_entity_id}.json")
                     project = {"entity_id": project_value["entity_id"], "kind": project_value["kind"], "name": project_value["canonical_name"]}
-                cards.append({"ref": {"entry_id": entry_id, "revision": row["source_revision"]}, "title": row["title"], "when": entry.occurrence.to_dict(), "summary": row["summary"], "provenance_kind": row["provenance_kind"], "modes": entry.modes, "domain_tags": entry.domain_tags, "workspace": workspace, "project": project, "entities": entities, "match": {"signals": signals, "sections": list(dict.fromkeys(match["sections"]))[:3], "snippets": snippets[:2]}, "flags": {"has_outcome": bool(row["has_outcome"]), "has_open_questions": bool(row["has_open_questions"])}})
+                cards.append({"ref": {"entry_id": entry_id, "revision": row["source_revision"]}, "title": row["title"], "when": entry.occurrence.to_dict(), "summary": row["summary"], "provenance_kind": row["provenance_kind"], "modes": entry.modes, "domain_tags": entry.domain_tags, "workspace": workspace, "project": project, "entities": entities, "experiences": experiences, "match": {"signals": signals, "sections": list(dict.fromkeys(match["sections"]))[:3], "snippets": snippets[:2]}, "flags": {"has_outcome": bool(row["has_outcome"]), "has_open_questions": bool(row["has_open_questions"])}})
             next_cursor = None
             if offset + page_size < len(ordered):
                 next_cursor = _cursor_encode({"fingerprint": fingerprint, "generation": generation, "offset": offset + page_size})

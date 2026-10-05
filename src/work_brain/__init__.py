@@ -46,6 +46,8 @@ _EXPORTS = {
     "CommitPublicationResult": (".services", "CommitPublicationResult"),
     "ProjectionMaintenance": (".services", "ProjectionMaintenance"),
     "ProjectionMaintenanceResult": (".services", "ProjectionMaintenanceResult"),
+    "ExperienceCard": (".experiences", "ExperienceCard"),
+    "ExperienceService": (".experiences", "ExperienceService"),
     "CareerCandidateMarkStore": (".career", "CareerCandidateMarkStore"),
     "CareerService": (".career", "CareerService"),
     "InterviewQuestion": (".career", "InterviewQuestion"),

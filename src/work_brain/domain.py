@@ -18,7 +18,10 @@ OCCURRENCE_PRECISIONS = {"instant", "day", "month", "quarter", "year", "range", 
 STATE_KINDS = {"task", "open_loop", "commitment", "project_state"}
 STATE_STATUSES = {"active", "waiting", "done", "dropped"}
 MUTATION_OPS = {"create", "update", "close", "reopen"}
-ENTITY_KINDS = {"workspace", "project", "person", "organization", "customer", "system", "topic"}
+ENTITY_KINDS = {
+    "workspace", "project", "experience", "person", "organization",
+    "customer", "system", "topic",
+}
 
 
 def _required(obj: Mapping[str, Any], key: str) -> Any:

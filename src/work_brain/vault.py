@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
 from .database import Database
-from .domain import SessionEntry, normalize_alias, normalize_domain_tags, validate_session
+from .domain import ENTITY_KINDS, SessionEntry, normalize_alias, normalize_domain_tags, validate_session
 from .errors import IntegrityError, ValidationError
 from .fsutil import (
     append_jsonl,
@@ -721,7 +721,7 @@ class Vault:
         updated_at: str | None = None,
     ) -> dict[str, Any]:
         with self._require_or_lock():
-            if kind not in {"workspace", "project", "person", "organization", "customer", "system", "topic"}:
+            if kind not in ENTITY_KINDS:
                 raise ValidationError("invalid entity kind")
             if not isinstance(canonical_name, str) or not canonical_name:
                 raise ValidationError("canonical_name must be non-empty")

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from ..retrieval import EvidenceRetriever
+from ..experiences import ExperienceService
 from .marks import CareerCandidateMarkStore
 from .questions import MarkdownQuestionBankProvider, QuestionBank, QuestionFilters, QuestionRef
 
@@ -17,6 +18,7 @@ class CareerService:
         self.questions = MarkdownQuestionBankProvider(configured)
         self.marks = CareerCandidateMarkStore(vault)
         self.retriever = retriever or EvidenceRetriever(vault)
+        self.experiences = ExperienceService(vault, retriever=self.retriever)
 
     @staticmethod
     def _default_banks(vault: Any) -> list[QuestionBank]:
@@ -35,7 +37,17 @@ class CareerService:
     def prepare(self, *, question: Mapping[str, Any] | None = None, question_text: str | None = None, query: str | None = None, filters: QuestionFilters | None = None, page_size: int = 8, cursor: str | None = None, seed: int | None = None) -> dict[str, Any]:
         selected = self._resolve_question(question, question_text, filters, seed)
         evidence = self.retriever.search(query or selected["text"], page_size=page_size, cursor=cursor)
-        return {"mode": "prepare", "question": selected, "evidence": evidence, "selection_required": True, "story_scores": None}
+        candidates = self.experiences.candidates_from_evidence(evidence)
+        return {
+            "mode": "prepare",
+            "question": selected,
+            "evidence": evidence,
+            "experiences": candidates["experiences"],
+            "ungrouped_candidates": candidates["ungrouped"],
+            "candidates": [*candidates["experiences"], *candidates["ungrouped"]],
+            "selection_required": True,
+            "story_scores": None,
+        }
 
     def mock(self, *, question: Mapping[str, Any] | None = None, question_text: str | None = None, filters: QuestionFilters | None = None, seed: int | None = None) -> dict[str, Any]:
         selected = self._resolve_question(question, question_text, filters, seed)

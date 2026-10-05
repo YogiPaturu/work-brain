@@ -180,10 +180,14 @@ class CommitDraftValidator:
         aliases = value.get("aliases", [])
         if not isinstance(aliases, list) or any(not isinstance(item, str) or not item for item in aliases):
             raise ValidationError("entity candidate aliases must be strings")
-        if not isinstance(value.get("relation", "subject"), str) or not value.get("relation", "subject").strip():
+        default_relation = "experience" if kind == "experience" else "subject"
+        relation = value.get("relation", default_relation)
+        if not isinstance(relation, str) or not relation.strip():
             raise ValidationError("entity candidate relation must be a non-empty token")
+        if kind == "experience" and relation.strip().casefold() != "experience":
+            raise ValidationError("experience entity candidates must use relation=experience")
         return {"entity_id": entity_id, "kind": kind, "canonical_name": name, "aliases": list(aliases),
-                "description": value.get("description"), "relation": value.get("relation", "subject")}
+                "description": value.get("description"), "relation": relation.strip().casefold()}
 
     @staticmethod
     def _context_name(value: Any, field: str) -> str:
