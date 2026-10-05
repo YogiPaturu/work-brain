@@ -350,6 +350,24 @@ class RuntimeTests(unittest.TestCase):
         validated = CommitDraftValidator().validate(value, turn_count=1, workflow="think")
         self.assertEqual("experience", validated.entity_candidates[0]["relation"])
 
+    def test_existing_experience_contract_requires_and_accepts_explicit_relation(self) -> None:
+        experience = self.vault.upsert_entity(kind="experience", canonical_name="Auth migration")
+        valid = draft()
+        valid["entity_candidates"] = [{
+            "entity_id": experience["entity_id"], "kind": "experience", "relation": "experience",
+        }]
+        session = self.vault.create_session(started_at="2026-10-01T10:00:00+01:00")
+        self.vault.append_turn(session["session_id"], "user", "The authentication migration changed direction.")
+        entry = CommitResolver(self.vault).publish(session["session_id"], valid, workflow="think")
+        self.assertEqual([{"entity_id": experience["entity_id"], "relation": "experience"}], entry.entity_refs)
+
+        invalid = draft()
+        invalid["entity_candidates"] = [{
+            "entity_id": experience["entity_id"], "kind": "experience", "relation": "subject",
+        }]
+        with self.assertRaisesRegex(ValidationError, "relation=experience"):
+            CommitDraftValidator().validate(invalid, turn_count=1, workflow="think")
+
     def test_commit_statements_require_exact_source_turns(self) -> None:
         value = draft()
         value["sections"]["context"][0]["source_turns"] = []
