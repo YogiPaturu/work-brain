@@ -3,8 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
+import json
 
-from work_brain import ExperienceService, Vault, new_uuid7
+from work_brain import ExperienceService, ValidationError, Vault, new_uuid7
 
 
 SECTIONS = (
@@ -81,6 +84,21 @@ class ExperienceTests(unittest.TestCase):
         self.vault.commit_entry(session["session_id"], raw, refresh_projections=False)
         self.assertEqual([], ExperienceService(self.vault).list()["experiences"])
         self.assertEqual([], self.vault.all_current_entries()[0].entity_refs)
+
+    def test_hydration_accepts_only_exact_card_revisions(self) -> None:
+        entry = self._commit("2026-10-01T10:00:00+01:00", self.architecture, title="Architecture", tags=["architecture"])
+        service = ExperienceService(self.vault)
+        with self.assertRaisesRegex(ValidationError, "must belong"):
+            service.hydrate(self.architecture["entity_id"], refs=[{"entry_id": entry.entry_id, "revision": 2}])
+
+    def test_cli_lists_experiences_as_machine_readable_cards(self) -> None:
+        self._commit("2026-10-01T10:00:00+01:00", self.architecture, title="Architecture", tags=["architecture"])
+        from work_brain.cli import main
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(0, main(["--vault", str(self.vault.root), "experience", "list"]))
+        value = json.loads(output.getvalue())
+        self.assertEqual(self.architecture["entity_id"], value["experiences"][0]["experience_id"])
 
 
 if __name__ == "__main__":

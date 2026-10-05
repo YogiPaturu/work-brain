@@ -341,6 +341,15 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "uses domain_tags"):
             CommitDraftValidator().validate(value, turn_count=1, workflow="think")
 
+    def test_experience_entity_candidate_defaults_to_experience_relation(self) -> None:
+        value = draft()
+        value["entity_candidates"] = [{
+            "kind": "experience",
+            "canonical_name": "Auth migration decision",
+        }]
+        validated = CommitDraftValidator().validate(value, turn_count=1, workflow="think")
+        self.assertEqual("experience", validated.entity_candidates[0]["relation"])
+
     def test_commit_statements_require_exact_source_turns(self) -> None:
         value = draft()
         value["sections"]["context"][0]["source_turns"] = []

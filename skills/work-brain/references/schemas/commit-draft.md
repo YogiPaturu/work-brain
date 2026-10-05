@@ -24,6 +24,14 @@ The model emits only semantic fields:
 - `state_changes`, `entity_candidates`, `artifact_candidates`, and
   `source_entry_refs`.
 
+When a bounded conversation clearly continues an existing professional
+Experience, `entity_candidates` may include its stable entity ID or an alias
+resolved by the application. A new Experience may be proposed with
+`{"kind":"experience","canonical_name":"..."}`; its relation defaults to
+`experience`. Experience association is optional. If the relationship is
+uncertain, omit the candidate and commit the SessionEntry normally. Never copy
+an Experience summary into the entry as a substitute for supporting evidence.
+
 The context fields are plain names:
 
 ```json

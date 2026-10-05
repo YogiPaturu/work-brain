@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from work_brain import CareerService, MarkdownQuestionBankProvider, QuestionBank, QuestionFilters, ToolRegistry, Vault, new_uuid7
+from work_brain import CareerService, EvidenceRetriever, LocalHashEmbeddingProvider, MarkdownQuestionBankProvider, QuestionBank, QuestionFilters, ToolRegistry, Vault, new_uuid7
 
 
 def entry_payload(session: dict, *, revision: int = 1, supersedes: int | None = None, summary: str = "A conflict was resolved with new evidence.") -> dict:
@@ -100,6 +100,25 @@ class CareerTests(unittest.TestCase):
         self.assertEqual("unmark", removed["action"])
         self.assertEqual([], service.marks.list())
         self.assertTrue((self.vault.root / "career/marks.jsonl").exists())
+
+    def test_prepare_aggregates_ranked_entries_into_experiences_and_preserves_gaps(self) -> None:
+        experience = self.vault.upsert_entity(kind="experience", canonical_name="Resolving the migration disagreement")
+        session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00")
+        self.vault.append_turn(session["session_id"], "user", "We resolved a disagreement with a teammate.")
+        value = entry_payload(session)
+        value["entity_refs"] = [{"entity_id": experience["entity_id"], "relation": "experience"}]
+        self.vault.commit_entry(session["session_id"], value, refresh_projections=False)
+        self.vault.reconcile_database()
+        retriever = EvidenceRetriever(self.vault, LocalHashEmbeddingProvider())
+        retriever.reindex()
+        service = CareerService(self.vault, banks=[self.bank], retriever=retriever)
+        prepared = service.prepare(question_text="Tell me about a disagreement you resolved.", page_size=4)
+        self.assertEqual(1, len(prepared["experiences"]))
+        candidate = prepared["experiences"][0]
+        self.assertEqual(experience["entity_id"], candidate["experience_id"])
+        self.assertEqual([{"entry_id": session["entry_id"], "revision": 1}], candidate["supporting_entry_refs"])
+        self.assertFalse(candidate["evidence_signals"]["outcomes"])
+        self.assertEqual([], prepared["ungrouped_candidates"])
 
     def test_tool_cannot_create_mark_from_model_suggestion_alone(self) -> None:
         session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00")

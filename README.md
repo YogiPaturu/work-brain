@@ -329,6 +329,17 @@ Use `work-brain reindex` after changing retrieval code or embedding settings.
 superseded revisions and reports degraded or incomplete state instead of
 presenting a false empty result.
 
+Long-lived Experiences use the same evidence boundary. They can span multiple
+sessions and dates without becoming a second evidence store:
+
+```bash
+work-brain --vault "$HOME/work-brain-vault" experience list --limit 8
+work-brain --vault "$HOME/work-brain-vault" experience search \
+  --query "changed direction after new evidence" --page-size 8
+work-brain --vault "$HOME/work-brain-vault" experience get \
+  --experience-id EXPERIENCE_ID
+```
+
 ### Semantic retrieval profile
 
 The optional `semantic` extra includes FastEmbed with the local BGE profile
@@ -413,8 +424,9 @@ work-brain --vault "$HOME/work-brain-vault" career \
   questions choose --tag-all ambiguity --seed 7
 ```
 
-`career prepare` retrieves a bounded first page of plausible evidence and
-returns an opaque continuation cursor. The user chooses the story and angle;
+`career prepare` retrieves a bounded first page of plausible evidence, groups
+matches into source-backed Experience candidates, and preserves relevant
+ungrouped entries. It returns an opaque continuation cursor. The user chooses the story and angle;
 the system does not declare a “best story” or persist a story-quality score.
 `career mock` asks the question first and does not reveal evidence suggestions
 before the answer.

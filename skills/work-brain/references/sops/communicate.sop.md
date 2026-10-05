@@ -40,6 +40,8 @@ what the intended audience should receive.
 - For a profile-scoped draft, the agent MUST use the profile-scoped evidence
   search tool. It MUST NOT broaden the entity, domain, or time window by issuing
   an unrestricted search for the same draft.
+- A validated profile may scope evidence by stable Experience IDs or aliases in
+  addition to workspace, project, domain tags, and time window.
 
 ## Steps
 

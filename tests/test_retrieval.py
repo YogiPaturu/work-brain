@@ -120,6 +120,20 @@ class RetrievalTests(unittest.TestCase):
         self.assertIsNone(second["next_cursor"])
         self.assertEqual("cursor_expired", retriever.search("import", page_size=1, cursor=first["next_cursor"], filters={"domain_tags": ["product"]})["status"])
 
+    def test_experience_filter_uses_stable_entity_alias(self) -> None:
+        experience = self.vault.upsert_entity(kind="experience", canonical_name="Auth migration", aliases=["auth"])
+        session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00")
+        self.vault.append_turn(session["session_id"], "user", "Auth migration decision")
+        value = payload(session, title="Auth migration decision", summary="The auth migration changed direction.")
+        value["entity_refs"] = [{"entity_id": experience["entity_id"], "relation": "experience"}]
+        self.vault.commit_entry(session["session_id"], value, refresh_projections=False)
+        self.vault.reconcile_database()
+        retriever = EvidenceRetriever(self.vault, LocalHashEmbeddingProvider())
+        retriever.reindex()
+        result = retriever.search("migration", filters={"experiences": ["auth"]})
+        self.assertEqual([session["entry_id"]], [card["ref"]["entry_id"] for card in result["cards"]])
+        self.assertEqual(experience["entity_id"], result["cards"][0]["experiences"][0]["entity_id"])
+
     def test_reindex_is_idempotent_and_repairs_derived_damage(self) -> None:
         self._commit("Repair index", "The retrieval index can be rebuilt.")
         retriever = EvidenceRetriever(self.vault)

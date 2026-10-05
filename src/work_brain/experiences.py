@@ -97,8 +97,12 @@ class ExperienceService:
         selected = refs or card["supporting_entry_refs"][:4]
         if not selected:
             return {"experience": card, "evidence": {"items": []}}
+        allowed_refs = {
+            (item["entry_id"], item["revision"])
+            for item in card["supporting_entry_refs"]
+        }
         for ref in selected:
-            if ref.get("entry_id") not in {item["entry_id"] for item in card["supporting_entry_refs"]}:
+            if (ref.get("entry_id"), ref.get("revision")) not in allowed_refs:
                 raise ValidationError("experience hydration refs must belong to the experience")
         return {"experience": card, "evidence": self.retriever.hydrate(list(selected)[:4])}
 

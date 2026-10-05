@@ -12,7 +12,7 @@ from work_brain.cli import main
 from work_brain.errors import ValidationError
 from work_brain.model import ModelResponse, ScriptedModel
 from work_brain.orchestrator import SessionOrchestrator
-from work_brain.profiles import CommunicationProfileStore
+from work_brain.profiles import CommunicationProfile, CommunicationProfileStore
 from work_brain.retrieval import EvidenceRetriever
 from work_brain.tools import ToolRegistry
 from work_brain.vault import Vault
@@ -232,6 +232,27 @@ class CommunicationProfileTests(unittest.TestCase):
         self.assertTrue(anchored.ok)
         self.assertEqual("auth architecture what changed", seen["query"])
         self.assertEqual({}, seen["filters"])
+
+    def test_profile_can_scope_communication_to_an_experience(self) -> None:
+        profile = CommunicationProfile.from_dict({
+            "id": "auth_experience",
+            "label": "Auth experience",
+            "workflow": "communicate",
+            "channel": "draft",
+            "audience": "manager",
+            "purpose": "summarize an experience",
+            "scope": {"experiences": ["auth-migration"], "time_window": "work_item"},
+            "tone": "concise",
+            "format": ["summary"],
+            "include": ["outcome"],
+            "exclude": ["private speculation"],
+            "triggers": [],
+            "cadence": "on_demand",
+            "schedule": {},
+            "delivery": {"mode": "draft_only"},
+            "rendering": {},
+        })
+        self.assertEqual(["auth-migration"], profile.retrieval_filters()["experiences"])
 
     def test_close_day_model_can_see_no_profile_when_none_is_opted_in(self) -> None:
         store = CommunicationProfileStore.load(RANQ_PROFILE)

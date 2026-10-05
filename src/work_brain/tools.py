@@ -245,7 +245,7 @@ class ToolRegistry:
                     cursor=cursor,
                 )
                 fallback_used = False
-                scope_fields = ("entities", "workspaces", "projects")
+                scope_fields = ("entities", "workspaces", "projects", "experiences")
                 if (
                     not cursor
                     and any(filters.get(field) for field in scope_fields)

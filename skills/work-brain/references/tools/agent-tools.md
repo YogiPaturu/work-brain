@@ -10,6 +10,9 @@ commands through the harness's existing shell capability:
   missing from their journal projection, and every uncommitted raw session
 - `search_evidence`
 - `hydrate_evidence`
+- `search_experiences`
+- `get_experience`
+- `hydrate_experience`
 - `search_questions`
 - `get_question`
 - `choose_question`
@@ -62,6 +65,8 @@ For example, the host may execute:
 work-brain state current
 work-brain work recent --limit 5
 work-brain evidence search --query "import reliability" --page-size 10
+work-brain experience search --query "influenced a decision" --page-size 8
+work-brain experience list --limit 8
 work-brain career questions search --tag-all conflict
 work-brain career prepare --question-text "Tell me about a difficult decision"
 work-brain career mock --question-text "Tell me about a difficult decision"
@@ -85,12 +90,13 @@ explicit session ID and reason; it hides a known bad structured entry while
 preserving the raw turns. It is not for ordinary workflow completion.
 
 Career question lookup is deterministic and does not require a model call.
-Question banks are separate from professional evidence. `prepare` may show a
-bounded page of plausible EvidenceCards and an opaque continuation cursor;
-`mock` asks the question first and does not reveal evidence suggestions before
-the answer. The user chooses the story/angle. Candidate marks are private
-preference events and require explicit confirmation; a model suggestion alone
-must never persist one.
+Question banks are separate from professional evidence. `prepare` aggregates
+ranked EvidenceCards into bounded source-backed Experience candidates and also
+preserves relevant ungrouped entries as single-entry candidates. `mock` asks
+the question first and does not reveal evidence suggestions before the answer.
+The user chooses the story/angle. Candidate marks are private preference
+events and require explicit confirmation; a model suggestion alone must never
+persist one.
 
 The existing `ToolRegistry` and bounded standalone model/tool loop remain
 available for provider-free tests and future standalone mode. They are not a
