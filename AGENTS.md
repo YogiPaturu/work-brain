@@ -23,7 +23,12 @@ Run:
 PYTHONPATH=src python3 -m unittest discover -s tests -q
 PYTHONPATH=src python3 -m compileall -q src examples
 git diff --check
+python3 -m mypy
 ```
+
+The type-check command covers the lifecycle, source/derived coordination, and
+capture-hook boundary modules first; it is intentionally not a whole-repo
+typing migration.
 
 For packaging changes, build a wheel and verify that all Skill/SOP/schema
 resources required by `SkillLoader` are present in the artifact.

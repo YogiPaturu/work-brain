@@ -82,9 +82,11 @@ host shell
 ## 5. Verification gate
 
 The HLD-001 v3 and LLD-002 v3 references are accepted and the CLI/capture
-boundary tests pass. Cold and OS-cache-warm benchmark measurements remain an
-operational verification follow-up. The implementation must not introduce MCP,
-a daemon, a provider-specific retriever, or host-aware logic.
+boundary tests pass. Run the reproducible synthetic measurement with
+`PYTHONPATH=src python3 examples/benchmark_retrieval.py --synthetic
+--embedding hash` before making deployment decisions. The implementation must
+not introduce MCP, a daemon, a provider-specific retriever, or host-aware
+logic.
 
 ## 6. Implemented v1 profile
 

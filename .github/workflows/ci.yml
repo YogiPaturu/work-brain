@@ -21,6 +21,12 @@ jobs:
         run: PYTHONPATH=src python -m unittest discover -s tests -q
       - name: Compile sources
         run: PYTHONPATH=src python -m compileall -q src examples
+      - name: Type-check lifecycle and hook boundaries
+        run: |
+          python -m pip install "mypy>=1.11"
+          python -m mypy
+      - name: Check patch formatting
+        run: git diff --check
       - name: Verify packaged Skill resources
         run: |
           python -m pip install build

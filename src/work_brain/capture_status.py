@@ -107,7 +107,7 @@ def live_status(vault: Any) -> dict[str, Any]:
 
     primary = active_sessions[0] if active_sessions else (recoverable_sessions[0] if recoverable_sessions else None)
     if active_sessions:
-        lifecycle, message = primary["lifecycle"], primary["message"]
+        lifecycle, message = active_sessions[0]["lifecycle"], active_sessions[0]["message"]
     elif recoverable_sessions:
         lifecycle, message = "recoverable_raw", "No active capture; raw turns are preserved and a structured commit is pending."
     else:

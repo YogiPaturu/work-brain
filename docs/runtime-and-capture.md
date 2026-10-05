@@ -123,6 +123,9 @@ Search does not initiate a full reindex. Use `work-brain rebuild` for all
 rebuildable projections or `work-brain reindex` for retrieval embeddings and
 FTS. Capture-hook failures remain host-safe no-ops, while a private
 operational health log records timestamp, host, category, and a short
+sanitized error message. Installed host hooks use the lightweight
+`python -m work_brain.hook` entrypoint, while the documented `capture-hook`
+CLI command remains available for compatibility and testing.
 non-sensitive error for `status` and `doctor`.
 
 ## 5. Logical session lifecycle

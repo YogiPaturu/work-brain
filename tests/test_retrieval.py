@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from work_brain import EvidenceRetriever, LocalHashEmbeddingProvider, Vault, new_uuid7
+from work_brain.retrieval import StaleIndexWork
 
 
 SECTIONS = (
@@ -54,6 +55,24 @@ class RetrievalTests(unittest.TestCase):
         provider = LockObservingProvider()
         EvidenceRetriever(vault, provider).index_entry(session["entry_id"])
         self.assertEqual([0], provider.source_lock_depths)
+
+    def test_stale_embedding_work_cannot_publish_over_newer_revision(self) -> None:
+        session = self._commit("Stale embedding", "The source revision may change during embedding.")
+        vault = self.vault
+        original = payload(session, title="Newer source", summary="A newer source revision wins.", revision=2, supersedes=1)
+
+        class RevisionChangingProvider(LocalHashEmbeddingProvider):
+            changed = False
+
+            def embed_documents(self, texts: list[str]) -> list[list[float]]:
+                if not self.changed:
+                    self.changed = True
+                    vault.commit_entry(session["session_id"], original, refresh_projections=False)
+                return super().embed_documents(texts)
+
+        with self.assertRaises(StaleIndexWork):
+            EvidenceRetriever(vault, RevisionChangingProvider()).index_entry(session["entry_id"])
+        self.assertEqual(2, vault.get_current_entry(session["entry_id"]).revision)
 
     def _commit(self, title: str, summary: str) -> dict:
         session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00", modes=["think"], domain_tags=["engineering"])

@@ -206,7 +206,9 @@ development, setup exposes the same canonical repository directory through:
 
 `work-brain setup codex|claude|cursor` creates idempotent links and additive
 hook entries, preserves unrelated settings, refuses unsafe overwrites, and
-supports `--check`. Absolute executable paths are used in hook commands.
+supports `--check`. Absolute executable paths are used in hook commands. The
+installed hook command uses the dependency-light `python -m work_brain.hook`
+entrypoint; `work-brain capture-hook` remains a compatible CLI adapter.
 
 The CLI resolves a vault by explicit `--vault`, `WORK_BRAIN_VAULT`, optional
 local user configuration, then a clear error. A private path is never stored
@@ -314,3 +316,15 @@ This matrix remains the cross-review baseline for LLD-03. The repository now
 implements the retrieval contract as a foreground local projection; cold and
 OS-cache-warm benchmark measurements remain an operational follow-up rather
 than a reason to add a daemon or change the v1 process boundary.
+
+The measurement is reproducible without private data:
+
+```bash
+PYTHONPATH=src python3 examples/benchmark_retrieval.py \
+  --synthetic --embedding hash --query "authentication access control"
+```
+
+The command reports cold-process, first-query, and same-process cache-warm
+latency. Results are machine-dependent and should be recorded with the host,
+Python version, embedding provider, and vault size when used for deployment
+decisions.
