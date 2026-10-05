@@ -25,7 +25,7 @@ def payload(session: dict, *, title: str, summary: str, revision: int = 1, super
         "supersedes_revision": supersedes, "revision_reason": "initial_commit" if revision == 1 else "reextract",
         "provenance_kind": "contemporaneous", "title": title, "summary": summary,
         "occurrence": {"start": "2026-09-30T10:00:00+01:00", "end": None, "precision": "instant", "label": None},
-        "modes": ["think"], "domains": ["engineering"], "sections": sections,
+        "modes": ["think"], "domain_tags": ["engineering"], "sections": sections,
         "state_mutations": [], "entity_refs": [], "artifact_refs": [], "source_refs": [],
     }
 
@@ -39,7 +39,7 @@ class RetrievalTests(unittest.TestCase):
         self.tempdir.cleanup()
 
     def _commit(self, title: str, summary: str) -> dict:
-        session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00", modes=["think"], domains=["engineering"])
+        session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00", modes=["think"], domain_tags=["engineering"])
         self.vault.append_turn(session["session_id"], "user", summary, recorded_at="2026-09-30T10:01:00+01:00")
         self.vault.commit_entry(session["session_id"], payload(session, title=title, summary=summary))
         return session
@@ -74,13 +74,13 @@ class RetrievalTests(unittest.TestCase):
         self._commit("Beta import", "Beta import investigation.")
         self._commit("Gamma import", "Gamma import investigation.")
         retriever = EvidenceRetriever(self.vault)
-        first = retriever.search("import", page_size=2, filters={"domains": ["engineering"]})
+        first = retriever.search("import", page_size=2, filters={"domain_tags": ["engineering"]})
         self.assertEqual(2, len(first["cards"]))
         self.assertIsNotNone(first["next_cursor"])
-        second = retriever.search("import", page_size=2, filters={"domains": ["engineering"]}, cursor=first["next_cursor"])
+        second = retriever.search("import", page_size=2, filters={"domain_tags": ["engineering"]}, cursor=first["next_cursor"])
         self.assertEqual(1, len(second["cards"]))
         self.assertIsNone(second["next_cursor"])
-        self.assertEqual("cursor_expired", retriever.search("import", page_size=1, cursor=first["next_cursor"], filters={"domains": ["product"]})["status"])
+        self.assertEqual("cursor_expired", retriever.search("import", page_size=1, cursor=first["next_cursor"], filters={"domain_tags": ["product"]})["status"])
 
     def test_reindex_is_idempotent_and_repairs_derived_damage(self) -> None:
         self._commit("Repair index", "The retrieval index can be rebuilt.")

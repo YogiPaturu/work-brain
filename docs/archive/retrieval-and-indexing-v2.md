@@ -297,7 +297,7 @@ Searchable text may include only information already represented by the current 
 - section statement text;
 - state mutation user-facing text;
 - modes;
-- domains;
+- domain_tags;
 - related entity canonical names and aliases;
 - related artifact labels/kinds;
 - occurrence label when present.
@@ -331,7 +331,7 @@ Contains:
 ```text
 Title: <title>
 Summary: <summary>
-Domains: <domains if any>
+Domains: <domain_tags if any>
 Modes: <modes if any>
 Entities: <canonical names if any>
 Artifacts: <artifact labels if any>
@@ -583,7 +583,7 @@ CREATE INDEX retrieval_entries_by_provenance
 
 `has_outcome` is true when the current entry's `sections.outcomes` is non-empty. `has_open_questions` is true when `sections.open_questions` is non-empty.
 
-### 12.2 Modes and domains
+### 12.2 Modes and domain_tags
 
 ```sql
 CREATE TABLE retrieval_entry_modes (
@@ -655,7 +655,7 @@ Column intent:
 
 - `title` — current entry title;
 - `body` — exact chunk text;
-- `metadata` — domains, modes, current related entity names/aliases, artifact labels/kinds, occurrence label.
+- `metadata` — domain_tags, modes, current related entity names/aliases, artifact labels/kinds, occurrence label.
 
 Lexical ranking weights are:
 
@@ -738,7 +738,7 @@ This detects search-text drift caused by catalog changes without treating entity
   "occurred_after": null,
   "occurred_before": null,
   "entities": [],
-  "domains": [],
+  "domain_tags": [],
   "modes": [],
   "provenance_kind": null,
   "has_outcome": null
@@ -781,7 +781,7 @@ Multiple entities use **any-of** semantics in v1.
 
 ### 13.4 Domain/mode filters
 
-Multiple `domains` or `modes` use any-of semantics.
+Multiple `domain_tags` or `modes` use any-of semantics.
 
 Tokens are matched by Unicode case-folded equality after trimming surrounding whitespace.
 
@@ -1003,7 +1003,7 @@ Target size is normally under roughly `180` model tokens per card.
   "summary": "Considered moving submission generation async and deferred it after reframing the main concern around failure isolation.",
   "provenance_kind": "contemporaneous",
   "modes": ["think", "operate"],
-  "domains": ["engineering"],
+  "domain_tags": ["engineering"],
   "entities": [
     {"entity_id": "0199...", "kind": "project", "name": "Ranq"}
   ],
@@ -1069,7 +1069,7 @@ First page:
     "occurred_after": null,
     "occurred_before": null,
     "entities": ["Ranq"],
-    "domains": ["engineering"],
+    "domain_tags": ["engineering"],
     "modes": [],
     "provenance_kind": null,
     "has_outcome": null
@@ -1181,7 +1181,7 @@ Hydration MUST NOT return indexed chunk text as though it were authoritative sou
         "occurrence": {},
         "provenance_kind": "contemporaneous",
         "modes": [],
-        "domains": [],
+        "domain_tags": [],
         "sections": {
           "reasoning": [
             {
@@ -1301,7 +1301,7 @@ The LLM never calls this tool directly.
 8. Validate embedding dimensions/norms/finiteness.
 9. Open one SQLite write transaction.
 10. Delete retrieval-owned rows for this `entry_id`.
-11. Insert `retrieval_entries`, modes/domains, chunks, FTS rows, and embeddings.
+11. Insert `retrieval_entries`, modes/domain_tags, chunks, FTS rows, and embeddings.
 12. Commit transaction.
 13. Invalidate the in-process vector cache.
 14. Return `IndexUpdateResult`.
@@ -1620,7 +1620,7 @@ A case may record human-known relevant entries:
 id: changed-direction-after-evidence
 query: "Tell me about a time I changed technical direction after new evidence"
 filters:
-  domains: [engineering]
+  domain_tags: [engineering]
 expected_relevant:
   - <entry-id-a>
   - <entry-id-b>
@@ -1946,7 +1946,7 @@ Exact module names remain implementer discretion; ownership boundaries do not.
 | current SessionEntry revision and immutable historical revisions | search corpus + hydration |
 | `entries.current_revision/current_hash` | currentness/staleness validation |
 | statement sections | deterministic semantic chunks |
-| modes/domains | filters and card metadata |
+| modes/domain_tags | filters and card metadata |
 | occurrence/provenance | structured filters/cards |
 | `entry_entities`/entity catalog | filters + search metadata |
 | `entry_artifacts`/artifact catalog | card/hydration/search metadata |

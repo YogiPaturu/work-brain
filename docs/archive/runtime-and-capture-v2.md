@@ -105,7 +105,7 @@ Private helper names, internal object decomposition, equivalent async/sync funct
 - `SKILL.md` is a small control plane/router; detailed procedures live in `.sop.md` reference files.
 - The SOP format inside the Skill follows the supplied Agent SOP convention: Overview, Parameters, Steps, constraints, and examples/troubleshooting where useful.
 - Core conversation guidance and one workflow SOP are loaded at session start; domain probe packs are loaded lazily and selectively.
-- The runtime normally keeps at most one domain probe pack active; at most two may be active when the conversation genuinely spans two domains.
+- The runtime normally keeps at most one domain probe pack active; at most two may be active when the conversation genuinely spans two domain_tags.
 - Normal session commit is emitted from the same model context used for the conversation.
 - The model never generates authoritative IDs, revision numbers, timestamps, SQL, index operations, or filesystem paths.
 - The runtime validates all model-produced structured data before persistence.
@@ -451,7 +451,7 @@ When the runtime decides to close the session:
 4. validate/repair the draft as specified in §17;
 5. generate `commit_id` and resolve deterministic IDs/refs;
 6. invoke the LLD-01 source-first entry publication;
-7. after entry publication succeeds, atomically update `session.json` with `ended_at`, final modes/domains, model ID, and loaded instruction-resource IDs;
+7. after entry publication succeeds, atomically update `session.json` with `ended_at`, final modes/domain_tags, model ID, and loaded instruction-resource IDs;
 8. invoke LLD-01 state/journal projection and LLD-03 index hooks;
 9. release the session as committed.
 
@@ -651,7 +651,7 @@ The model emits:
   "title": "Thinking through asynchronous submission generation",
   "summary": "Clarified that failure isolation, rather than latency alone, is the strongest reason to consider asynchronous processing; deferred the change pending more evidence.",
   "historical_occurrence": null,
-  "domains": ["engineering"],
+  "domain_tags": ["engineering"],
   "sections": {
     "context": [],
     "observations": [],
@@ -701,7 +701,7 @@ For `backfill`, `historical_occurrence` MUST contain an LLD-01 occurrence value.
 
 ### 16.6 Domains
 
-`domains` is an open lowercase-token list proposed by the model and normalized by the runtime. It SHOULD reflect actual subject matter rather than every loaded probe pack.
+`domain_tags` is an open lowercase-token list proposed by the model and normalized by the runtime. It SHOULD reflect actual subject matter rather than every loaded probe pack.
 
 ### 16.7 State-change draft
 
@@ -1280,7 +1280,7 @@ A dedicated CLI LLD is not required for v1. Exact commands may map directly onto
 
 **Rejected as the normal path.** The active model already has the conversation in context. A final constrained CommitDraft is cheaper and avoids resending the transcript. Explicit re-extraction remains available when needed.
 
-### 30.3 One giant SOP containing all modes and domains
+### 30.3 One giant SOP containing all modes and domain_tags
 
 **Rejected.** It wastes context and weakens instruction salience. A small Skill router + core SOP + one active workflow + lazy probe packs is the v1 contract.
 

@@ -37,5 +37,5 @@ class Database:
                 raise PersistenceError(f"failed migration {migration_id}: {exc}") from exc
 
     def reset_derived_tables(self, conn: sqlite3.Connection) -> None:
-        for table in ("retrieval_fts", "retrieval_embeddings", "retrieval_chunks", "retrieval_entry_modes", "retrieval_entry_domains", "retrieval_entries", "entry_artifacts", "entry_entities", "state_items", "amendments", "entry_revisions", "entries", "sessions", "entity_aliases", "entities", "artifacts"):
+        for table in ("retrieval_fts", "retrieval_embeddings", "retrieval_chunks", "retrieval_entry_modes", "retrieval_entry_domain_tags", "retrieval_entries", "entry_artifacts", "entry_entities", "state_items", "amendments", "entry_revisions", "entries", "sessions", "entity_aliases", "entities", "artifacts"):
             conn.execute(f"DELETE FROM {table}")

@@ -15,7 +15,7 @@ def main() -> None:
     session = vault.create_session(
         started_at="2026-09-30T09:00:00+01:00",
         modes=["think"],
-        domains=["engineering"],
+        domain_tags=["engineering"],
         runtime={"model": "synthetic", "skill": "work-brain"},
     )
     vault.append_turn(session["session_id"], "user", "The synthetic import flow is slow.", recorded_at="2026-09-30T09:01:00+01:00")
@@ -32,7 +32,7 @@ def main() -> None:
         "revision_reason": "initial_commit", "provenance_kind": "contemporaneous", "title": "Synthetic import investigation",
         "summary": "A synthetic example of a captured engineering investigation.",
         "occurrence": {"start": "2026-09-30T09:00:00+01:00", "end": "2026-09-30T09:02:00+01:00", "precision": "instant", "label": None},
-        "modes": ["think"], "domains": ["engineering"], "sections": sections,
+        "modes": ["think"], "domain_tags": ["engineering"], "sections": sections,
         "state_mutations": [], "entity_refs": [], "artifact_refs": [], "source_refs": [],
     })
     print(f"created synthetic vault at {vault.root}")

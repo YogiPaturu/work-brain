@@ -112,7 +112,7 @@ class RuntimeTests(unittest.TestCase):
     def test_orchestrator_persists_turn_before_model_and_resolves_commit(self) -> None:
         model = ScriptedModel(drafts=[draft()])
         orchestrator = SessionOrchestrator(self.vault, model)
-        session = orchestrator.start("I am deciding how to isolate imports.", workflow="think", domains=["engineering"])
+        session = orchestrator.start("I am deciding how to isolate imports.", workflow="think", domain_tags=["engineering"])
         self.assertEqual(RuntimeState.ACTIVE, orchestrator.state)
         self.assertEqual(2, len(self.vault.list_turns(session["session_id"])))
         entry = orchestrator.close()
@@ -186,13 +186,13 @@ class RuntimeTests(unittest.TestCase):
 
     def test_close_day_record_includes_day_entries_unjournaled_entries_and_uncommitted_raw(self) -> None:
         committed = self.vault.create_session(
-            started_at="2026-10-01T09:00:00+01:00", modes=["think"], domains=["engineering"],
+            started_at="2026-10-01T09:00:00+01:00", modes=["think"], domain_tags=["engineering"],
         )
         self.vault.append_turn(committed["session_id"], "user", "Capture the completed import decision.")
         CommitResolver(self.vault).publish(committed["session_id"], draft(), workflow="think")
 
         unjournaled = self.vault.create_session(
-            started_at="2026-08-01T09:00:00+01:00", modes=["think"], domains=["engineering"],
+            started_at="2026-08-01T09:00:00+01:00", modes=["think"], domain_tags=["engineering"],
         )
         self.vault.append_turn(unjournaled["session_id"], "user", "Capture an older committed item.")
         CommitResolver(self.vault).publish(unjournaled["session_id"], draft(), workflow="think")
@@ -276,6 +276,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_commit_draft_rejects_legacy_domains_field(self) -> None:
         value = draft()
+        value.pop("domain_tags")
         value["domains"] = ["engineering"]
         with self.assertRaisesRegex(ValidationError, "uses domain_tags"):
             CommitDraftValidator().validate(value, turn_count=1, workflow="think")
@@ -299,7 +300,7 @@ class RuntimeTests(unittest.TestCase):
             "started_at": "2026-10-01T13:30:00+01:00",
             "workflow": "think",
             "modes": ["think"],
-            "domains": ["product"],
+            "domain_tags": ["product"],
             "turns": [
                 {"role": "user", "content": "I changed the design after testing the first approach."},
                 {"role": "assistant", "content": "What evidence changed your mind?"},
