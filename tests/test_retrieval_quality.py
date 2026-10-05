@@ -90,6 +90,7 @@ class RetrievalQualityTests(unittest.TestCase):
                 session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00", modes=["think"], domain_tags=["engineering"])
                 self.vault.append_turn(session["session_id"], "user", summary, recorded_at="2026-09-30T10:01:00+01:00")
                 self.vault.commit_entry(session["session_id"], _entry_payload(session, title, summary, details))
+            EvidenceRetriever(self.vault, LocalHashEmbeddingProvider()).reindex()
         finally:
             if previous_provider is None:
                 os.environ.pop("WORK_BRAIN_EMBEDDING", None)

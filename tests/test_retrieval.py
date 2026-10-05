@@ -38,10 +38,28 @@ class RetrievalTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tempdir.cleanup()
 
+    def test_embedding_work_runs_without_authoritative_writer_lock(self) -> None:
+        session = self._commit("Lock boundary", "Embedding must not block source capture.")
+        vault = self.vault
+
+        class LockObservingProvider(LocalHashEmbeddingProvider):
+            def __init__(self) -> None:
+                super().__init__()
+                self.source_lock_depths: list[int] = []
+
+            def embed_documents(self, texts: list[str]) -> list[list[float]]:
+                self.source_lock_depths.append(vault._lock_depth)
+                return super().embed_documents(texts)
+
+        provider = LockObservingProvider()
+        EvidenceRetriever(vault, provider).index_entry(session["entry_id"])
+        self.assertEqual([0], provider.source_lock_depths)
+
     def _commit(self, title: str, summary: str) -> dict:
         session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00", modes=["think"], domain_tags=["engineering"])
         self.vault.append_turn(session["session_id"], "user", summary, recorded_at="2026-09-30T10:01:00+01:00")
         self.vault.commit_entry(session["session_id"], payload(session, title=title, summary=summary))
+        EvidenceRetriever(self.vault).reindex()
         return session
 
     def test_search_uses_one_chunk_corpus_and_bounded_cards(self) -> None:
@@ -62,6 +80,7 @@ class RetrievalTests(unittest.TestCase):
         current = self.vault.get_current_entry(session["entry_id"])
         second = payload(session, title="Corrected direction", summary="The corrected direction is now authoritative.", revision=2, supersedes=1)
         self.vault.commit_entry(session["session_id"], second)
+        EvidenceRetriever(self.vault).reindex()
         result = EvidenceRetriever(self.vault).search("direction")
         self.assertEqual(2, result["cards"][0]["ref"]["revision"])
         hydrated = EvidenceRetriever(self.vault).hydrate([{"entry_id": current.entry_id, "revision": 1}])
@@ -90,7 +109,7 @@ class RetrievalTests(unittest.TestCase):
                 conn.execute("DELETE FROM retrieval_fts")
         self.assertTrue(retriever.doctor())
         result = retriever.search("rebuilt")
-        self.assertEqual("ok", result["status"])
+        self.assertEqual("degraded", result["status"])
         before = retriever.reindex()
         after = retriever.reindex()
         self.assertEqual(before["indexed_entries"], after["indexed_entries"])

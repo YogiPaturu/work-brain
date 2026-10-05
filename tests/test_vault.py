@@ -42,6 +42,13 @@ class VaultTests(unittest.TestCase):
         self.assertFalse(source_only.database_path.exists())
         self.assertEqual(1, len(source_only.list_turns(session["session_id"])))
 
+    def test_raw_capture_works_with_corrupt_sqlite_projection(self) -> None:
+        broken = Vault(Path(self.tempdir.name) / "broken-projection").initialize()
+        broken.database_path.write_text("not a sqlite database", encoding="utf-8")
+        session = broken.create_session()
+        broken.append_turn(session["session_id"], "user", "source capture is independent")
+        self.assertEqual("source capture is independent", broken.list_turns(session["session_id"])[0]["content"])
+
     def test_turn_append_retry_and_middle_corruption(self) -> None:
         turn_id = new_uuid7()
         first = self.vault.append_turn(self.session["session_id"], "user", "hello", turn_id=turn_id, recorded_at="2026-09-30T10:01:00+01:00")

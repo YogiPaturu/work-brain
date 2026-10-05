@@ -10,6 +10,7 @@ changing chunking, filtering, fusion, or CLI contracts.
 """
 
 import base64
+import contextlib
 import hashlib
 import importlib
 import importlib.util
@@ -27,6 +28,7 @@ from .domain import ENTRY_SECTIONS, SessionEntry, normalize_alias
 from .errors import FeatureUnavailable, IntegrityError, PersistenceError, ValidationError
 from .fsutil import canonical_json_bytes, content_hash, read_json
 from .ids import validate_uuid7
+from .lock import VaultLock
 from .timeutil import parse_timestamp, timestamp_now, validate_calendar_date
 
 
@@ -184,6 +186,10 @@ class RetrievalHealth:
     lexical_available: bool
     semantic_available: bool
     generation: str
+
+
+class StaleIndexWork(IntegrityError):
+    """Embedding work was based on a source revision that is no longer current."""
 
 
 def embedding_profile(provider: EmbeddingProvider) -> dict[str, Any]:
@@ -372,6 +378,11 @@ class EvidenceRetriever:
     def _db(self):
         return self.vault._database()
 
+    @contextlib.contextmanager
+    def _index_lock(self):
+        with VaultLock(self.vault.root / ".index.write.lock"):
+            yield
+
     def _dependency_hash(self, entry: SessionEntry) -> str:
         dependencies: list[Any] = []
         if entry.workspace_entity_id is not None:
@@ -443,17 +454,34 @@ class EvidenceRetriever:
     def _vector_bytes(self, vector: Iterable[float]) -> bytes:
         return struct.pack("<" + "f" * self.embedding_provider.dimensions, *(float(value) for value in vector))
 
-    def _index_entry_locked(self, entry_id: str, conn: Any) -> dict[str, Any]:
+    def _prepare_entry_index(self, entry_id: str) -> dict[str, Any]:
         entry = self.vault.get_current_entry(entry_id)
         source_hash = self._source_hash(entry)
         dependency_hash = self._dependency_hash(entry)
         metadata = self._metadata(entry)
         chunks = _chunks(entry, metadata)
         vectors = self._vectors(chunks)
+        return {
+            "entry": entry,
+            "source_hash": source_hash,
+            "dependency_hash": dependency_hash,
+            "chunks": chunks,
+            "vectors": vectors,
+        }
+
+    def _index_entry_locked(self, prepared: Mapping[str, Any], conn: Any) -> dict[str, Any]:
+        entry = prepared["entry"]
+        source_hash = prepared["source_hash"]
+        dependency_hash = prepared["dependency_hash"]
+        chunks = prepared["chunks"]
+        vectors = prepared["vectors"]
+        current = self.vault.get_current_entry(entry.entry_id)
+        if current.revision != entry.revision or self._source_hash(current) != source_hash or self._dependency_hash(current) != dependency_hash:
+            raise StaleIndexWork(f"source changed while preparing index work: {entry.entry_id}")
         occurrence_start = _epoch_ms(entry.occurrence.start) if entry.occurrence.start and entry.occurrence.precision == "instant" else _epoch_ms(entry.occurrence.start)
         occurrence_end = _epoch_ms(entry.occurrence.end) if entry.occurrence.end and entry.occurrence.precision == "instant" else _epoch_ms(entry.occurrence.end)
-        conn.execute("DELETE FROM retrieval_fts WHERE entry_id = ?", (entry_id,))
-        conn.execute("DELETE FROM retrieval_entries WHERE entry_id = ?", (entry_id,))
+        conn.execute("DELETE FROM retrieval_fts WHERE entry_id = ?", (entry.entry_id,))
+        conn.execute("DELETE FROM retrieval_entries WHERE entry_id = ?", (entry.entry_id,))
         conn.execute(
             "INSERT INTO retrieval_entries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (entry.entry_id, entry.revision, source_hash, dependency_hash, RECIPE_ID, entry.title, entry.summary,
@@ -486,13 +514,14 @@ class EvidenceRetriever:
 
     def index_entry(self, entry_id: str) -> dict[str, Any]:
         validate_uuid7(entry_id, "entry_id")
-        self.vault.initialize()
-        with self.vault.write_lock():
+        self.vault.initialize_projections()
+        prepared = self._prepare_entry_index(entry_id)
+        with self._index_lock():
             conn = self._db().connect()
             try:
                 with conn:
                     self._set_meta(conn, "index_state", "building")
-                    result = self._index_entry_locked(entry_id, conn)
+                    result = self._index_entry_locked(prepared, conn)
                     self._set_meta(conn, "index_state", "current")
                     self._set_meta(conn, "generation", hashlib.sha256(f"{timestamp_now()}:{entry_id}".encode()).hexdigest())
                 return result
@@ -500,8 +529,9 @@ class EvidenceRetriever:
                 conn.close()
 
     def reindex(self) -> dict[str, Any]:
-        self.vault.initialize()
-        with self.vault.write_lock():
+        self.vault.initialize_projections()
+        prepared_entries = [self._prepare_entry_index(entry.entry_id) for entry in self.vault.all_current_entries()]
+        with self._index_lock():
             conn = self._db().connect()
             try:
                 with conn:
@@ -514,9 +544,9 @@ class EvidenceRetriever:
                     conn.execute("DELETE FROM retrieval_entry_domain_tags")
                     conn.execute("DELETE FROM retrieval_entries")
                 indexed = []
-                for entry in self.vault.all_current_entries():
+                for prepared in prepared_entries:
                     with conn:
-                        indexed.append(self._index_entry_locked(entry.entry_id, conn))
+                        indexed.append(self._index_entry_locked(prepared, conn))
                 with conn:
                     self._set_meta(conn, "recipe_id", RECIPE_ID)
                     self._set_meta(conn, "embedding_model_id", self.embedding_provider.model_id)
@@ -577,22 +607,17 @@ class EvidenceRetriever:
                 (self.embedding_provider.model_id, self.embedding_provider.adapter_recipe, self.embedding_provider.dimensions),
             )}
             lexical = bool(valid_ids) and chunks == fts and all(row["chunk_id"] in chunks for row in conn.execute("SELECT chunk_id FROM retrieval_chunks WHERE entry_id IN ({})".format(",".join("?" * len(valid_ids)) if valid_ids else "NULL"), tuple(valid_ids))) if valid_ids else True
-            semantic = lexical and chunks == embeddings
+            semantic = bool(valid_ids) and chunks == embeddings
             return RetrievalHealth(meta.get("index_state", "stale"), stale, lexical, semantic, meta.get("generation", ""))
         finally:
             conn.close()
 
     def _ensure_current(self) -> RetrievalHealth:
-        health = self.health()
-        if health.index_state == "building":
-            return health
-        if health.index_state != "current" or health.stale_entries or (self.vault.all_current_entries() and not health.lexical_available):
-            try:
-                self.reindex()
-            except Exception:
-                return self.health()
+        """Read index health without mutating or rebuilding the index."""
+        try:
             return self.health()
-        return health
+        except Exception:
+            return RetrievalHealth("failed", 0, False, False, "")
 
     def _eligible(self, conn: Any, filters: Mapping[str, Any]) -> set[str]:
         allowed = {"occurred_after", "occurred_before", "entities", "workspaces", "projects", "domain_tags", "modes", "provenance_kind", "has_outcome"}
@@ -771,7 +796,7 @@ class EvidenceRetriever:
         normalized_filters = dict(filters or {})
         health = self._ensure_current()
         embedding = self.embedding_status(health)
-        if health.index_state != "current":
+        if not health.lexical_available and not health.semantic_available:
             return {"status": "retrieval_unavailable", "degraded_components": ["index"], "incomplete": True, "omitted_stale_entries": health.stale_entries, "cards": [], "next_cursor": None, "embedding": embedding}
         conn = self._db().connect()
         try:
@@ -790,6 +815,8 @@ class EvidenceRetriever:
             lexical: dict[str, dict[str, Any]] = {}
             semantic: dict[str, dict[str, Any]] = {}
             degraded: list[str] = []
+            if health.index_state != "current" or health.stale_entries:
+                degraded.append("index")
             if health.lexical_available:
                 try:
                     lexical = self._branch_lexical(conn, query, eligible)

@@ -55,6 +55,7 @@ class CommunicationProfileTests(unittest.TestCase):
             "state_mutations": [], "entity_refs": [{"entity_id": entity_id, "relation": "about"}],
             "artifact_refs": [], "source_refs": [],
         })
+        EvidenceRetriever(self.vault).reindex()
 
     def test_ranq_whatsapp_profile_is_valid_and_user_scoped(self) -> None:
         store = CommunicationProfileStore.load(RANQ_PROFILE)
