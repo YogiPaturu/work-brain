@@ -33,7 +33,7 @@ def _payload(session: dict, item: dict) -> dict:
         "supersedes_revision": None, "revision_reason": "initial_commit",
         "provenance_kind": "contemporaneous", "title": item["title"], "summary": item["summary"],
         "occurrence": {"start": "2026-09-30T10:00:00+01:00", "end": None, "precision": "instant", "label": None},
-        "modes": item["modes"], "domains": item["domains"], "sections": sections,
+        "modes": item["modes"], "domain_tags": item["domain_tags"], "sections": sections,
         "state_mutations": [], "entity_refs": [], "artifact_refs": [], "source_refs": [],
     }
 
@@ -50,7 +50,7 @@ def evaluate(fixture: dict, embedding: str) -> dict:
     with tempfile.TemporaryDirectory(prefix="work-brain-retrieval-eval-") as temporary:
         vault = Vault(Path(temporary) / "vault").initialize()
         for item in fixture["entries"]:
-            session = vault.create_session(started_at="2026-09-30T10:00:00+01:00", modes=item["modes"], domains=item["domains"])
+            session = vault.create_session(started_at="2026-09-30T10:00:00+01:00", modes=item["modes"], domain_tags=item["domain_tags"])
             vault.append_turn(session["session_id"], "user", item["summary"], recorded_at="2026-09-30T10:01:00+01:00")
             vault.commit_entry(session["session_id"], _payload(session, item))
         retriever = EvidenceRetriever(vault, _provider(embedding))

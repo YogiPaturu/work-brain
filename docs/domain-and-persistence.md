@@ -297,7 +297,7 @@ Each session directory contains one current metadata snapshot:
   "local_date": "2026-09-30",
   "entry_id": "0199aa9d-0aa9-7ac2-8b6a-761725ae23cb",
   "modes": ["think"],
-  "domains": ["engineering"],
+  "domain_tags": ["engineering"],
   "runtime": {
     "model": "<runtime supplied model identifier>",
     "skill": "work-brain",
@@ -311,9 +311,9 @@ Rules:
 
 - `session_id`, `started_at`, `local_date`, and `entry_id` are required once a session is initialized.
 - `ended_at` is null until the structured entry has been durably published; the runtime finalizes the session snapshot after entry publication so a crash cannot leave a closed-looking session with no structured entry.
-- `modes` and `domains` are normalized lowercase string tokens, not closed enums. This allows later modes such as `teach` without changing the persistence schema.
+- `modes` and `domain_tags` are normalized lowercase string tokens, not closed enums. This allows later modes such as `teach` without changing the persistence schema.
 - `runtime.sops` stores stable instruction-resource identities in `resource-id@version` form; probe resources MAY use a namespaced identifier such as `probe:engineering@1`.
-- LLD-02 owns the meaning and selection of `modes`, `domains`, model identifiers, and SOP references.
+- LLD-02 owns the meaning and selection of `modes`, `domain_tags`, model identifiers, and SOP references.
 - `runtime` fields are provenance/debugging metadata; their absence MUST NOT make professional evidence invalid.
 - `session.json` is a mutable snapshot and MUST be updated by atomic replacement.
 
@@ -402,7 +402,7 @@ A structured entry revision has this v1 shape:
     "label": null
   },
   "modes": ["think", "operate"],
-  "domains": ["engineering"],
+  "domain_tags": ["engineering"],
   "workspace_entity_id": "0199aaf1-c215-75ec-b2df-76f43ef7ae34",
   "project_entity_id": "0199aaf1-c215-75ec-b2df-76f43ef7ae33",
   "sections": {
@@ -590,7 +590,7 @@ Rules:
 An entry may carry one first-class `workspace_entity_id` and one
 `project_entity_id`. A workspace is a broad working context such as `Ranq` or
 `Brother-in-law health tech`; a project is a specific effort such as `Auth
-implementation` or `Billing Right Code`. `domains` remain a multi-valued tag
+implementation` or `Billing Right Code`. `domain_tags` remain a multi-valued tag
 set for cross-cutting concerns such as `auth`, `architecture`, and `billing`.
 Workspace and project scope are indexed separately from ordinary entity
 references so communication profiles can retrieve experiences across multiple
@@ -928,7 +928,7 @@ CREATE INDEX sessions_by_local_date
     ON sessions(local_date, started_at);
 ```
 
-`modes`, `domains`, and SOP refs remain in `session.json`; LLD-03 MAY index them for retrieval if required.
+`modes`, `domain_tags`, and SOP refs remain in `session.json`; LLD-03 MAY index them for retrieval if required.
 
 ### 17.2 `entries`
 

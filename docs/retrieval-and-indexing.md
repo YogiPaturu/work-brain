@@ -93,8 +93,8 @@ projection. It provides deterministic overview/section/state chunks, SQLite
 FTS5 lexical search, structured filters, exact entry-level fusion, opaque
 pagination, source hydration, staleness checks, and explicit `reindex`.
 
-The base public install includes the local FastEmbed adapter for
-`BAAI/bge-small-en-v1.5`, making real semantic retrieval the normal provider.
+The optional `semantic` extra includes the local FastEmbed adapter for
+`BAAI/bge-small-en-v1.5`; the base install uses the deterministic hash fallback.
 The checked-in semantic smoke corpus measures the deterministic hash fallback
 at 3/6 expected top-three matches, so it is explicitly not treated as a
 production-quality semantic default. `EvidenceRetriever` accepts an injected

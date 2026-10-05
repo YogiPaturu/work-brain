@@ -445,12 +445,12 @@ class HarnessCaptureService:
         started_at = payload.get("started_at") or next((turn["recorded_at"] for turn in turns if turn["recorded_at"]), None) or timestamp_now()
         parse_timestamp(started_at, "transcript.started_at")
         modes = payload.get("modes", ["think"])
-        domains = payload.get("domains", [])
+        domain_tags = payload.get("domain_tags", [])
         source = payload.get("source", "user-supplied transcript")
         if not isinstance(modes, list) or any(not isinstance(item, str) or not item.strip() for item in modes):
             raise ValidationError("transcript.modes must be a list of non-empty strings")
-        if not isinstance(domains, list) or any(not isinstance(item, str) or not item.strip() for item in domains):
-            raise ValidationError("transcript.domains must be a list of non-empty strings")
+        if not isinstance(domain_tags, list) or any(not isinstance(item, str) or not item.strip() for item in domain_tags):
+            raise ValidationError("transcript.domain_tags must be a list of non-empty strings")
         if not isinstance(source, str) or not source.strip():
             raise ValidationError("transcript.source must be a non-empty string")
         workflow = payload.get("workflow", modes[0] if modes else "think")
@@ -462,7 +462,7 @@ class HarnessCaptureService:
             session = self.vault.create_session(
                 started_at=started_at,
                 modes=modes,
-                domains=domains,
+                domain_tags=domain_tags,
                 runtime={
                     "capture_status": "imported",
                     "capture_boundary": "closed",
@@ -513,7 +513,7 @@ class HarnessCaptureService:
             })
             next_session = self.vault.create_session(
                 modes=list(previous.get("modes", [])),
-                domains=list(previous.get("domains", [])),
+                domain_tags=list(previous.get("domain_tags", [])),
                 runtime=runtime,
             )
             previous_runtime = dict(previous.get("runtime") or {})

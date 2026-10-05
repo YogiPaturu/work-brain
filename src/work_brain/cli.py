@@ -55,6 +55,8 @@ def _parser() -> argparse.ArgumentParser:
     backfill_tags = sub.add_parser("backfill-tags", help="add domain tags as new entry revisions")
     backfill_tags.add_argument("--file", required=True, help="JSON mapping with defaults and entry assignments")
     backfill_tags.add_argument("--dry-run", action="store_true")
+    migrate_tags = sub.add_parser("migrate-domain-tags", help="rename legacy domains keys in structured vault JSON")
+    migrate_tags.add_argument("--dry-run", action="store_true")
 
     config = sub.add_parser("config", help="manage local user configuration")
     config_sub = config.add_subparsers(dest="config_command", required=True)
@@ -74,7 +76,7 @@ def _parser() -> argparse.ArgumentParser:
     start = sub.add_parser("session-start", help="create a bounded conversation session")
     start.add_argument("--started-at")
     start.add_argument("--mode", action="append", default=[])
-    start.add_argument("--domain", action="append", default=[])
+    start.add_argument("--domain-tag", action="append", default=[])
     session = sub.add_parser("session", help="inspect persisted conversation sessions")
     session_sub = session.add_subparsers(dest="session_command", required=True)
     turns = session_sub.add_parser("turns", help="read the raw persisted turns for a session")
@@ -103,7 +105,7 @@ def _parser() -> argparse.ArgumentParser:
     draft.add_argument("--file", help="JSON file; omit or use - to read CommitDraft from stdin")
     skills = sub.add_parser("skills", help="show progressively loaded Skill/SOP resources")
     skills.add_argument("--workflow", default="think")
-    skills.add_argument("--domain", action="append", default=[])
+    skills.add_argument("--domain-tag", action="append", default=[])
     sub.add_parser("recoverable", help="list unfinished sessions")
 
     live_status = sub.add_parser("status", help="show live capture and commit lifecycle status")
@@ -295,12 +297,12 @@ def _backfill_tags(vault: Vault, payload: dict[str, Any], *, dry_run: bool) -> d
         if "domain_tags" not in requested:
             continue
         additions = normalize_domain_tags(requested["domain_tags"])
-        merged = normalize_domain_tags([*entry.domains, *additions])
+        merged = normalize_domain_tags([*entry.domain_tags, *additions])
         plan.append({
             "entry_id": entry.entry_id,
             "title": entry.title,
-            "from": entry.domains,
-            "add": [tag for tag in merged if tag not in entry.domains],
+            "from": entry.domain_tags,
+            "add": [tag for tag in merged if tag not in entry.domain_tags],
             "result": merged,
         })
     if dry_run:
@@ -646,7 +648,7 @@ def _question_ref(value: str | None) -> QuestionRef | None:
 
 def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     command = args.command
-    machine = bool(args.json or command in {"state", "work", "evidence", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session", "profiles", "backfill-context", "backfill-tags"})
+    machine = bool(args.json or command in {"state", "work", "evidence", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session", "profiles", "backfill-context", "backfill-tags", "migrate-domain-tags"})
     if command == "status":
         snapshot = _live_status(_vault(args))
         return snapshot, bool(args.json)
@@ -718,6 +720,8 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         return _backfill_context(vault, _read_payload(args.file), dry_run=args.dry_run), True
     if command == "backfill-tags":
         return _backfill_tags(vault, _read_payload(args.file), dry_run=args.dry_run), True
+    if command == "migrate-domain-tags":
+        return vault.migrate_domain_tags(dry_run=args.dry_run), True
     if command == "doctor":
         diagnostics = vault.doctor()
         retriever = EvidenceRetriever(vault)
@@ -729,7 +733,7 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     if command == "session-start":
         started_at = args.started_at
         rollover = HarnessCaptureService(vault).rollover_stale_sessions(reference_at=started_at)
-        session = vault.create_session(started_at=started_at, modes=args.mode, domains=args.domain)
+        session = vault.create_session(started_at=started_at, modes=args.mode, domain_tags=args.domain_tag)
         return {"session": session, "rollover": rollover}, True
     if command == "session" and args.session_command == "turns":
         return _session_turns(vault, args.session_id, offset=args.offset, limit=args.limit), True
@@ -757,7 +761,7 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         continuation = _finish_capture_after_commit(vault, args.session_id, workflow)
         return {"entry_id": entry.entry_id, "revision": entry.revision, "commit_id": entry.commit_id, "capture": continuation}, True
     if command == "skills":
-        loaded = SkillLoader().load(args.workflow, args.domain)
+        loaded = SkillLoader().load(args.workflow, args.domain_tag)
         return {"resources": loaded.identities, "missing": list(loaded.missing)}, True
     if command == "recoverable":
         entry_session_ids = {entry.session_id for entry in vault.all_current_entries()}

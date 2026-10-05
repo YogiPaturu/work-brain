@@ -21,7 +21,7 @@ def entry_payload(session: dict, *, commit_id: str | None = None, reason: str = 
         "supersedes_revision": supersedes, "revision_reason": reason, "provenance_kind": "contemporaneous",
         "title": "Import reliability", "summary": "Investigated an unreliable import path.",
         "occurrence": {"start": "2026-09-30T10:00:00+01:00", "end": "2026-09-30T10:05:00+01:00", "precision": "instant", "label": None},
-        "modes": ["think"], "domains": ["engineering"], "sections": sections,
+        "modes": ["think"], "domain_tags": ["engineering"], "sections": sections,
         "state_mutations": [], "entity_refs": [], "artifact_refs": [], "source_refs": [],
     }
 
@@ -30,7 +30,7 @@ class VaultTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.vault = Vault(Path(self.tempdir.name) / "career-vault").initialize()
-        self.session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00", modes=["think"], domains=["engineering"])
+        self.session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00", modes=["think"], domain_tags=["engineering"])
 
     def tearDown(self) -> None:
         self.tempdir.cleanup()
@@ -72,6 +72,29 @@ class VaultTests(unittest.TestCase):
         self.assertTrue(journal.exists())
         self.assertTrue(state.exists())
         self.assertTrue(database.exists())
+        self.assertEqual([], self.vault.doctor())
+
+    def test_domain_tags_migration_rewrites_legacy_structured_json(self) -> None:
+        self.vault.append_turn(self.session["session_id"], "user", "Migrate the tag field.", recorded_at="2026-09-30T10:01:00+01:00")
+        self.vault.commit_entry(self.session["session_id"], entry_payload(self.session))
+        session_path = self.vault.session_dir(self.session["session_id"]) / "session.json"
+        entry_path = self.vault.session_dir(self.session["session_id"]) / "entries/0001.json"
+        for path in (session_path, entry_path):
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw["domains"] = raw.pop("domain_tags")
+            path.write_text(json.dumps(raw), encoding="utf-8")
+        preview = self.vault.migrate_domain_tags(dry_run=True)
+        self.assertEqual(2, preview["count"])
+        result = self.vault.migrate_domain_tags()
+        self.assertEqual(2, result["count"])
+        for path in (session_path, entry_path):
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            self.assertIn("domain_tags", raw)
+            self.assertNotIn("domains", raw)
+        with closing(self.vault._database().connect()) as conn:
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        self.assertIn("retrieval_entry_domain_tags", tables)
+        self.assertNotIn("retrieval_entry_domains", tables)
         self.assertEqual([], self.vault.doctor())
 
     def test_entity_artifact_and_state_are_materialized(self) -> None:

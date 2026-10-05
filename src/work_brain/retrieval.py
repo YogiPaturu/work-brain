@@ -279,8 +279,8 @@ def _chunk_id(entry: SessionEntry, kind: str, section: str | None, ordinal: int)
 
 def _chunks(entry: SessionEntry, metadata: str) -> list[dict[str, Any]]:
     overview_lines = [f"Title: {entry.title}", f"Summary: {entry.summary}"]
-    if entry.domains:
-        overview_lines.append("Domains: " + ", ".join(entry.domains))
+    if entry.domain_tags:
+        overview_lines.append("Domain tags: " + ", ".join(entry.domain_tags))
     if entry.modes:
         overview_lines.append("Modes: " + ", ".join(entry.modes))
     overview = "\n".join(overview_lines)
@@ -389,7 +389,7 @@ class EvidenceRetriever:
         return hashlib.sha256(canonical_json_bytes(dependencies)).hexdigest()
 
     def _metadata(self, entry: SessionEntry) -> str:
-        values = list(entry.domains) + list(entry.modes)
+        values = list(entry.domain_tags) + list(entry.modes)
         if entry.workspace_entity_id is not None:
             value = read_json(self.vault.root / "catalog/entities" / f"{entry.workspace_entity_id}.json")
             values.extend([value["canonical_name"], *value.get("aliases", [])])
@@ -463,8 +463,8 @@ class EvidenceRetriever:
         )
         for mode in entry.modes:
             conn.execute("INSERT INTO retrieval_entry_modes VALUES (?, ?)", (entry.entry_id, normalize_alias(mode)))
-        for domain in entry.domains:
-            conn.execute("INSERT INTO retrieval_entry_domains VALUES (?, ?)", (entry.entry_id, normalize_alias(domain)))
+        for domain_tag in entry.domain_tags:
+            conn.execute("INSERT INTO retrieval_entry_domain_tags VALUES (?, ?)", (entry.entry_id, normalize_alias(domain_tag)))
         for chunk, vector in zip(chunks, vectors):
             conn.execute(
                 "INSERT INTO retrieval_chunks VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -511,7 +511,7 @@ class EvidenceRetriever:
                     conn.execute("DELETE FROM retrieval_embeddings")
                     conn.execute("DELETE FROM retrieval_chunks")
                     conn.execute("DELETE FROM retrieval_entry_modes")
-                    conn.execute("DELETE FROM retrieval_entry_domains")
+                    conn.execute("DELETE FROM retrieval_entry_domain_tags")
                     conn.execute("DELETE FROM retrieval_entries")
                 indexed = []
                 for entry in self.vault.all_current_entries():
@@ -595,7 +595,7 @@ class EvidenceRetriever:
         return health
 
     def _eligible(self, conn: Any, filters: Mapping[str, Any]) -> set[str]:
-        allowed = {"occurred_after", "occurred_before", "entities", "workspaces", "projects", "domains", "modes", "provenance_kind", "has_outcome"}
+        allowed = {"occurred_after", "occurred_before", "entities", "workspaces", "projects", "domain_tags", "modes", "provenance_kind", "has_outcome"}
         unknown = sorted(set(filters) - allowed)
         if unknown:
             raise ValidationError(f"unknown evidence filter: {unknown[0]}")
@@ -620,7 +620,7 @@ class EvidenceRetriever:
             clauses.append("r.has_outcome = ?")
             params.append(int(filters["has_outcome"]))
         ids = None
-        for field, table in (("domains", "retrieval_entry_domains"), ("modes", "retrieval_entry_modes")):
+        for field, table in (("domain_tags", "retrieval_entry_domain_tags"), ("modes", "retrieval_entry_modes")):
             values = filters.get(field, [])
             if not isinstance(values, list) or any(not isinstance(value, str) or not value.strip() for value in values):
                 raise ValidationError(f"{field} must be a list of non-empty strings")
@@ -841,7 +841,7 @@ class EvidenceRetriever:
                 if entry.project_entity_id is not None:
                     project_value = read_json(self.vault.root / "catalog/entities" / f"{entry.project_entity_id}.json")
                     project = {"entity_id": project_value["entity_id"], "kind": project_value["kind"], "name": project_value["canonical_name"]}
-                cards.append({"ref": {"entry_id": entry_id, "revision": row["source_revision"]}, "title": row["title"], "when": entry.occurrence.to_dict(), "summary": row["summary"], "provenance_kind": row["provenance_kind"], "modes": entry.modes, "domains": entry.domains, "workspace": workspace, "project": project, "entities": entities, "match": {"signals": signals, "sections": list(dict.fromkeys(match["sections"]))[:3], "snippets": snippets[:2]}, "flags": {"has_outcome": bool(row["has_outcome"]), "has_open_questions": bool(row["has_open_questions"])}})
+                cards.append({"ref": {"entry_id": entry_id, "revision": row["source_revision"]}, "title": row["title"], "when": entry.occurrence.to_dict(), "summary": row["summary"], "provenance_kind": row["provenance_kind"], "modes": entry.modes, "domain_tags": entry.domain_tags, "workspace": workspace, "project": project, "entities": entities, "match": {"signals": signals, "sections": list(dict.fromkeys(match["sections"]))[:3], "snippets": snippets[:2]}, "flags": {"has_outcome": bool(row["has_outcome"]), "has_open_questions": bool(row["has_open_questions"])}})
             next_cursor = None
             if offset + page_size < len(ordered):
                 next_cursor = _cursor_encode({"fingerprint": fingerprint, "generation": generation, "offset": offset + page_size})

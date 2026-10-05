@@ -71,6 +71,8 @@ work-brain capture-hook --host codex < hook.json
 work-brain capture-hook --host claude-code < hook.json
 work-brain capture-hook --host cursor < hook.json
 work-brain commit-draft --session-id SESSION_ID < draft.json
+work-brain migrate-domain-tags --dry-run
+work-brain migrate-domain-tags
 work-brain backfill-tags --file domain-tags.json --dry-run
 work-brain backfill-tags --file domain-tags.json
 work-brain recoverable
@@ -89,6 +91,12 @@ lists. The lists are additive, have no upper bound, and are normalized to
 lowercase hyphenated tokens while preserving existing tags. Run `--dry-run`
 first; an applied change publishes a new immutable `metadata_backfill` revision
 and retains the prior revision and source reference.
+
+`migrate-domain-tags` is the one-time schema migration for older private vaults
+that stored the same metadata under `domains`. It renames the key to
+`domain_tags` in session and structured-entry JSON, preserves IDs/revisions and
+evidence values, rebuilds all derived projections, and supports `--dry-run`.
+Run it before using the renamed filters or profile scopes on an older vault.
 
 Starting a new Work Brain session automatically rolls over inactive recoverable
 sessions more than one calendar day old. It preserves their raw turns and marks
@@ -136,7 +144,7 @@ user and assistant turns continuously.
 `session import --file transcript.json` is the explicit recovery path for a
 user-supplied transcript whose original host capture was missed. The JSON
 object must contain a non-empty `turns` list of `{role, content}` objects and
-may include `started_at`, `workflow`, `modes`, `domains`, and `source`. The
+may include `started_at`, `workflow`, `modes`, `domain_tags`, and `source`. The
 application validates the entire input before creating a closed imported
 session. It preserves the supplied turn text exactly, marks the capture as
 `imported`, and never merges it into an existing session or entry. Missing

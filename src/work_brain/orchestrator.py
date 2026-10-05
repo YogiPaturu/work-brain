@@ -197,12 +197,12 @@ class SessionOrchestrator:
         self.instructions: LoadedInstructions | None = None
         self._messages: list[dict[str, Any]] = []
         self._modes: list[str] = []
-        self._domains: list[str] = []
+        self._domain_tags: list[str] = []
         self.profile_id: str | None = None
         self.last_rollover_commits: list[dict[str, Any]] = []
 
     def start(self, user_text: str | None = None, *, workflow: str | None = None,
-              domains: list[str] | None = None, started_at: str | None = None,
+              domain_tags: list[str] | None = None, started_at: str | None = None,
               profile_id: str | None = None) -> dict[str, Any]:
         if self.state not in {RuntimeState.IDLE, RuntimeState.COMMITTED, RuntimeState.RECOVERABLE}:
             raise ValidationError("a session is already active")
@@ -211,8 +211,8 @@ class SessionOrchestrator:
             raise ValidationError("profile_id can only be used with workflow=communicate")
         self.profile_id = profile_id
         self.tools.activate_profile(profile_id)
-        self._domains = list(domains or [])
-        self.instructions = self.loader.load(self.workflow, self._domains)
+        self._domain_tags = list(domain_tags or [])
+        self.instructions = self.loader.load(self.workflow, self._domain_tags)
         self._modes = [self.workflow]
         # Host capture closes raw boundaries even when the host/model exits
         # before it can emit a CommitDraft.  Resolve stale boundaries before
@@ -222,7 +222,7 @@ class SessionOrchestrator:
         HarnessCaptureService(self.vault).rollover_stale_sessions(reference_at=started_at)
         self.last_rollover_commits = self._commit_pending_rollovers()
         session = self.vault.create_session(
-            started_at=started_at, modes=self._modes, domains=self._domains,
+            started_at=started_at, modes=self._modes, domain_tags=self._domain_tags,
             runtime={"model": self.model.model_id, "app_revision": "runtime-v1", "workflow": self.workflow,
                      "sops": self.instructions.identities, "missing_resources": list(self.instructions.missing),
                      "profile_id": self.profile_id},
@@ -263,8 +263,8 @@ class SessionOrchestrator:
             session_id = session["session_id"]
             runtime = dict(session.get("runtime") or {})
             chosen = select_workflow(runtime.get("workflow"), (session.get("modes") or [None])[0])
-            domains = list(session.get("domains", []))
-            instructions = self.loader.load(chosen, domains, include_commit_schema=True)
+            domain_tags = list(session.get("domain_tags", []))
+            instructions = self.loader.load(chosen, domain_tags, include_commit_schema=True)
             messages = [{"role": turn["role"], "content": turn["content"]} for turn in self.vault.list_turns(session_id)]
             if not messages:
                 self.vault.close_session(session_id, commit_status="no_new_evidence")
@@ -313,7 +313,7 @@ class SessionOrchestrator:
             if self.workflow != "communicate":
                 self.profile_id = None
                 self.tools.activate_profile(None)
-            self.instructions = self.loader.load(self.workflow, self._domains)
+            self.instructions = self.loader.load(self.workflow, self._domain_tags)
             self._modes = self._merge(self._modes, [self.workflow])
             session = self.vault.read_session(self.session_id)
             session["modes"] = self._merge(session.get("modes", []), [self.workflow])
@@ -330,7 +330,7 @@ class SessionOrchestrator:
         plan = self.context_planner.plan(candidate_messages, self.instructions.text, self.model)
         if plan.rollover and self._messages:
             self.close()
-            self.start(workflow=self.workflow, domains=self._domains)
+            self.start(workflow=self.workflow, domain_tags=self._domain_tags)
             return self.turn(user_text)
         # This append is deliberately before any model invocation.
         self.vault.append_turn(self.session_id, "user", user_text)
@@ -417,7 +417,7 @@ class SessionOrchestrator:
             raise ValidationError("session is not active")
         self.state = RuntimeState.COMMITTING
         try:
-            commit_instructions = self.loader.load(self.workflow, self._domains, include_commit_schema=True)
+            commit_instructions = self.loader.load(self.workflow, self._domain_tags, include_commit_schema=True)
             draft = self.model.emit_commit_draft(self._messages, instructions=commit_instructions.text)
             last_error = ""
             for attempt in range(3):
@@ -425,7 +425,7 @@ class SessionOrchestrator:
                     entry = self.resolver.publish(self.session_id, draft, workflow=self.workflow)
                     session = self.vault.read_session(self.session_id)
                     session["modes"] = self._merge(session.get("modes", []), self._modes)
-                    session["domains"] = self._merge(session.get("domains", []), self._domains)
+                    session["domain_tags"] = self._merge(session.get("domain_tags", []), self._domain_tags)
                     session.setdefault("runtime", {}).update({"model": self.model.model_id, "sops": commit_instructions.identities,
                                                                "workflow": self.workflow, "commit_attempts": attempt + 1,
                                                                "commit_status": "committed"})
@@ -475,8 +475,8 @@ class SessionOrchestrator:
             raise ValidationError("session profile_id requires workflow=communicate")
         self.tools.activate_profile(self.profile_id)
         self._modes = list(session.get("modes", [])) or [self.workflow]
-        self._domains = list(session.get("domains", []))
-        self.instructions = self.loader.load(self.workflow, self._domains)
+        self._domain_tags = list(session.get("domain_tags", []))
+        self.instructions = self.loader.load(self.workflow, self._domain_tags)
         self._messages = [{"role": turn["role"], "content": turn["content"]} for turn in self.vault.list_turns(session_id)]
         self.state = RuntimeState.ACTIVE
         return session
@@ -485,7 +485,7 @@ class SessionOrchestrator:
         """Explicitly create a new revision from immutable raw turns."""
         session = self.vault.read_session(session_id)
         chosen = select_workflow(workflow, (session.get("runtime") or {}).get("workflow"))
-        instructions = self.loader.load(chosen, session.get("domains", []), include_commit_schema=True)
+        instructions = self.loader.load(chosen, session.get("domain_tags", []), include_commit_schema=True)
         messages = [{"role": turn["role"], "content": turn["content"]} for turn in self.vault.list_turns(session_id)]
         draft = self.model.emit_commit_draft(messages, instructions=instructions.text)
         for attempt in range(3):

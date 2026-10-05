@@ -60,7 +60,7 @@ These projections MUST NOT define separate evidence stores. They are different w
 - Local embeddings.
 - Rebuildable indexes.
 - SOP/Skill-driven agent behavior.
-- Domain-aware probe guidance for engineering, product, customer, sales, marketing, strategy, leadership, and future domains.
+- Domain-aware probe guidance for engineering, product, customer, sales, marketing, strategy, leadership, and future domain_tags.
 - Human-in-the-loop story/evidence selection for interview use.
 - Public code repository with a separate private user vault.
 

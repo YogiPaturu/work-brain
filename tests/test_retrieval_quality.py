@@ -74,7 +74,7 @@ def _entry_payload(session: dict, title: str, summary: str, details: str) -> dic
         "supersedes_revision": None, "revision_reason": "initial_commit",
         "provenance_kind": "contemporaneous", "title": title, "summary": summary,
         "occurrence": {"start": "2026-09-30T10:00:00+01:00", "end": None, "precision": "instant", "label": None},
-        "modes": ["think"], "domains": ["engineering"], "sections": sections,
+        "modes": ["think"], "domain_tags": ["engineering"], "sections": sections,
         "state_mutations": [], "entity_refs": [], "artifact_refs": [], "source_refs": [],
     }
 
@@ -87,7 +87,7 @@ class RetrievalQualityTests(unittest.TestCase):
         os.environ["WORK_BRAIN_EMBEDDING"] = "hash"
         try:
             for title, summary, details in CORPUS:
-                session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00", modes=["think"], domains=["engineering"])
+                session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00", modes=["think"], domain_tags=["engineering"])
                 self.vault.append_turn(session["session_id"], "user", summary, recorded_at="2026-09-30T10:01:00+01:00")
                 self.vault.commit_entry(session["session_id"], _entry_payload(session, title, summary, details))
         finally:

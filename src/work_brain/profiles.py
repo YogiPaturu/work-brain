@@ -19,7 +19,7 @@ PROFILE_FIELDS = {
     "id", "label", "workflow", "channel", "audience", "purpose", "scope",
     "tone", "format", "rendering", "include", "exclude", "triggers", "cadence", "schedule", "delivery",
 }
-SCOPE_FIELDS = {"entities", "workspaces", "projects", "domains", "time_window"}
+SCOPE_FIELDS = {"entities", "workspaces", "projects", "domain_tags", "time_window"}
 RENDERING_FIELDS = {"markup", "layout", "max_length"}
 SCHEDULE_FIELDS = {"weekdays", "time"}
 DELIVERY_FIELDS = {"mode", "webhook_env"}
@@ -117,7 +117,7 @@ class CommunicationProfile:
         if unknown_scope:
             raise ValidationError(f"profile {profile_id} has unknown scope fields: {', '.join(unknown_scope)}")
         normalized_scope: dict[str, Any] = {}
-        for field in ("entities", "workspaces", "projects", "domains"):
+        for field in ("entities", "workspaces", "projects", "domain_tags"):
             if field in scope:
                 normalized_scope[field] = list(_string_list(scope[field], f"scope.{field}"))
         if "time_window" in scope:
@@ -231,7 +231,7 @@ class CommunicationProfile:
         """Translate the profile scope into non-bypassable evidence filters."""
 
         filters: dict[str, Any] = {}
-        for field in ("entities", "workspaces", "projects", "domains"):
+        for field in ("entities", "workspaces", "projects", "domain_tags"):
             if self.scope.get(field):
                 filters[field] = list(self.scope[field])
         if self.scope.get("time_window") in {"today", "week_to_date"}:

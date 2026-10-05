@@ -14,7 +14,7 @@ WORKFLOWS = (
     "think", "operate", "communicate", "career", "open-day", "close-day", "backfill",
 )
 WORKFLOW_SOPS = {workflow: f"{workflow}.sop.md" for workflow in WORKFLOWS}
-DOMAIN_ALIASES = {
+DOMAIN_TAG_ALIASES = {
     "eng": "engineering", "software": "engineering", "debug": "debugging",
     "product-management": "product", "customers": "customer", "bizdev": "sales",
     "exec": "leadership", "architecture": "architecture", "people": "people-management",
@@ -60,7 +60,7 @@ class SkillLoader:
         )
         self.skill_dir = self.skills_root / "work-brain"
 
-    def load(self, workflow: str, domains: Iterable[str] = (), *, include_commit_schema: bool = False) -> LoadedInstructions:
+    def load(self, workflow: str, domain_tags: Iterable[str] = (), *, include_commit_schema: bool = False) -> LoadedInstructions:
         if workflow not in WORKFLOWS:
             raise ValidationError(f"unknown workflow: {workflow}")
         skill = self._resource(self.skill_dir / "SKILL.md")
@@ -70,27 +70,33 @@ class SkillLoader:
             resources.append(self._resource(self.skill_dir / "references/schemas/commit-draft.md"))
             resources.append(self._resource(self.skill_dir / "references/domain-tags.md"))
         missing: list[str] = []
-        seen_domains: set[str] = set()
-        for raw_domain in domains:
-            domain = self.normalize_domain(raw_domain)
-            if domain in seen_domains:
+        seen_domain_tags: set[str] = set()
+        for raw_domain_tag in domain_tags:
+            domain_tag = self.normalize_domain_tag(raw_domain_tag)
+            if domain_tag in seen_domain_tags:
                 continue
-            seen_domains.add(domain)
-            probe = self.skill_dir / "references/probes" / f"{domain}.md"
+            seen_domain_tags.add(domain_tag)
+            probe = self.skill_dir / "references/probes" / f"{domain_tag}.md"
             if probe.exists():
                 resources.append(self._resource(probe))
             else:
-                missing.append(domain)
-            if len(seen_domains) == 2:
+                missing.append(domain_tag)
+            if len(seen_domain_tags) == 2:
                 break
         return LoadedInstructions(skill, tuple(resources), tuple(missing))
 
     @staticmethod
-    def normalize_domain(value: str) -> str:
+    def normalize_domain_tag(value: str) -> str:
         if not isinstance(value, str) or not value.strip():
-            raise ValidationError("domain must be a non-empty string")
+            raise ValidationError("domain_tag must be a non-empty string")
         normalized = value.strip().casefold().replace("_", "-").replace(" ", "-")
-        return DOMAIN_ALIASES.get(normalized, normalized)
+        return DOMAIN_TAG_ALIASES.get(normalized, normalized)
+
+    @staticmethod
+    def normalize_token(value: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValidationError("token must be a non-empty string")
+        return value.strip().casefold()
 
     @staticmethod
     def _resource(path: Path) -> InstructionResource:

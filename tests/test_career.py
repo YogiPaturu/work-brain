@@ -22,7 +22,7 @@ def entry_payload(session: dict, *, revision: int = 1, supersedes: int | None = 
         "supersedes_revision": supersedes, "revision_reason": "reextract" if revision > 1 else "initial_commit",
         "provenance_kind": "contemporaneous", "title": "Conflict resolution", "summary": summary,
         "occurrence": {"start": "2026-09-30T10:00:00+01:00", "end": "2026-09-30T10:05:00+01:00", "precision": "instant", "label": None},
-        "modes": ["think"], "domains": ["engineering"], "sections": sections,
+        "modes": ["think"], "domain_tags": ["engineering"], "sections": sections,
         "state_mutations": [], "entity_refs": [], "artifact_refs": [], "source_refs": [],
     }
 

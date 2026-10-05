@@ -106,7 +106,7 @@ class Vault:
         *,
         started_at: str | None = None,
         modes: list[str] | None = None,
-        domains: list[str] | None = None,
+        domain_tags: list[str] | None = None,
         runtime: Mapping[str, Any] | None = None,
         session_id: str | None = None,
         entry_id: str | None = None,
@@ -128,7 +128,7 @@ class Vault:
                 "local_date": local_date,
                 "entry_id": entry_id,
                 "modes": list(modes or []),
-                "domains": list(domains or []),
+                "domain_tags": normalize_domain_tags(list(domain_tags or [])),
                 "runtime": dict(runtime or {}),
             }
             validate_session(metadata)
@@ -155,7 +155,7 @@ class Vault:
             candidate.setdefault("local_date", current["local_date"])
             candidate.setdefault("ended_at", current.get("ended_at"))
             candidate.setdefault("modes", current.get("modes", []))
-            candidate.setdefault("domains", current.get("domains", []))
+            candidate.setdefault("domain_tags", current.get("domain_tags", []))
             candidate.setdefault("runtime", current.get("runtime", {}))
             validate_session(candidate)
             atomic_replace_json(self.session_dir(session_id) / "session.json", candidate)
@@ -233,6 +233,48 @@ class Vault:
 
     def _session_paths(self) -> list[Path]:
         return sorted(self.root.glob("sessions/*/*/*/*/session.json"))
+
+    def _domain_tag_migration_paths(self) -> list[Path]:
+        return sorted({
+            *self.root.glob("sessions/*/*/*/*/session.json"),
+            *self.root.glob("sessions/*/*/*/*/entries/*.json"),
+            *self.root.glob("quarantine/entries/**/*.json"),
+        })
+
+    def migrate_domain_tags(self, *, dry_run: bool = False) -> dict[str, Any]:
+        """Rename legacy structured-vault ``domains`` keys in place.
+
+        This is a schema-only migration: evidence values, entry IDs, revisions,
+        and commit IDs are unchanged. Derived projections are rebuilt after the
+        source JSON migration completes.
+        """
+        with self._require_or_lock() if not dry_run else contextlib.nullcontext():
+            plan: list[tuple[Path, dict[str, Any]]] = []
+            for path in self._domain_tag_migration_paths():
+                raw = read_json(path)
+                if not isinstance(raw, dict) or "domains" not in raw:
+                    continue
+                if "domain_tags" in raw:
+                    raise IntegrityError(f"record contains both domain_tags and legacy domains: {path}")
+                migrated = dict(raw)
+                migrated["domain_tags"] = normalize_domain_tags(raw["domains"])
+                del migrated["domains"]
+                plan.append((path, migrated))
+            if dry_run:
+                return {
+                    "dry_run": True,
+                    "count": len(plan),
+                    "files": [str(path.relative_to(self.root)) for path, _ in plan],
+                }
+            for path, migrated in plan:
+                atomic_replace_json(path, migrated)
+            self.rebuild_all()
+            return {
+                "dry_run": False,
+                "count": len(plan),
+                "files": [str(path.relative_to(self.root)) for path, _ in plan],
+                "status": "migrated",
+            }
 
     def all_sessions(self, *, include_archived: bool = False) -> list[dict[str, Any]]:
         sessions = []
@@ -418,11 +460,11 @@ class Vault:
         with self._require_or_lock():
             current = self.get_current_entry(entry_id)
             additions = normalize_domain_tags(domain_tags)
-            merged = normalize_domain_tags([*current.domains, *additions])
-            if merged == current.domains:
+            merged = normalize_domain_tags([*current.domain_tags, *additions])
+            if merged == current.domain_tags:
                 return current
             raw = current.to_dict()
-            raw["domains"] = merged
+            raw["domain_tags"] = merged
             return self._publish_metadata_backfill(current, raw)
 
     def _publish_metadata_backfill(self, current: SessionEntry, raw: dict[str, Any]) -> SessionEntry:

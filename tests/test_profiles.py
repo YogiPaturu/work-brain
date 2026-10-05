@@ -36,7 +36,7 @@ class CommunicationProfileTests(unittest.TestCase):
         session = self.vault.create_session(
             started_at=started_at,
             modes=["communicate"],
-            domains=["founder"],
+            domain_tags=["founder"],
         )
         self.vault.append_turn(session["session_id"], "user", summary, recorded_at=started_at)
         sections = {name: [] for name in (
@@ -50,7 +50,7 @@ class CommunicationProfileTests(unittest.TestCase):
             "revision_reason": "initial_commit", "provenance_kind": "contemporaneous",
             "title": title, "summary": summary,
             "occurrence": {"start": started_at, "end": None, "precision": "instant", "label": None},
-            "modes": ["communicate"], "domains": ["founder"], "sections": sections,
+            "modes": ["communicate"], "domain_tags": ["founder"], "sections": sections,
             "workspace_entity_id": workspace_id, "project_entity_id": project_id,
             "state_mutations": [], "entity_refs": [{"entity_id": entity_id, "relation": "about"}],
             "artifact_refs": [], "source_refs": [],
@@ -335,7 +335,7 @@ class CommunicationProfileTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(0, main(["--vault", str(self.vault.root), "backfill-tags", "--file", mapping.name]))
             updated = self.vault.get_current_entry(entry.entry_id)
-            self.assertEqual(["founder", "authentication", "access-control", "security"], updated.domains)
+            self.assertEqual(["founder", "authentication", "access-control", "security"], updated.domain_tags)
             self.assertEqual(2, updated.revision)
             self.assertEqual("metadata_backfill", updated.revision_reason)
             self.assertEqual([1, 2], [item.revision for item, _ in self.vault.all_entry_revisions()])

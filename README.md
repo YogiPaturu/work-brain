@@ -17,7 +17,7 @@ pipx ensurepath
 
 git clone https://github.com/YogiPaturu/work-brain.git
 cd work-brain
-pipx install .
+pipx install ".[semantic]"
 ```
 
 On systems where `pipx` is not provided by a package manager, install the
@@ -204,13 +204,15 @@ rebuildable projections.
 
 ## Install
 
-Work Brain requires Python 3.11+ and SQLite and has no runtime dependencies.
+Work Brain requires Python 3.11+ and SQLite. The base install has no runtime
+dependencies and uses a deterministic local hash fallback for semantic
+retrieval. Install the optional `semantic` extra to use FastEmbed/BGE locally.
 The recommended user installation is:
 
 ```bash
 brew install pipx                 # macOS/Homebrew; otherwise install pipx with Python 3 below
 pipx ensurepath
-pipx install /path/to/work-brain
+pipx install "/path/to/work-brain[semantic]"
 ```
 
 For development from a checkout, use an editable virtual environment instead:
@@ -218,7 +220,7 @@ For development from a checkout, use an editable virtual environment instead:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e .
+python -m pip install -e ".[semantic]"
 ```
 
 The editable virtualenv keeps the current source tree importable for tests and
@@ -259,7 +261,9 @@ use `--json` when a machine-readable response is needed.
 ```bash
 # Vault and Skill diagnostics.
 work-brain --json doctor
-work-brain skills --workflow think --domain engineering
+work-brain skills --workflow think --domain-tag engineering
+work-brain migrate-domain-tags --dry-run
+work-brain migrate-domain-tags
 
 # Compact application operations for a host agent.
 work-brain state current
@@ -292,7 +296,7 @@ adapter, and entry-level hybrid fusion:
 ```bash
 work-brain evidence search --query "import reliability" --page-size 10
 work-brain evidence search --query "changed direction after new evidence" \
-  --filters '{"domains":["engineering"],"has_outcome":true}'
+  --filters '{"domain_tags":["engineering"],"has_outcome":true}'
 ```
 
 Results are bounded EvidenceCards with stable `{entry_id, revision}` refs and
@@ -311,11 +315,11 @@ presenting a false empty result.
 
 ### Semantic retrieval profile
 
-The normal install includes FastEmbed with the local BGE profile
-`BAAI/bge-small-en-v1.5`, so semantic retrieval works without an extra install.
-The first embedding operation downloads and locally caches the model. The
-deterministic hash-vector adapter remains available for tests, small demos,
-and offline environments, but it is not a production-quality semantic model.
+The optional `semantic` extra includes FastEmbed with the local BGE profile
+`BAAI/bge-small-en-v1.5`. Install it when you want production-quality local
+semantic retrieval; the first embedding operation downloads and locally caches
+the model. The base install uses the deterministic hash-vector adapter, which
+remains useful for tests, small demos, and offline environments.
 
 ```bash
 work-brain reindex
@@ -343,8 +347,8 @@ and permissive to tune the model against. Run the smoke cases directly with:
 PYTHONPATH=src python3 -m unittest tests.test_retrieval_quality -v
 ```
 
-The FastEmbed case is skipped only when tests are run in a minimal environment
-where the package dependency has not been installed. Run cold-process and
+The FastEmbed case is skipped when the optional extra has not been installed.
+Run cold-process and
 cache-warm timings against a private or synthetic vault with:
 
 ```bash
@@ -663,9 +667,9 @@ degraded behavior, reindexing, no-score EvidenceCards, tagged question parsing,
 explicit candidate marks, revision-stable preferences, and prepare/mock
 boundaries. Transcript-style behavioral contract fixtures cover bounded
 thinking, explicit state updates, scoped communication, career selection,
-uncertain backfill, and no-op close-day behavior. The default vector adapter is
-the local FastEmbed/BGE provider; a deterministic hash baseline remains
-available behind the same adapter contract for offline tests and minimal
+uncertain backfill, and no-op close-day behavior. The optional vector adapter
+is the local FastEmbed/BGE provider; the base install uses a deterministic hash
+baseline behind the same adapter contract for offline tests and minimal
 environments.
 
 Manual checks should be run separately for each available local harness:

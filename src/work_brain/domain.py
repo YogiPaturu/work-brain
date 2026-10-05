@@ -149,7 +149,7 @@ class SessionEntry:
     summary: str
     occurrence: Occurrence
     modes: list[str]
-    domains: list[str]
+    domain_tags: list[str]
     workspace_entity_id: str | None
     project_entity_id: str | None
     sections: dict[str, list[Statement]]
@@ -185,7 +185,8 @@ class SessionEntry:
         if not isinstance(title, str) or not title or not isinstance(summary, str):
             raise ValidationError("title and summary must be strings; title cannot be empty")
         occurrence = Occurrence.from_dict(_required(raw, "occurrence"))
-        modes, domains = _string_list(_required(raw, "modes"), "modes"), _string_list(_required(raw, "domains"), "domains")
+        modes = _string_list(_required(raw, "modes"), "modes")
+        domain_tags = normalize_domain_tags(_legacy_domain_tags(raw, required=True), "domain_tags")
         workspace_entity_id = raw.get("workspace_entity_id")
         if workspace_entity_id is not None:
             workspace_entity_id = validate_uuid7(workspace_entity_id, "workspace_entity_id")
@@ -221,7 +222,7 @@ class SessionEntry:
         if any(statement.basis == "inferred" and not statement.source_turns for statements in sections.values() for statement in statements) and not artifacts:
             raise ValidationError("inferred statements without source_turns require an artifact reference")
         return cls(entry_id, session_id, revision, commit_id, created_at, supersedes, reason, provenance, title, summary,
-                   occurrence, modes, domains, workspace_entity_id, project_entity_id, sections, mutations, entities, artifacts, sources)
+                   occurrence, modes, domain_tags, workspace_entity_id, project_entity_id, sections, mutations, entities, artifacts, sources)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -229,7 +230,7 @@ class SessionEntry:
             "commit_id": self.commit_id, "created_at": self.created_at, "supersedes_revision": self.supersedes_revision,
             "revision_reason": self.revision_reason, "provenance_kind": self.provenance_kind, "title": self.title,
             "summary": self.summary, "occurrence": self.occurrence.to_dict(), "modes": self.modes,
-            "domains": self.domains, "workspace_entity_id": self.workspace_entity_id,
+            "domain_tags": self.domain_tags, "workspace_entity_id": self.workspace_entity_id,
             "project_entity_id": self.project_entity_id,
             "sections": {k: [s.to_dict() for s in v] for k, v in self.sections.items()},
             "state_mutations": [m.to_dict() for m in self.state_mutations], "entity_refs": self.entity_refs,
@@ -250,9 +251,12 @@ def validate_session(raw: Mapping[str, Any]) -> dict[str, Any]:
         parse_timestamp(ended_at, "ended_at")
         if parse_timestamp(ended_at) < parse_timestamp(started_at):
             raise ValidationError("ended_at must not precede started_at")
-    if not isinstance(raw.get("modes", []), list) or not isinstance(raw.get("domains", []), list):
-        raise ValidationError("modes and domains must be lists")
-    return dict(raw)
+    if not isinstance(raw.get("modes", []), list):
+        raise ValidationError("modes must be a list")
+    candidate = dict(raw)
+    candidate["domain_tags"] = normalize_domain_tags(_legacy_domain_tags(raw), "domain_tags")
+    candidate.pop("domains", None)
+    return candidate
 
 
 def normalize_alias(value: str) -> str:
@@ -272,3 +276,18 @@ def normalize_domain_tags(value: Any, field: str = "domain_tags") -> list[str]:
         if token not in result:
             result.append(token)
     return result
+
+
+def _legacy_domain_tags(raw: Mapping[str, Any], *, required: bool = False) -> Any:
+    """Read pre-domain_tags source records without allowing ambiguous input."""
+    has_canonical = "domain_tags" in raw
+    has_legacy = "domains" in raw
+    if has_canonical and has_legacy:
+        raise ValidationError("record cannot contain both domain_tags and legacy domains")
+    if has_canonical:
+        return raw["domain_tags"]
+    if "domains" in raw:
+        return raw["domains"]
+    if required:
+        raise ValidationError("missing required field: domain_tags")
+    return []

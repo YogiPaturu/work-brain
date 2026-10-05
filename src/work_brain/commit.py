@@ -54,7 +54,7 @@ class CommitDraftValidator:
             Occurrence.from_dict(historical)
         if "domains" in raw:
             raise ValidationError("CommitDraft uses domain_tags, not domains")
-        domain_tags = self._domains(raw.get("domain_tags", []))
+        domain_tags = self._domain_tags(raw.get("domain_tags", []))
         if "workspace" not in raw:
             raise ValidationError("CommitDraft must include workspace; infer it or clarify it before committing")
         if "project" not in raw:
@@ -95,7 +95,7 @@ class CommitDraftValidator:
         return statement.to_dict()
 
     @staticmethod
-    def _domains(value: Any) -> list[str]:
+    def _domain_tags(value: Any) -> list[str]:
         return normalize_domain_tags(value, "domain_tags")
 
     @staticmethod
@@ -227,7 +227,7 @@ class CommitResolver:
                 raise ValidationError(f"source entry reference is not available: {ref['entry_id']}@{ref['revision']}")
             source_refs.append({"kind": "entry", "id": ref["entry_id"], "revision": ref["revision"]})
         modes = self._merge_tokens(session.get("modes", []), [workflow])
-        domains = self._merge_tokens(session.get("domains", []), draft.domain_tags)
+        domain_tags = self._merge_tokens(session.get("domain_tags", []), draft.domain_tags)
         occurrence = draft.historical_occurrence or {
             "start": session["started_at"], "end": timestamp_now(), "precision": "instant", "label": None,
         }
@@ -238,7 +238,7 @@ class CommitResolver:
             "created_at": timestamp_now(), "supersedes_revision": revision - 1 if revision > 1 else None,
             "revision_reason": revision_reason,
             "provenance_kind": "reconstructed" if workflow == "backfill" or (session.get("runtime") or {}).get("capture_fidelity") == "imported" else "contemporaneous",
-            "title": draft.title, "summary": draft.summary, "occurrence": occurrence, "modes": modes, "domains": domains,
+            "title": draft.title, "summary": draft.summary, "occurrence": occurrence, "modes": modes, "domain_tags": domain_tags,
             "workspace_entity_id": workspace_entity_id,
             "project_entity_id": project_entity_id,
             "sections": draft.sections, "state_mutations": mutations, "entity_refs": entity_refs,
@@ -279,10 +279,10 @@ class CommitResolver:
                 if candidate.get("kind") is not None and matches[0]["kind"] != candidate["kind"]:
                     raise ValidationError(f"entity {entity_id} is not a {candidate['kind']}")
             else:
-                key = SkillLoader.normalize_domain(candidate["canonical_name"])
+                key = SkillLoader.normalize_token(candidate["canonical_name"])
                 matches = [item for item in catalog if item["kind"] == candidate["kind"] and
-                           (SkillLoader.normalize_domain(item["canonical_name"]) == key or
-                            any(SkillLoader.normalize_domain(alias) == key for alias in item.get("aliases", [])))]
+                           (SkillLoader.normalize_token(item["canonical_name"]) == key or
+                            any(SkillLoader.normalize_token(alias) == key for alias in item.get("aliases", [])))]
                 if len(matches) > 1:
                     raise IntegrityError(f"ambiguous entity candidate: {candidate['canonical_name']}")
                 entity_id = matches[0]["entity_id"] if matches else self.vault.upsert_entity(
@@ -294,10 +294,10 @@ class CommitResolver:
 
     def _resolve_context_name(self, name: str, kind: str) -> str:
         catalog = [read_json(path) for path in sorted((self.vault.root / "catalog/entities").glob("*.json"))]
-        key = SkillLoader.normalize_domain(name)
+        key = SkillLoader.normalize_token(name)
         matches = [item for item in catalog if item["kind"] == kind and
-                   (SkillLoader.normalize_domain(item["canonical_name"]) == key or
-                    any(SkillLoader.normalize_domain(alias) == key for alias in item.get("aliases", [])))]
+                   (SkillLoader.normalize_token(item["canonical_name"]) == key or
+                    any(SkillLoader.normalize_token(alias) == key for alias in item.get("aliases", [])))]
         if len(matches) > 1:
             raise IntegrityError(f"ambiguous {kind} name: {name}")
         return matches[0]["entity_id"] if matches else self.vault.upsert_entity(
