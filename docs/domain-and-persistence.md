@@ -54,6 +54,13 @@ This LLD implements the following settled HLD decisions:
 - contemporaneous and reconstructed evidence must be distinguishable;
 - SQLite metadata is local and rebuildable;
 - retrieval-specific FTS/vector indexes are derived, not authoritative;
+
+The source writer and derived maintenance have separate boundaries. Source
+capture uses `initialize_source_store()` and `.vault.write.lock`; it does not
+open or migrate the rebuildable SQLite projection. Application-level commit
+coordination may refresh journals/state/SQLite after source publication, but
+the source `Vault` does not invoke retrieval. Retrieval indexing is an
+application maintenance concern protected by `.index.write.lock`.
 - no background service is required for correctness;
 - private user data must not be required in the public repository.
 
@@ -1138,7 +1145,10 @@ Full-text and semantic access patterns belong to LLD-03.
 
 V1 supports one active application process writing a vault at a time.
 
-The application MUST acquire a vault-level advisory/exclusive lock before mutation. A second writer MUST fail clearly rather than proceed concurrently.
+The application MUST acquire the vault-level advisory/exclusive source lock
+before source mutation. A second source writer MUST fail clearly rather than
+proceed concurrently. Derived index publication uses a separate advisory
+index lock and MUST NOT hold the source lock while generating embeddings.
 
 Read-only inspection MAY occur without the write lock if the implementation can tolerate observing the last atomically published snapshot.
 
@@ -1158,7 +1168,10 @@ The same `commit_id` MUST map to exactly one `(entry_id, revision, content_hash)
 
 ### 20.4 SQLite transaction failure
 
-If the source entry revision has already been atomically published but SQLite fails, the operation reports a derived-state failure. The next startup, `doctor`, or `reindex` can reconcile from source.
+If the source entry revision has already been atomically published but SQLite
+or retrieval fails, the operation reports `source_status=committed` with an
+independent derived status. The next `doctor`, `rebuild`, or `reindex` can
+reconcile from source.
 
 The implementation MUST NOT delete the successfully published source revision to make SQLite appear consistent.
 

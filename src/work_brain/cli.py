@@ -737,10 +737,20 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     if command == "doctor":
         diagnostics = vault.doctor()
         retriever = EvidenceRetriever(vault)
+        try:
+            health = retriever.health()
+            embedding = retriever.embedding_status(health)
+        except Exception as exc:
+            diagnostics.append(f"retrieval health unavailable: {exc}")
+            embedding = {
+                "provider": "unavailable",
+                "status": "failed",
+                "warning": "Run work-brain reindex after repairing the derived database.",
+            }
         return {
             "ok": not diagnostics,
             "diagnostics": diagnostics,
-            "embedding": retriever.embedding_status(retriever.health()),
+            "embedding": embedding,
         }, machine
     if command == "session-start":
         started_at = args.started_at

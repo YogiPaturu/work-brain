@@ -114,3 +114,14 @@ The implementation deliberately does not add a resident daemon, MCP server,
 remote embedding fallback, retrieval LLM call, or host-specific retrieval
 logic. `work-brain evidence search` is safe to call as a separate OS process;
 whether model startup is acceptable remains a measured deployment decision.
+
+Index lifecycle boundary:
+
+- `EvidenceRetriever` captures source revision/content/dependency hashes and
+  performs chunking/embedding outside the authoritative source lock.
+- `.index.write.lock` protects only derived SQLite index publication.
+- publication is rejected when source revision or hashes change while
+  embedding is in progress; explicit `reindex` repairs a stale index.
+- `search()` checks health and returns current indexed evidence with explicit
+  degraded/incomplete metadata when possible. It never launches a full
+  rebuild as a read side effect.

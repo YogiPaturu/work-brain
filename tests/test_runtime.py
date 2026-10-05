@@ -206,6 +206,17 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual("codex", health[-1]["host"])
         self.assertEqual("capture_hook_failure", health[-1]["category"])
 
+    def test_doctor_distinguishes_corrupt_derived_database(self) -> None:
+        broken = Vault(Path(self.tempdir.name) / "broken-doctor").initialize()
+        broken.database_path.write_text("not sqlite", encoding="utf-8")
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(4, main(["--vault", str(broken.root), "doctor", "--json"]))
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["ok"])
+        self.assertEqual("failed", result["embedding"]["status"])
+        self.assertTrue(any("SQLite" in item or "retrieval health" in item for item in result["diagnostics"]))
+
     def test_model_tool_calls_execute_and_return_without_polluting_raw_turns(self) -> None:
         model = ScriptedModel(responses=[
             ModelResponse("", ({"id": "call-1", "name": "get_recent_work", "arguments": {"limit": 1}},)),

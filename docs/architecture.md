@@ -33,6 +33,36 @@ There is no second Work Brain LLM call behind the host agent. Work Brain is
 model-provider agnostic in production. A standalone direct-LLM runtime may be
 retained for tests and future experiments, but it is not a v1 dependency.
 
+### Source and derived boundaries
+
+Authoritative source consists of session metadata, append-only raw turns,
+immutable `SessionEntry` revisions, amendments, and source catalog records.
+Journals, `state/current.json`, SQLite, FTS, chunks, and embeddings are
+rebuildable projections. Source publication is the success boundary: a
+projection or retrieval failure is reported independently and never makes a
+durably published entry look like an ordinary failed commit.
+
+The application commit path is:
+
+```text
+validate -> plan catalog dependencies -> short source lock
+         -> publish catalogs and immutable entry -> release source lock
+         -> best-effort JSON/SQLite refresh -> best-effort retrieval indexing
+```
+
+The `.vault.write.lock` protects source mutations only. Embedding/model work
+and derived index publication use `.index.write.lock`; index publication
+rechecks source revision and hashes captured before embedding so stale work
+cannot replace newer evidence. Raw session creation and turn append initialize
+only the source store and do not open or migrate SQLite.
+
+Search is read-only with respect to maintenance: it returns explicit
+degraded/incomplete metadata and does not silently start a full reindex.
+
+Runtime lifecycle is represented as orthogonal capture, commit, and projection
+states. Legacy flat runtime keys remain readable, but lifecycle writes use
+centralized transition helpers.
+
 MCP is not part of v1. It remains a possible future adapter only if Work Brain
 becomes remote/hosted, a supported harness cannot execute the CLI, native
 structured tools become materially preferable, or remote authentication and
@@ -101,7 +131,7 @@ trusted Codex, Claude Code, or Cursor process may independently read or write
 files permitted by the host. A Skill cannot prevent that. Stronger isolation
 would require a real sandbox or service/MCP boundary and is deferred.
 
-Only one Work Brain writer may operate on a vault at a time. Running Codex,
+Only one Work Brain source writer may operate on a vault at a time. Running Codex,
 Claude Code, and Cursor against the same vault simultaneously does not bypass
 the existing LLD-01 lock or make concurrent writes safe.
 

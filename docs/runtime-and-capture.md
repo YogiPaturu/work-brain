@@ -119,6 +119,12 @@ thin. Retrieval commands do not expose SQL or vector primitives. `evidence
 search` delegates to the implemented LLD-03 retriever and may report stable
 degraded/incomplete results when an index component is unavailable.
 
+Search does not initiate a full reindex. Use `work-brain rebuild` for all
+rebuildable projections or `work-brain reindex` for retrieval embeddings and
+FTS. Capture-hook failures remain host-safe no-ops, while a private
+operational health log records timestamp, host, category, and a short
+non-sensitive error for `status` and `doctor`.
+
 ## 5. Logical session lifecycle
 
 The host agent may begin an explicit Work Brain conversation by invoking the
@@ -154,8 +160,15 @@ session and rotates the mapping to a fresh bounded session while keeping host
 capture active. `finish this`, `that's enough`, and `save this` preserve that
 active envelope; `stop work brain` and `close my day` deactivate it.
 
-Only one Work Brain writer may operate on a vault at a time. Existing LLD-01
-lock and source-first semantics remain authoritative.
+Only one Work Brain source writer may operate on a vault at a time. The
+`.vault.write.lock` protects source mutations; retrieval/model work uses its
+separate derived-index lock and is never required for raw turn capture.
+
+Lifecycle is persisted as three orthogonal concerns: capture (`inactive`,
+`active`, `recoverable`, `closed`), commit (`none`, `pending`, `committed`,
+`failed`, `no_new_evidence`), and projection (`current`, `dirty`, `rebuilding`,
+`failed`). Existing flat runtime fields remain a compatibility view and are
+normalized on read. Central transition helpers reject illegal transitions.
 
 ## 6. Capture port
 
