@@ -18,7 +18,11 @@ class Database:
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
-        self.migrate(conn)
+        try:
+            self.migrate(conn)
+        except Exception:
+            conn.close()
+            raise
         return conn
 
     def migrate(self, conn: sqlite3.Connection) -> None:
