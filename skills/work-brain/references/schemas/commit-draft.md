@@ -31,6 +31,10 @@ resolved by the application. A new Experience may be proposed with
 `experience`. Experience association is optional. If the relationship is
 uncertain, omit the candidate and commit the SessionEntry normally. Never copy
 an Experience summary into the entry as a substitute for supporting evidence.
+For an existing Experience, prefer the explicit shape
+`{"entity_id":"...","kind":"experience","relation":"experience"}`.
+An Experience candidate must always use `relation: "experience"`; the
+application rejects unrelated relations and rejects ambiguous catalog matches.
 
 The context fields are plain names:
 

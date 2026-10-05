@@ -29,17 +29,17 @@ class ToolDefinition:
 
 
 PROFILES: dict[str, tuple[str, ...]] = {
-    "think": ("search_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "get_current_state"),
-    "operate": ("get_current_state", "get_recent_work", "search_evidence", "hydrate_evidence", "list_work_item_communication_profiles"),
-    "communicate": ("get_current_state", "get_recent_work", "search_evidence", "search_profile_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "get_communication_profile"),
+    "think": ("search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "get_current_state"),
+    "operate": ("get_current_state", "get_recent_work", "search_evidence", "select_evidence", "hydrate_evidence", "list_work_item_communication_profiles"),
+    "communicate": ("get_current_state", "get_recent_work", "search_evidence", "select_evidence", "search_profile_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "get_communication_profile"),
     "career": (
         "search_questions", "get_question", "choose_question",
-        "search_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience",
-        "mark_interview_candidate", "unmark_interview_candidate", "list_interview_candidates",
+        "search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience",
+        "mark_interview_candidate", "unmark_interview_candidate", "list_interview_candidates", "associate_entry_experience",
     ),
     "open-day": ("get_current_state", "get_recent_work"),
     "close-day": ("get_current_state", "get_close_day_record", "list_post_close_communication_profiles"),
-    "backfill": ("search_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience"),
+    "backfill": ("search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "associate_entry_experience"),
 }
 
 
@@ -54,6 +54,7 @@ class ToolRegistry:
             "Read target-day committed entries, committed entries missing from their journal projection, and all uncommitted raw sessions.",
         ),
         "search_evidence": ToolDefinition("search_evidence", "Search evidence through the configured retrieval adapter."),
+        "select_evidence": ToolDefinition("select_evidence", "Select bounded evidence by deterministic metadata filters without a text query."),
         "search_profile_evidence": ToolDefinition("search_profile_evidence", "Search evidence using a validated communication profile's exact scope."),
         "hydrate_evidence": ToolDefinition("hydrate_evidence", "Hydrate selected stable evidence references."),
         "search_experiences": ToolDefinition("search_experiences", "Search or list source-backed professional Experiences."),
@@ -68,6 +69,7 @@ class ToolRegistry:
         "mark_interview_candidate": ToolDefinition("mark_interview_candidate", "Persist an explicitly user-confirmed interview candidate mark.", mutating=True),
         "unmark_interview_candidate": ToolDefinition("unmark_interview_candidate", "Remove an interview candidate mark.", mutating=True),
         "list_interview_candidates": ToolDefinition("list_interview_candidates", "List current user-authored interview candidate marks."),
+        "associate_entry_experience": ToolDefinition("associate_entry_experience", "Attach or remove an entry's optional source-backed Experience association.", mutating=True),
         "commit_session": ToolDefinition("commit_session", "Publish a validated session draft.", mutating=True),
         "record_amendment": ToolDefinition("record_amendment", "Record an explicit user correction.", mutating=True),
     }
@@ -80,7 +82,7 @@ class ToolRegistry:
         if retrieval is None:
             from .retrieval import EvidenceRetriever
             adapter = EvidenceRetriever(vault)
-            retrieval = {"search_evidence": adapter.search, "hydrate_evidence": adapter.hydrate}
+            retrieval = {"search_evidence": adapter.search, "select_evidence": adapter.select_evidence, "hydrate_evidence": adapter.hydrate}
         self.retrieval = dict(retrieval)
 
     def definitions(self, workflow: str, *, committing: bool = False) -> tuple[ToolDefinition, ...]:
@@ -191,7 +193,7 @@ class ToolRegistry:
                 "unjournaled_entries": unjournaled_entries,
                 "uncommitted_raw_sessions": uncommitted_raw,
             })
-        if name in {"search_evidence", "hydrate_evidence"}:
+        if name in {"search_evidence", "select_evidence", "hydrate_evidence"}:
             handler = self.retrieval.get(name)
             if handler is None:
                 return ToolResult(False, error="retrieval adapter is not configured")
@@ -238,12 +240,13 @@ class ToolRegistry:
                     query = f"{work_item.strip()} {query or ''}".strip()
                 page_size = arguments.get("page_size", 8)
                 cursor = arguments.get("cursor")
-                result = handler(
-                    query=query,
-                    filters=filters,
-                    page_size=page_size,
-                    cursor=cursor,
-                )
+                if query:
+                    result = handler(query=query, filters=filters, page_size=page_size, cursor=cursor)
+                else:
+                    selector = self.retrieval.get("select_evidence")
+                    if selector is None:
+                        raise ValidationError("retrieval adapter does not support filter-only evidence selection")
+                    result = selector(filters=filters, page_size=page_size, cursor=cursor)
                 fallback_used = False
                 scope_fields = ("entities", "workspaces", "projects", "experiences")
                 if (
@@ -259,13 +262,8 @@ class ToolRegistry:
                     scope_terms: list[str] = []
                     for field in scope_fields:
                         scope_terms.extend(fallback_filters.pop(field, []))
-                    fallback_query = " ".join(scope_terms + [query]).strip()
-                    result = handler(
-                        query=fallback_query,
-                        filters=fallback_filters,
-                        page_size=page_size,
-                        cursor=None,
-                    )
+                    fallback_query = " ".join(scope_terms + ([query] if query else [])).strip()
+                    result = handler(query=fallback_query, filters=fallback_filters, page_size=page_size, cursor=None)
                     fallback_used = True
                 if isinstance(result, dict):
                     result = dict(result)
@@ -305,7 +303,7 @@ class ToolRegistry:
                 }
                 for profile in self.profile_store.triggered_after_work_item()
             ])
-        if name in {"search_questions", "get_question", "choose_question", "mark_interview_candidate", "unmark_interview_candidate", "list_interview_candidates"}:
+        if name in {"search_questions", "get_question", "choose_question", "mark_interview_candidate", "unmark_interview_candidate", "list_interview_candidates", "associate_entry_experience"}:
             try:
                 from .career import CareerService, QuestionFilters, QuestionRef
                 service = CareerService(self.vault)
@@ -329,13 +327,27 @@ class ToolRegistry:
                     return ToolResult(True, service.choose_question(filters=filters, text=arguments.get("text"), seed=arguments.get("seed")))
                 if name == "list_interview_candidates":
                     return ToolResult(True, service.marks.list())
+                if name == "associate_entry_experience":
+                    if arguments.get("explicit_user_intent") is not True:
+                        return ToolResult(False, error="explicit_user_intent=true is required to change an Experience association")
+                    return ToolResult(True, service.experiences.associate(
+                        arguments["entry_id"],
+                        experience_id=arguments.get("experience_id"),
+                        experience_name=arguments.get("experience_name"),
+                        remove=arguments.get("remove", False),
+                        move=arguments.get("move", False),
+                    ))
                 if name == "mark_interview_candidate":
                     if arguments.get("explicit_user_intent") is not True:
                         return ToolResult(False, error="explicit_user_intent=true is required; a model suggestion cannot create a mark")
-                    return ToolResult(True, service.marks.mark(arguments["entry_id"], note=arguments.get("note"), question_refs=arguments.get("question_refs")))
+                    target_kind = arguments.get("target_kind", "entry")
+                    target_id = arguments.get("target_id", arguments.get("entry_id"))
+                    return ToolResult(True, service.marks.mark(target_id, target_kind=target_kind, note=arguments.get("note"), question_refs=arguments.get("question_refs")))
                 if arguments.get("explicit_user_intent") is not True:
                     return ToolResult(False, error="explicit_user_intent=true is required to change a candidate mark")
-                return ToolResult(True, service.marks.unmark(arguments["entry_id"]))
+                target_kind = arguments.get("target_kind", "entry")
+                target_id = arguments.get("target_id", arguments.get("entry_id"))
+                return ToolResult(True, service.marks.unmark(target_id, target_kind=target_kind))
             except (ValidationError, ValueError, KeyError) as exc:
                 return ToolResult(False, error=str(exc))
         return ToolResult(False, error=f"tool is not available in the current phase: {name}")

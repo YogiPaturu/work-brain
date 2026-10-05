@@ -106,6 +106,77 @@ class ExperienceService:
                 raise ValidationError("experience hydration refs must belong to the experience")
         return {"experience": card, "evidence": self.retriever.hydrate(list(selected)[:4])}
 
+    def associate(
+        self,
+        entry_id: str,
+        *,
+        experience_id: str | None = None,
+        experience_name: str | None = None,
+        remove: bool = False,
+        move: bool = False,
+        _maintain: bool = True,
+    ) -> dict[str, Any]:
+        entry = self.vault.associate_entry_experience(
+            entry_id,
+            experience_id=experience_id,
+            experience_name=experience_name,
+            remove=remove,
+            move=move,
+        )
+        maintenance: dict[str, Any] | None = None
+        if _maintain:
+            maintenance = self.retriever.reindex()
+        result = {"entry_id": entry.entry_id, "revision": entry.revision, "experience_ids": [
+            ref["entity_id"] for ref in entry.entity_refs if ref["relation"] == "experience"
+        ]}
+        if maintenance is not None:
+            result["retrieval"] = maintenance
+        return result
+
+    def associate_entries(
+        self,
+        entry_ids: Iterable[str],
+        *,
+        experience_id: str | None = None,
+        experience_name: str | None = None,
+        remove: bool = False,
+        move: bool = False,
+    ) -> dict[str, Any]:
+        selected_ids = list(entry_ids)
+        if not selected_ids:
+            raise ValidationError("at least one entry_id is required")
+        entries = [self.vault.get_current_entry(entry_id) for entry_id in selected_ids]
+        if not remove:
+            existing = [
+                ref["entity_id"] for entry in entries for ref in entry.entity_refs
+                if ref["relation"] == "experience"
+            ]
+            if existing and not move:
+                raise ValidationError("entry already belongs to an Experience; use move=true to replace it")
+            contexts = {(entry.workspace_entity_id, entry.project_entity_id) for entry in entries}
+            if len(contexts) > 1:
+                raise ValidationError("all entries in one Experience association must share workspace/project context")
+            resolved_experience_id = experience_id
+            if resolved_experience_id is None and experience_name is not None:
+                resolved_experience_id = self.vault._resolve_experience_entity(None, experience_name)
+            if resolved_experience_id is not None:
+                for entry in entries:
+                    self.vault.validate_experience_context(
+                        [resolved_experience_id], entry.workspace_entity_id, entry.project_entity_id,
+                        excluding_entry_id=entry.entry_id,
+                    )
+            experience_id = resolved_experience_id
+        updated = [self.associate(
+            entry.entry_id,
+            experience_id=experience_id,
+            experience_name=experience_name,
+            remove=remove,
+            move=move,
+            _maintain=False,
+        ) for entry_id in entry_ids]
+        maintenance = self.retriever.reindex() if updated else None
+        return {"updated": updated, "count": len(updated), "retrieval": maintenance}
+
     def candidates_from_evidence(self, evidence: Mapping[str, Any]) -> dict[str, Any]:
         """Aggregate ranked evidence cards without inventing story quality."""
         raw_cards = evidence.get("cards", [])
@@ -130,6 +201,7 @@ class ExperienceService:
                     "title": entry.title,
                     "supporting_entry_refs": [{"entry_id": entry.entry_id, "revision": entry.revision}],
                     "matched_evidence": dict(card),
+                    "_best_rank": rank,
                 })
                 continue
             for experience_id in experience_ids:
@@ -149,8 +221,15 @@ class ExperienceService:
             candidate["matched_evidence"] = item["matches"][:3]
             candidate["_best_rank"] = item["best_rank"]
             experiences.append(candidate)
-        experiences.sort(key=lambda item: (item.pop("_best_rank"), item["experience_id"]))
-        return {"experiences": experiences, "ungrouped": ungrouped}
+        experiences.sort(key=lambda item: (item["_best_rank"], item["experience_id"]))
+        ungrouped.sort(key=lambda item: (item["_best_rank"], item["supporting_entry_refs"][0]["entry_id"]))
+        ordered = sorted(
+            [*experiences, *ungrouped],
+            key=lambda item: (item["_best_rank"], item.get("experience_id", item["supporting_entry_refs"][0]["entry_id"])),
+        )
+        public_experiences = [{key: value for key, value in item.items() if key != "_best_rank"} for item in experiences]
+        public_ungrouped = [{key: value for key, value in item.items() if key != "_best_rank"} for item in ungrouped]
+        return {"experiences": public_experiences, "ungrouped": public_ungrouped, "ordered": ordered}
 
     def _groups(self, *, filters: Mapping[str, Any] | None = None) -> dict[str, list[SessionEntry]]:
         groups: dict[str, list[SessionEntry]] = {}
@@ -212,10 +291,11 @@ class ExperienceService:
         )
 
     def _context(self, entries: list[SessionEntry], field: str) -> dict[str, Any] | None:
-        for entry in entries:
-            entity_id = getattr(entry, field)
-            if entity_id is None:
-                continue
+        ids = {getattr(entry, field) for entry in entries}
+        if len(ids) > 1:
+            raise IntegrityError(f"experience entries have conflicting {field}")
+        entity_id = next(iter(ids), None)
+        if entity_id is not None:
             path = self.vault.root / "catalog/entities" / f"{entity_id}.json"
             if not path.exists():
                 raise IntegrityError(f"missing context entity: {entity_id}")

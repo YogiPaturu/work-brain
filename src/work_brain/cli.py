@@ -134,6 +134,10 @@ def _parser() -> argparse.ArgumentParser:
     search.add_argument("--page-size", type=int, default=10)
     search.add_argument("--filters", help="JSON object containing EvidenceFilters")
     search.add_argument("--cursor")
+    select = evidence_sub.add_parser("select", help="select evidence using filters without a text query")
+    select.add_argument("--page-size", type=int, default=10)
+    select.add_argument("--filters", help="JSON object containing EvidenceFilters")
+    select.add_argument("--cursor")
     hydrate = evidence_sub.add_parser("hydrate")
     hydrate.add_argument("--file", help="JSON object with refs; omit or use - to read stdin")
     get = evidence_sub.add_parser("get")
@@ -155,6 +159,13 @@ def _parser() -> argparse.ArgumentParser:
     experience_hydrate = experience_sub.add_parser("hydrate")
     experience_hydrate.add_argument("--experience-id", required=True)
     experience_hydrate.add_argument("--file", help="JSON object with optional refs; omit or use - to read stdin")
+    experience_associate = experience_sub.add_parser("associate", help="attach or remove source-backed Experience links")
+    experience_associate.add_argument("--entry-id", action="append", required=True)
+    target = experience_associate.add_mutually_exclusive_group()
+    target.add_argument("--experience-id")
+    target.add_argument("--experience-name")
+    experience_associate.add_argument("--remove", action="store_true")
+    experience_associate.add_argument("--move", action="store_true")
 
     career = sub.add_parser("career", help="interview practice and career retrieval")
     career.add_argument("--bank", action="append", default=[], metavar="BANK_ID=PATH", help="question bank; repeat for multiple banks")
@@ -182,11 +193,17 @@ def _parser() -> argparse.ArgumentParser:
     candidates_sub = candidates.add_subparsers(dest="candidates_command", required=True)
     candidates_sub.add_parser("list")
     mark = candidates_sub.add_parser("mark")
-    mark.add_argument("--entry-id", required=True)
+    mark.add_argument("--entry-id")
+    mark.add_argument("--experience-id")
+    mark.add_argument("--target-id")
+    mark.add_argument("--target-kind", choices=["entry", "experience"])
     mark.add_argument("--note")
     mark.add_argument("--question-ref", action="append", default=[], metavar="BANK_ID/QUESTION_ID")
     unmark = candidates_sub.add_parser("unmark")
-    unmark.add_argument("--entry-id", required=True)
+    unmark.add_argument("--entry-id")
+    unmark.add_argument("--experience-id")
+    unmark.add_argument("--target-id")
+    unmark.add_argument("--target-kind", choices=["entry", "experience"])
     prepare = career_sub.add_parser("prepare", help="select a question and retrieve plausible evidence")
     prepare.add_argument("--question-text")
     prepare.add_argument("--question-ref", metavar="BANK_ID/QUESTION_ID")
@@ -528,6 +545,16 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
             return service.search(args.query, filters=filters, page_size=args.page_size, cursor=args.cursor), True
         if args.experience_command == "get":
             return service.get(args.experience_id), True
+        if args.experience_command == "associate":
+            if args.remove and (args.experience_id or args.experience_name):
+                raise ValidationError("--remove cannot be combined with an Experience target")
+            return service.associate_entries(
+                args.entry_id,
+                experience_id=args.experience_id,
+                experience_name=args.experience_name,
+                remove=args.remove,
+                move=args.move,
+            ), True
         payload = _read_payload(args.file) if args.file else {}
         refs = payload.get("refs")
         if refs is not None and not isinstance(refs, list):
@@ -549,8 +576,16 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
                 for raw in args.question_ref:
                     ref = _question_ref(raw)
                     refs.append(ref.to_dict())
-                return service.marks.mark(args.entry_id, note=args.note, question_refs=refs), True
-            return service.marks.unmark(args.entry_id), True
+                target_id = args.target_id or args.entry_id or args.experience_id
+                target_kind = args.target_kind or ("experience" if args.experience_id else "entry")
+                if not target_id:
+                    raise ValidationError("candidate mark requires --target-id, --entry-id, or --experience-id")
+                return service.marks.mark(target_id, target_kind=target_kind, note=args.note, question_refs=refs), True
+            target_id = args.target_id or args.entry_id or args.experience_id
+            target_kind = args.target_kind or ("experience" if args.experience_id else "entry")
+            if not target_id:
+                raise ValidationError("candidate unmark requires --target-id, --entry-id, or --experience-id")
+            return service.marks.unmark(target_id, target_kind=target_kind), True
         ref = _question_ref(args.question_ref)
         question = service.get_question(ref) if ref else None
         if args.career_command == "prepare":
@@ -646,6 +681,11 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         if not isinstance(filters, dict):
             raise ValidationError("--filters must be a JSON object")
         return EvidenceRetriever(vault).search(args.query, filters=filters, page_size=args.page_size, cursor=args.cursor), True
+    if command == "evidence" and args.evidence_command == "select":
+        filters = json.loads(args.filters) if args.filters else {}
+        if not isinstance(filters, dict):
+            raise ValidationError("--filters must be a JSON object")
+        return EvidenceRetriever(vault).select_evidence(filters=filters, page_size=args.page_size, cursor=args.cursor), True
     if command == "evidence" and args.evidence_command == "hydrate":
         payload = _read_payload(args.file)
         return EvidenceRetriever(vault).hydrate(payload.get("refs", [])), True

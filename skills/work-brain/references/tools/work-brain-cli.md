@@ -47,6 +47,7 @@ work-brain work recent --limit 8
 work-brain work loops --limit 20
 work-brain evidence get --entry-id ENTRY_ID
 work-brain evidence search --query "import reliability" --page-size 10
+work-brain evidence select --filters '{"occurred_after":"2026-10-01","projects":["Auth"]}'
 work-brain evidence hydrate < refs.json
 work-brain experience list --limit 8
 work-brain experience search --query "influenced the API decision" --page-size 8
@@ -68,6 +69,10 @@ cursor. Use `evidence hydrate` for selected refs and `reindex` for explicit
 retrieval maintenance. Search may report degraded or incomplete state; never
 describe an unavailable search as proof that no history exists.
 
+`evidence select` is the filter-only companion for date, workspace, project,
+Experience, domain-tag, provenance, and outcome scopes. It does not require a
+query string and uses the same bounded cards and pagination contract.
+
 `experience list/search/get/hydrate` are bounded read operations over stable
 Experience entities and their linked SessionEntry revisions. An Experience is
 optional; unassigned entries remain available through `evidence search` and
@@ -86,6 +91,8 @@ work-brain migrate-domain-tags --dry-run
 work-brain migrate-domain-tags
 work-brain backfill-tags --file domain-tags.json --dry-run
 work-brain backfill-tags --file domain-tags.json
+work-brain experience associate --entry-id ENTRY_ID --experience-id EXPERIENCE_ID
+work-brain experience associate --entry-id ENTRY_ID --experience-name "Migration recovery"
 work-brain recoverable
 ```
 

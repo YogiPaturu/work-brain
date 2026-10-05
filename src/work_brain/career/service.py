@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -36,15 +39,56 @@ class CareerService:
 
     def prepare(self, *, question: Mapping[str, Any] | None = None, question_text: str | None = None, query: str | None = None, filters: QuestionFilters | None = None, page_size: int = 8, cursor: str | None = None, seed: int | None = None) -> dict[str, Any]:
         selected = self._resolve_question(question, question_text, filters, seed)
-        evidence = self.retriever.search(query or selected["text"], page_size=page_size, cursor=cursor)
-        candidates = self.experiences.candidates_from_evidence(evidence)
+        if not isinstance(page_size, int) or not 1 <= page_size <= 20:
+            raise ValueError("page_size must be between 1 and 20")
+        evidence_query = query or selected["text"]
+        fingerprint = hashlib.sha256(json.dumps({"query": evidence_query, "page_size": page_size}, sort_keys=True).encode()).hexdigest()
+        candidate_offset = 0
+        if cursor:
+            try:
+                padded = cursor + "=" * (-len(cursor) % 4)
+                cursor_value = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
+            except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ValueError("cursor must be an opaque career continuation") from exc
+            if not isinstance(cursor_value, dict) or cursor_value.get("fingerprint") != fingerprint:
+                return {
+                    "mode": "prepare", "question": selected, "evidence": {"cards": [], "next_cursor": None, "status": "cursor_expired"},
+                    "experiences": [], "ungrouped_candidates": [], "candidates": [], "selection_required": True, "story_scores": None,
+                }
+            candidate_offset = int(cursor_value.get("offset", 0))
+        work_limit = max(40, page_size * 8)
+        retrieval_page_size = 20
+        retrieval_cursor = None
+        raw_cards: list[dict[str, Any]] = []
+        last_evidence: dict[str, Any] = {"cards": [], "next_cursor": None, "status": "ok"}
+        while len(raw_cards) < work_limit:
+            last_evidence = self.retriever.search(evidence_query, page_size=retrieval_page_size, cursor=retrieval_cursor)
+            raw = last_evidence.get("cards", [])
+            if isinstance(raw, list):
+                raw_cards.extend(card for card in raw if isinstance(card, dict))
+            retrieval_cursor = last_evidence.get("next_cursor")
+            candidates = self.experiences.candidates_from_evidence({"cards": raw_cards})
+            unique_count = len(candidates["experiences"]) + len(candidates["ungrouped"])
+            if unique_count >= candidate_offset + page_size or not retrieval_cursor or last_evidence.get("status") == "retrieval_unavailable":
+                break
+        candidates = self.experiences.candidates_from_evidence({"cards": raw_cards})
+        ordered = [dict(candidate) for candidate in candidates.get("ordered", [*candidates["experiences"], *candidates["ungrouped"]])]
+        for candidate in ordered:
+            candidate.pop("_best_rank", None)
+        page = ordered[candidate_offset:candidate_offset + page_size]
+        next_cursor = None
+        if candidate_offset + page_size < len(ordered) or retrieval_cursor:
+            next_cursor = base64.urlsafe_b64encode(json.dumps({"fingerprint": fingerprint, "offset": candidate_offset + page_size}, sort_keys=True).encode()).decode().rstrip("=")
+        evidence = dict(last_evidence)
+        evidence["cards"] = raw_cards[:work_limit]
+        evidence["next_cursor"] = next_cursor
         return {
             "mode": "prepare",
             "question": selected,
             "evidence": evidence,
-            "experiences": candidates["experiences"],
-            "ungrouped_candidates": candidates["ungrouped"],
-            "candidates": [*candidates["experiences"], *candidates["ungrouped"]],
+            "experiences": [candidate for candidate in page if candidate.get("candidate_type") == "experience"],
+            "ungrouped_candidates": [candidate for candidate in page if candidate.get("candidate_type") == "ungrouped_entry"],
+            "candidates": page,
             "selection_required": True,
             "story_scores": None,
         }
@@ -55,6 +99,9 @@ class CareerService:
 
     def search_evidence(self, query: str, *, filters: Mapping[str, Any] | None = None, page_size: int = 8, cursor: str | None = None) -> dict[str, Any]:
         return self.retriever.search(query, filters=filters, page_size=page_size, cursor=cursor)
+
+    def select_evidence(self, *, filters: Mapping[str, Any] | None = None, page_size: int = 8, cursor: str | None = None) -> dict[str, Any]:
+        return self.retriever.select_evidence(filters=filters, page_size=page_size, cursor=cursor)
 
     def hydrate_evidence(self, refs: list[Mapping[str, Any]]) -> dict[str, Any]:
         return self.retriever.hydrate(refs)

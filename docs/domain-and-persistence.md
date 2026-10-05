@@ -610,6 +610,11 @@ to it with `{"relation": "experience"}`. The entity stores identity and
 aliases only; linked entries remain the authority for context, reasoning,
 contribution, trade-offs, outcomes, and learning. Association is optional, so
 unassigned entries remain valid evidence and remain searchable.
+An Experience has one workspace/project context in v1. The first linked entry
+establishes that pair; later associations must match it. A mismatch is a
+validation error, not a silent first-entry choice. Historical association is
+published as a metadata-only immutable SessionEntry revision, preserving all
+prior revisions and provenance.
 
 ## 12. Artifact Reference Catalog
 
@@ -1049,6 +1054,12 @@ CREATE TABLE entry_artifacts (
     PRIMARY KEY (entry_id, artifact_id, relation)
 );
 ```
+
+The rebuildable reverse lookup index
+`entry_entities_by_entity_relation(entity_id, relation, entry_id)` supports
+bounded Experience-to-entry hydration without changing the authoritative JSON
+source model. Migration `006_experience_reverse_lookup.sql` creates it
+idempotently.
 
 These tables represent the current entry revision only and are rebuilt/replaced when the current revision changes.
 

@@ -47,7 +47,12 @@ valid single-entry candidate.
 
 The system may internally order search candidates, but it does not score or choose the user's “best” story. LLD-03 returns bounded pages plus an opaque continuation cursor. The Career workflow shows that more candidates exist when appropriate and lets the user continue until satisfied or the search is exhausted.
 
-A user may explicitly mark an entry as an interview candidate. That mark is durable private preference metadata and references the existing entry identity; it does not modify the SessionEntry or assert that the story is objectively strong. Automatic model-derived career annotations are deliberately not required in v1. They can be added later as replaceable projection data over the same stable evidence identities.
+A user may explicitly mark either a stable Experience or an individual ungrouped
+entry as an interview candidate. Marks use a `{target_kind, target_id}`
+contract, preserve the legacy entry-mark fields when reading/writing entry
+events, and remain preference metadata rather than professional evidence. An
+Experience mark remains valid as more entry revisions are attached. Automatic
+model-derived career annotations are deliberately not required in v1.
 
 ## 2. Effective Source Set
 
@@ -105,11 +110,11 @@ This LLD fixes question normalization/query semantics, source boundaries, user-s
 - V1 question lookup uses deterministic in-memory parsing/filtering; no FTS/vector/LLM call is required to find a question.
 - Every normalized question receives a deterministic `QuestionRef` derived from stable bank identity plus normalized question content.
 - Public/shared banks and private vault banks use the same provider contract and preserve source provenance.
-- Career evidence search uses LLD-03 `search_evidence` pages and `hydrate_evidence`; LLD-04 does not maintain a second professional-evidence index.
+- Career evidence uses LLD-03 `search_evidence` pages (and `select_evidence` for filter-only scopes) plus `hydrate_evidence`; LLD-04 does not maintain a second professional-evidence index.
 - The user, not the model, chooses the story/angle used for preparation.
 - V1 supports two practice flows: `prepare` and `mock`.
 - User-authored candidate marks are append-only events in private `career/marks.jsonl`.
-- Candidate marks follow stable `entry_id` across later SessionEntry revisions; the event records the revision current when marked for audit.
+- Candidate marks target either a stable Experience or an individual entry. Entry events record the revision current when marked for audit; Experience marks have no entry revision and remain valid as membership grows.
 - Mark/unmark operations are idempotent at the application command level and latest event wins for current preference state.
 - Automatic model-derived career capability/story annotations are deferred from v1.
 - Career marks do not influence LLD-03's numeric retrieval fusion; they may be overlaid in presentation or used as an explicit user filter/list.
@@ -171,7 +176,7 @@ QuestionBankProvider
 
 CareerMarkStore
   append_mark_event(event)
-  get_current_mark(entry_id)
+  get_current_mark(target_kind, target_id)
   list_current_marks()
 
 EvidenceRetriever       # LLD-03
@@ -365,11 +370,11 @@ mark | unmark
 Rules:
 
 - IDs/timestamps are application-generated, not model-authoritative.
-- `entry_id` MUST resolve through LLD-01.
-- `entry_revision_at_event` records what the user was looking at; current mark state follows the stable `entry_id` across later revisions.
+- `target_kind` MUST be `entry` or `experience`, and `target_id` MUST resolve through LLD-01/catalog records.
+- Entry `target_revision_at_event` records what the user was looking at; current entry mark state follows stable `entry_id` across later revisions. Experience marks follow stable Experience identity as more entries are attached.
 - `note` is optional and MUST represent user-provided/confirmed preference text; the model MUST NOT silently write its own assessment as if the user said it.
 - `question_refs` is optional and only records explicit association requested/confirmed by the user.
-- events are append-only; current state is latest valid event per `entry_id`.
+- events are append-only; current state is latest valid event per `(target_kind, target_id)`.
 - the single-writer vault rule from LLD-01 applies. A mark/unmark is acknowledged only after its JSONL record is durably flushed; a malformed final partial record may be recovered using the same trailing-record principle as other append-only local sources, while corruption in the middle of the file fails visibly.
 
 ### 9.4 Mark commands
@@ -377,12 +382,18 @@ Rules:
 Model-facing/application operations:
 
 ```text
-mark_interview_candidate(entry_ref, note?, question_refs?)
-unmark_interview_candidate(entry_id)
+mark_interview_candidate(target_kind, target_id, note?, question_refs?)
+unmark_interview_candidate(target_kind, target_id)
 list_interview_candidates()
+associate_entry_experience(entry_id, experience_id | experience_name, move?, remove?)
 ```
 
-The model MAY suggest marking an entry, but persistence requires explicit user intent such as “mark this,” “this is a good interview example,” or equivalent. A model's private belief that an entry looks strong MUST NOT create a user mark automatically.
+The model MAY suggest marking an entry or Experience, but persistence requires
+explicit user intent such as “mark this,” “this is a good interview example,”
+or equivalent. A model's private belief that an entry or Experience looks
+strong MUST NOT create a user mark automatically. Historical entries can be
+associated later through an immutable metadata-only SessionEntry revision;
+previous revisions remain readable and the association does not copy facts.
 
 ## 10. Automatic Career Annotation Extension Boundary
 
@@ -584,7 +595,7 @@ Question lookup and mark persistence require no conversational-model call.
 | LLD-03 retrieval degraded | preserve degraded/incomplete semantics in Career workflow |
 | cursor expired | rerun search from first page and state that the result set refreshed |
 | candidate-mark append fails | do not claim the mark was saved; SessionEntry remains unaffected |
-| marked entry later deleted | mark becomes orphaned diagnostic until explicitly removed/archived; never retarget automatically |
+| marked entry/Experience later deleted or missing | mark becomes an orphaned diagnostic until explicitly removed/archived; never retarget automatically |
 | question edited and old QuestionRef no longer resolves | return `question_not_found`; do not substitute a similar question |
 
 ## 19. Privacy and Publication Boundaries
@@ -632,8 +643,8 @@ Authoritative access patterns:
 
 ```text
 append mark/unmark event
-get current mark for entry_id
-list current marked entry_ids
+get current mark for target_kind + target_id
+list current marked targets
 ```
 
 The JSONL event file is expected to remain tiny. V1 may scan it on process start and maintain an in-memory current-state map. A SQLite cache MAY be added later only if measurements justify it; it would be derived and rebuildable from `marks.jsonl`.

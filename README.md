@@ -315,6 +315,14 @@ work-brain evidence search --query "changed direction after new evidence" \
   --filters '{"domain_tags":["engineering"],"has_outcome":true}'
 ```
 
+For time/project/workspace/Experience views that do not need text search, use
+the deterministic filter-only selector:
+
+```bash
+work-brain evidence select \
+  --filters '{"occurred_after":"2026-10-01","projects":["Auth"]}'
+```
+
 Results are bounded EvidenceCards with stable `{entry_id, revision}` refs and
 an opaque continuation cursor. Hydrate at most four selected refs from the
 authoritative source entry:
@@ -440,12 +448,14 @@ work-brain --vault "$HOME/work-brain-vault" career mock \
 
 Candidate marks are explicit private preferences, not evidence or model
 judgments. The Skill may suggest one, but the application requires explicit
-user intent before saving it; marks follow the stable entry ID across later
-revisions:
+user intent before saving it; marks can target either a stable Experience or
+an individual entry:
 
 ```bash
 work-brain --vault "$HOME/work-brain-vault" career candidates mark \
   --entry-id ENTRY_ID --note "Use the trade-off angle"
+work-brain --vault "$HOME/work-brain-vault" career candidates mark \
+  --experience-id EXPERIENCE_ID --note "Use the recovery angle"
 work-brain --vault "$HOME/work-brain-vault" career candidates list
 work-brain --vault "$HOME/work-brain-vault" career candidates unmark --entry-id ENTRY_ID
 ```

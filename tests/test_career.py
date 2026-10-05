@@ -62,7 +62,7 @@ class CareerTests(unittest.TestCase):
         result = service.search_questions(filters=QuestionFilters.from_values(tags_all=["conflict"]))
         self.assertEqual(1, len(result["questions"]))
         self.assertEqual([], self.vault.all_current_entries())
-        self.assertEqual({"search_questions", "get_question", "choose_question", "search_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "mark_interview_candidate", "unmark_interview_candidate", "list_interview_candidates"}, {item.name for item in ToolRegistry(self.vault).definitions("career")})
+        self.assertEqual({"search_questions", "get_question", "choose_question", "search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "mark_interview_candidate", "unmark_interview_candidate", "list_interview_candidates", "associate_entry_experience"}, {item.name for item in ToolRegistry(self.vault).definitions("career")})
 
     def test_prepare_pages_evidence_but_mock_does_not_reveal_it(self) -> None:
         session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00")
@@ -120,6 +120,25 @@ class CareerTests(unittest.TestCase):
         self.assertFalse(candidate["evidence_signals"]["outcomes"])
         self.assertEqual([], prepared["ungrouped_candidates"])
 
+    def test_prepare_paginates_unique_candidates_not_entry_hits(self) -> None:
+        first_experience = self.vault.upsert_entity(kind="experience", canonical_name="Migration architecture")
+        second_experience = self.vault.upsert_entity(kind="experience", canonical_name="Stakeholder influence")
+        for index, experience in enumerate((first_experience, first_experience, second_experience), 1):
+            session = self.vault.create_session(started_at=f"2026-09-{20 + index:02d}T10:00:00+01:00")
+            self.vault.append_turn(session["session_id"], "user", f"A disagreement example {index}.")
+            value = entry_payload(session, summary=f"A disagreement example {index}.")
+            value["entity_refs"] = [{"entity_id": experience["entity_id"], "relation": "experience"}]
+            self.vault.commit_entry(session["session_id"], value, refresh_projections=False)
+        self.vault.reconcile_database()
+        retriever = EvidenceRetriever(self.vault, LocalHashEmbeddingProvider())
+        retriever.reindex()
+        service = CareerService(self.vault, banks=[self.bank], retriever=retriever)
+        first = service.prepare(question_text="Tell me about a disagreement you resolved.", page_size=1)
+        second = service.prepare(question_text="Tell me about a disagreement you resolved.", page_size=1, cursor=first["evidence"]["next_cursor"])
+        self.assertEqual(1, len(first["candidates"]))
+        self.assertEqual(1, len(second["candidates"]))
+        self.assertNotEqual(first["candidates"][0].get("experience_id"), second["candidates"][0].get("experience_id"))
+
     def test_tool_cannot_create_mark_from_model_suggestion_alone(self) -> None:
         session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00")
         self.vault.append_turn(session["session_id"], "user", "A candidate story.")
@@ -130,6 +149,19 @@ class CareerTests(unittest.TestCase):
         self.assertIsNone(CareerService(self.vault).marks.get(entry.entry_id))
         accepted = registry.call("mark_interview_candidate", entry_id=entry.entry_id, note="I chose this story", explicit_user_intent=True)
         self.assertTrue(accepted.ok)
+
+    def test_experience_candidate_marks_use_stable_target_identity(self) -> None:
+        experience = self.vault.upsert_entity(kind="experience", canonical_name="Migration recovery")
+        service = CareerService(self.vault, banks=[self.bank])
+        marked = service.marks.mark(experience["entity_id"], target_kind="experience", note="Use the recovery angle.")
+        self.assertEqual("experience", marked["target_kind"])
+        self.assertEqual(experience["entity_id"], marked["target_id"])
+        self.assertNotIn("entry_revision_at_event", marked)
+        listed = service.marks.list()
+        self.assertFalse(listed[0]["orphaned"])
+        removed = service.marks.unmark(experience["entity_id"], target_kind="experience")
+        self.assertEqual("experience", removed["target_kind"])
+        self.assertEqual([], service.marks.list())
 
     def test_cli_can_query_a_configured_bank(self) -> None:
         from work_brain.cli import main

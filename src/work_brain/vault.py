@@ -5,6 +5,7 @@ import json
 import sqlite3
 import subprocess
 import shutil
+import sysconfig
 import threading
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
@@ -45,7 +46,9 @@ class Vault:
     ):
         self.root = Path(root).expanduser().resolve()
         default_migrations = Path(__file__).resolve().parents[2] / "migrations"
-        self.migration_dir = Path(migration_dir).resolve() if migration_dir else default_migrations
+        installed_migrations = Path(sysconfig.get_path("data")) / "share/work-brain/migrations"
+        selected_migrations = default_migrations if default_migrations.is_dir() else installed_migrations
+        self.migration_dir = Path(migration_dir).resolve() if migration_dir else selected_migrations
         self._thread_lock = threading.RLock()
         self._lock_depth = 0
         self._file_lock: VaultLock | None = None
@@ -522,13 +525,13 @@ class Vault:
             raw["domain_tags"] = merged
             return self._publish_metadata_backfill(current, raw)
 
-    def _publish_metadata_backfill(self, current: SessionEntry, raw: dict[str, Any]) -> SessionEntry:
+    def _publish_metadata_backfill(self, current: SessionEntry, raw: dict[str, Any], *, reason: str = "metadata_backfill") -> SessionEntry:
         raw.update({
             "revision": current.revision + 1,
             "commit_id": new_uuid7(),
             "created_at": timestamp_now(),
             "supersedes_revision": current.revision,
-            "revision_reason": "metadata_backfill",
+            "revision_reason": reason,
         })
         refs = list(raw.get("source_refs", []))
         previous_ref = {"kind": "entry", "id": current.entry_id, "revision": current.revision}
@@ -536,6 +539,89 @@ class Vault:
             refs.append(previous_ref)
         raw["source_refs"] = refs
         return self.commit_entry(current.session_id, raw)
+
+    def associate_entry_experience(
+        self,
+        entry_id: str,
+        *,
+        experience_id: str | None = None,
+        experience_name: str | None = None,
+        remove: bool = False,
+        move: bool = False,
+    ) -> SessionEntry:
+        """Publish an immutable metadata revision for an Experience link."""
+        with self._require_or_lock():
+            current = self.get_current_entry(entry_id)
+            existing_ids = [ref["entity_id"] for ref in current.entity_refs if ref["relation"] == "experience"]
+            if remove:
+                if experience_id is not None or experience_name is not None:
+                    raise ValidationError("remove cannot specify an Experience target")
+                target_id = None
+            else:
+                if experience_id and experience_name:
+                    raise ValidationError("specify experience_id or experience_name, not both")
+                if experience_id is None and not experience_name:
+                    raise ValidationError("an Experience target is required unless remove=true")
+                target_id = self._resolve_experience_entity(experience_id, experience_name)
+                if target_id in existing_ids and len(existing_ids) == 1:
+                    return current
+                if existing_ids and not move:
+                    raise ValidationError("entry already belongs to an Experience; use move=true to replace it")
+                self._validate_experience_context(target_id, current)
+            refs = [ref for ref in current.entity_refs if ref["relation"] != "experience"]
+            if target_id is not None:
+                refs.append({"entity_id": target_id, "relation": "experience"})
+            if refs == current.entity_refs:
+                return current
+            raw = current.to_dict()
+            raw["entity_refs"] = refs
+            return self._publish_metadata_backfill(current, raw)
+
+    def _resolve_experience_entity(self, entity_id: str | None, name: str | None) -> str:
+        if entity_id is not None:
+            entity_id = validate_uuid7(entity_id, "experience_id")
+            path = self.root / "catalog/entities" / f"{entity_id}.json"
+            if not path.exists():
+                raise FileNotFoundError(f"experience not found: {entity_id}")
+            if read_json(path).get("kind") != "experience":
+                raise ValidationError("entity is not an experience")
+            return entity_id
+        if not isinstance(name, str) or not name.strip():
+            raise ValidationError("experience_name must be a non-empty string")
+        return self._resolve_context_entity("experience", name.strip())
+
+    def _validate_experience_context(self, experience_id: str, incoming: SessionEntry) -> None:
+        self.validate_experience_context(
+            [experience_id], incoming.workspace_entity_id, incoming.project_entity_id,
+            excluding_entry_id=incoming.entry_id,
+        )
+
+    def validate_experience_context(
+        self,
+        experience_ids: list[str],
+        workspace_entity_id: str | None,
+        project_entity_id: str | None,
+        *,
+        excluding_entry_id: str | None = None,
+    ) -> None:
+        """Reject mixed workspace/project contexts for an Experience link."""
+        incoming_context = (workspace_entity_id, project_entity_id)
+        for experience_id in experience_ids:
+            linked = [
+                entry for entry in self.all_current_entries()
+                if entry.entry_id != excluding_entry_id and any(
+                    ref["relation"] == "experience" and ref["entity_id"] == experience_id for ref in entry.entity_refs
+                )
+            ]
+            contexts = {(entry.workspace_entity_id, entry.project_entity_id) for entry in linked}
+            if len(contexts) > 1:
+                raise IntegrityError(f"experience has conflicting workspace/project context: {experience_id}")
+            if contexts and next(iter(contexts)) != incoming_context:
+                established = next(iter(contexts))
+                raise ValidationError(
+                    "entry workspace/project does not match the Experience context "
+                    f"({established[0]}, {established[1]})"
+                )
 
     def _resolve_context_entity(self, kind: str, value: str | Mapping[str, Any] | None) -> str | None:
         if value is None:

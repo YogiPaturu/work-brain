@@ -109,6 +109,7 @@ state current
 work recent
 work loops
 evidence search
+evidence select
 evidence get
 commit-draft
 recoverable

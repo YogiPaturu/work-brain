@@ -337,6 +337,11 @@ class CommitResolver:
             entity_creations.append(project_creation)
             catalog.append(self._creation_as_catalog(project_creation))
         artifact_refs, artifact_creations = self._plan_artifacts(draft.artifact_candidates)
+        self.vault.validate_experience_context(
+            [ref["entity_id"] for ref in entity_refs if ref["relation"] == "experience"],
+            workspace_entity_id,
+            project_entity_id,
+        )
         payload = {
             "entry_id": session["entry_id"], "session_id": session_id, "revision": revision, "commit_id": new_uuid7(),
             "created_at": timestamp_now(), "supersedes_revision": revision - 1 if revision > 1 else None,
@@ -400,8 +405,13 @@ class CommitResolver:
                 matches = [item for item in catalog if item["entity_id"] == entity_id]
                 if not matches:
                     raise ValidationError(f"entity does not exist: {entity_id}")
-                if candidate.get("kind") is not None and matches[0]["kind"] != candidate["kind"]:
+                actual_kind = matches[0]["kind"]
+                if candidate.get("kind") is not None and actual_kind != candidate["kind"]:
                     raise ValidationError(f"entity {entity_id} is not a {candidate['kind']}")
+                if candidate["relation"] == "experience" and actual_kind != "experience":
+                    raise ValidationError("relation=experience requires an experience entity")
+                if actual_kind == "experience" and candidate["relation"] != "experience":
+                    raise ValidationError("experience entities must use relation=experience")
             else:
                 key = SkillLoader.normalize_token(candidate["canonical_name"])
                 matches = [item for item in catalog if item["kind"] == candidate["kind"] and

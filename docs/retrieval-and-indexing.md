@@ -16,6 +16,7 @@ get_current_state
 get_recent_work
 get_open_loops
 search_evidence
+select_evidence
 hydrate_evidence
 ```
 
@@ -51,6 +52,14 @@ Search results MUST be bounded pages with opaque continuation, stable source
 references, and explicit degraded/incomplete/index-state semantics. Hydration
 MUST resolve stable references against authoritative source and MUST NOT expose
 internal SQLite paths, vectors, prompts, or raw model reasoning as evidence.
+
+`search_evidence(query, filters, page_size, cursor)` is search-oriented and
+requires non-empty query text. `select_evidence(filters, page_size, cursor)` is
+the deterministic filter-only companion for time, workspace, project,
+Experience, domain-tag, provenance, and outcome scopes. Both operations share
+the same eligibility, pagination, and bounded EvidenceCard construction. A
+filter-only page is ordered by reverse chronological occurrence with a stable
+entry-ID tie-breaker and never substitutes placeholder query text.
 
 ## 4. Implementation plan
 

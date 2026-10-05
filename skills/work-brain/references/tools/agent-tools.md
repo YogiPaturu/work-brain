@@ -9,6 +9,7 @@ commands through the harness's existing shell capability:
 - `get_close_day_record` for target-day committed entries, committed entries
   missing from their journal projection, and every uncommitted raw session
 - `search_evidence`
+- `select_evidence` for bounded filter-only selection without a text query
 - `hydrate_evidence`
 - `search_experiences`
 - `get_experience`
@@ -19,6 +20,7 @@ commands through the harness's existing shell capability:
 - `mark_interview_candidate` only after explicit user confirmation
 - `unmark_interview_candidate` only after explicit user confirmation
 - `list_interview_candidates`
+- `associate_entry_experience` for explicit post-hoc Experience association
 - `commit-draft` through stdin or a bounded file during the committing phase
 - `session status` for read-only capture health and lifecycle inspection
 - `status` for the auto-detected lifecycle dashboard at Work Brain boundaries
@@ -65,6 +67,7 @@ For example, the host may execute:
 work-brain state current
 work-brain work recent --limit 5
 work-brain evidence search --query "import reliability" --page-size 10
+work-brain evidence select --filters '{"occurred_after":"2026-10-01","projects":["Auth"]}'
 work-brain experience search --query "influenced a decision" --page-size 8
 work-brain experience list --limit 8
 work-brain career questions search --tag-all conflict
@@ -94,9 +97,11 @@ Question banks are separate from professional evidence. `prepare` aggregates
 ranked EvidenceCards into bounded source-backed Experience candidates and also
 preserves relevant ungrouped entries as single-entry candidates. `mock` asks
 the question first and does not reveal evidence suggestions before the answer.
-The user chooses the story/angle. Candidate marks are private preference
-events and require explicit confirmation; a model suggestion alone must never
-persist one.
+The user chooses the story/angle. Candidate marks are private preference events
+over either a stable Experience or an individual entry and require explicit
+confirmation; a model suggestion alone must never persist one. Experience
+association is optional and can be added later with `experience associate`; it
+publishes metadata revisions without rewriting older evidence.
 
 The existing `ToolRegistry` and bounded standalone model/tool loop remain
 available for provider-free tests and future standalone mode. They are not a

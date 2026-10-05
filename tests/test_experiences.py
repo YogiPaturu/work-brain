@@ -91,6 +91,36 @@ class ExperienceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "must belong"):
             service.hydrate(self.architecture["entity_id"], refs=[{"entry_id": entry.entry_id, "revision": 2}])
 
+    def test_post_hoc_association_publishes_metadata_revision_and_preserves_old_revision(self) -> None:
+        session = self.vault.create_session(started_at="2026-10-04T10:00:00+01:00")
+        self.vault.append_turn(session["session_id"], "user", "This was an ungrouped decision.")
+        raw = payload(session, workspace_id=self.workspace["entity_id"], project_id=self.project["entity_id"], experience_id=self.architecture["entity_id"], title="Ungrouped", summary="Ungrouped", started_at="2026-10-04T10:00:00+01:00", tags=["engineering"])
+        raw["entity_refs"] = []
+        entry = self.vault.commit_entry(
+            session["session_id"],
+            raw,
+            refresh_projections=False,
+        )
+        updated = ExperienceService(self.vault).associate(entry.entry_id, experience_id=self.architecture["entity_id"])
+        self.assertEqual(2, updated["revision"])
+        revisions = [item for item, _ in self.vault.all_entry_revisions() if item.entry_id == entry.entry_id]
+        self.assertEqual([1, 2], [item.revision for item in revisions])
+        self.assertEqual([], revisions[0].entity_refs)
+        self.assertEqual([{"entity_id": self.architecture["entity_id"], "relation": "experience"}], revisions[1].entity_refs)
+        self.assertEqual("metadata_backfill", revisions[1].revision_reason)
+
+    def test_post_hoc_association_rejects_mixed_project_context(self) -> None:
+        other_project = self.vault.upsert_entity(kind="project", canonical_name="Search")
+        first = self._commit("2026-10-01T10:00:00+01:00", self.architecture, title="First", tags=["architecture"])
+        session = self.vault.create_session(started_at="2026-10-02T10:00:00+01:00")
+        self.vault.append_turn(session["session_id"], "user", "A different project entry.")
+        second_payload = payload(session, workspace_id=self.workspace["entity_id"], project_id=other_project["entity_id"], experience_id=self.architecture["entity_id"], title="Second", summary="Second", started_at="2026-10-02T10:00:00+01:00", tags=["architecture"])
+        second_payload["entity_refs"] = []
+        second = self.vault.commit_entry(session["session_id"], second_payload, refresh_projections=False)
+        with self.assertRaisesRegex(ValidationError, "does not match"):
+            ExperienceService(self.vault).associate(second.entry_id, experience_id=self.architecture["entity_id"])
+        self.assertEqual([], self.vault.get_current_entry(second.entry_id).entity_refs)
+
     def test_cli_lists_experiences_as_machine_readable_cards(self) -> None:
         self._commit("2026-10-01T10:00:00+01:00", self.architecture, title="Architecture", tags=["architecture"])
         from work_brain.cli import main

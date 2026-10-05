@@ -47,6 +47,7 @@ jobs:
           with zipfile.ZipFile(wheel) as archive:
               names = set(archive.namelist())
           required_suffixes = (
+              '/share/work-brain/migrations/006_experience_reverse_lookup.sql',
               '/share/work-brain/skills/work-brain/references/domain-tags.md',
               '/share/work-brain/skills/work-brain/references/schemas/commit-draft.md',
           )

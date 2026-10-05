@@ -330,9 +330,9 @@ def _cursor_decode(value: str) -> dict[str, Any]:
         padded = value + "=" * (-len(value) % 4)
         decoded = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
     except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValidationError("cursor must be an opaque continuation returned by search_evidence") from exc
+        raise ValidationError("cursor must be an opaque continuation returned by evidence retrieval") from exc
     if not isinstance(decoded, dict):
-        raise ValidationError("cursor must be an opaque continuation returned by search_evidence")
+        raise ValidationError("cursor must be an opaque continuation returned by evidence retrieval")
     return decoded
 
 
@@ -619,8 +619,73 @@ class EvidenceRetriever:
         except Exception:
             return RetrievalHealth("failed", 0, False, False, "")
 
+    @staticmethod
+    def _validate_page(page_size: int) -> None:
+        if not isinstance(page_size, int) or not 1 <= page_size <= MAX_PAGE_SIZE:
+            raise ValidationError(f"page_size must be between 1 and {MAX_PAGE_SIZE}")
+
+    def _entry_card(
+        self,
+        conn: Any,
+        entry_id: str,
+        rows: Mapping[str, Any],
+        *,
+        match: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        row = rows[entry_id]
+        match = match or {}
+        entry = self.vault.get_current_entry(entry_id)
+        workspace = None
+        if entry.workspace_entity_id is not None:
+            workspace_value = read_json(self.vault.root / "catalog/entities" / f"{entry.workspace_entity_id}.json")
+            workspace = {"entity_id": workspace_value["entity_id"], "kind": workspace_value["kind"], "name": workspace_value["canonical_name"]}
+        entities = []
+        experiences = []
+        for ref in entry.entity_refs:
+            entity = read_json(self.vault.root / "catalog/entities" / f"{ref['entity_id']}.json")
+            entities.append({"entity_id": entity["entity_id"], "kind": entity["kind"], "name": entity["canonical_name"]})
+            if ref["relation"] == "experience" and entity["kind"] == "experience":
+                experiences.append({"entity_id": entity["entity_id"], "name": entity["canonical_name"]})
+        project = None
+        if entry.project_entity_id is not None:
+            project_value = read_json(self.vault.root / "catalog/entities" / f"{entry.project_entity_id}.json")
+            project = {"entity_id": project_value["entity_id"], "kind": project_value["kind"], "name": project_value["canonical_name"]}
+        snippets = []
+        for value in match.get("snippets", []):
+            if value not in snippets:
+                snippets.append(value)
+        return {
+            "ref": {"entry_id": entry_id, "revision": row["source_revision"]},
+            "title": row["title"], "when": entry.occurrence.to_dict(), "summary": row["summary"],
+            "provenance_kind": row["provenance_kind"], "modes": entry.modes, "domain_tags": entry.domain_tags,
+            "workspace": workspace, "project": project, "entities": entities, "experiences": experiences,
+            "match": {
+                "signals": list(match.get("signals", [])),
+                "sections": list(dict.fromkeys(match.get("sections", [])))[:3],
+                "snippets": snippets[:2],
+            },
+            "flags": {"has_outcome": bool(row["has_outcome"]), "has_open_questions": bool(row["has_open_questions"])},
+        }
+
+    def _cards_for_ids(
+        self,
+        conn: Any,
+        entry_ids: Iterable[str],
+        *,
+        matches: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        ids = list(entry_ids)
+        if not ids:
+            return []
+        placeholders = ",".join("?" * len(ids))
+        rows = {row["entry_id"]: row for row in conn.execute(
+            f"SELECT * FROM retrieval_entries WHERE entry_id IN ({placeholders})", tuple(ids)
+        )}
+        matches = matches or {}
+        return [self._entry_card(conn, entry_id, rows, match=matches.get(entry_id)) for entry_id in ids if entry_id in rows]
+
     def _eligible(self, conn: Any, filters: Mapping[str, Any]) -> set[str]:
-        allowed = {"occurred_after", "occurred_before", "entities", "workspaces", "projects", "experiences", "domain_tags", "modes", "provenance_kind", "has_outcome"}
+        allowed = {"occurred_after", "occurred_before", "entities", "workspaces", "projects", "experiences", "domain_tags", "modes", "provenance_kind", "provenance", "has_outcome"}
         unknown = sorted(set(filters) - allowed)
         if unknown:
             raise ValidationError(f"unknown evidence filter: {unknown[0]}")
@@ -634,11 +699,12 @@ class EvidenceRetriever:
         if before is not None:
             clauses.append("r.occurrence_start_ms < ?")
             params.append(before)
-        if filters.get("provenance_kind") is not None:
-            if filters["provenance_kind"] not in {"contemporaneous", "reconstructed"}:
+        provenance = filters.get("provenance", filters.get("provenance_kind"))
+        if provenance is not None:
+            if provenance not in {"contemporaneous", "reconstructed"}:
                 raise ValidationError("provenance_kind must be contemporaneous or reconstructed")
             clauses.append("r.provenance_kind = ?")
-            params.append(filters["provenance_kind"])
+            params.append(provenance)
         if filters.get("has_outcome") is not None:
             if not isinstance(filters["has_outcome"], bool):
                 raise ValidationError("has_outcome must be a boolean")
@@ -820,8 +886,7 @@ class EvidenceRetriever:
     def search(self, query: str, *, filters: Mapping[str, Any] | None = None, page_size: int = DEFAULT_PAGE_SIZE, cursor: str | None = None) -> dict[str, Any]:
         if not isinstance(query, str) or not 1 <= len(_normalize_text(query).strip()) <= MAX_QUERY_CHARS:
             raise ValidationError("query must be between 1 and 1000 characters")
-        if not isinstance(page_size, int) or not 1 <= page_size <= MAX_PAGE_SIZE:
-            raise ValidationError(f"page_size must be between 1 and {MAX_PAGE_SIZE}")
+        self._validate_page(page_size)
         normalized_filters = dict(filters or {})
         health = self._ensure_current()
         embedding = self.embedding_status(health)
@@ -871,41 +936,77 @@ class EvidenceRetriever:
                 return (-rrf, -(1 if entry_id in lexical_rank and entry_id in semantic_rank else 0), min(lexical_rank.get(entry_id, 10**9), semantic_rank.get(entry_id, 10**9)), entry_id)
             ordered = sorted(candidates, key=sort_key)
             page_ids = ordered[offset:offset + page_size]
-            rows = {row["entry_id"]: row for row in conn.execute("SELECT * FROM retrieval_entries")}
-            cards = []
+            matches: dict[str, dict[str, Any]] = {}
             for entry_id in page_ids:
-                row = rows[entry_id]
                 match = {
                     "snippets": list(lexical.get(entry_id, {}).get("snippets", [])) + list(semantic.get(entry_id, {}).get("snippets", [])),
                     "sections": list(lexical.get(entry_id, {}).get("sections", [])) + list(semantic.get(entry_id, {}).get("sections", [])),
                 }
                 signals = [signal for signal, branch in (("lexical", lexical), ("semantic", semantic)) if entry_id in branch]
-                snippets = []
-                for value in match.get("snippets", []):
-                    if value not in snippets:
-                        snippets.append(value)
-                entry = self.vault.get_current_entry(entry_id)
-                workspace = None
-                if entry.workspace_entity_id is not None:
-                    workspace_value = read_json(self.vault.root / "catalog/entities" / f"{entry.workspace_entity_id}.json")
-                    workspace = {"entity_id": workspace_value["entity_id"], "kind": workspace_value["kind"], "name": workspace_value["canonical_name"]}
-                entities = []
-                experiences = []
-                for ref in entry.entity_refs:
-                    entity = read_json(self.vault.root / "catalog/entities" / f"{ref['entity_id']}.json")
-                    entities.append({"entity_id": entity["entity_id"], "kind": entity["kind"], "name": entity["canonical_name"]})
-                    if ref["relation"] == "experience" and entity["kind"] == "experience":
-                        experiences.append({"entity_id": entity["entity_id"], "name": entity["canonical_name"]})
-                project = None
-                if entry.project_entity_id is not None:
-                    project_value = read_json(self.vault.root / "catalog/entities" / f"{entry.project_entity_id}.json")
-                    project = {"entity_id": project_value["entity_id"], "kind": project_value["kind"], "name": project_value["canonical_name"]}
-                cards.append({"ref": {"entry_id": entry_id, "revision": row["source_revision"]}, "title": row["title"], "when": entry.occurrence.to_dict(), "summary": row["summary"], "provenance_kind": row["provenance_kind"], "modes": entry.modes, "domain_tags": entry.domain_tags, "workspace": workspace, "project": project, "entities": entities, "experiences": experiences, "match": {"signals": signals, "sections": list(dict.fromkeys(match["sections"]))[:3], "snippets": snippets[:2]}, "flags": {"has_outcome": bool(row["has_outcome"]), "has_open_questions": bool(row["has_open_questions"])}})
+                match["signals"] = signals
+                matches[entry_id] = match
+            cards = self._cards_for_ids(conn, page_ids, matches=matches)
             next_cursor = None
             if offset + page_size < len(ordered):
                 next_cursor = _cursor_encode({"fingerprint": fingerprint, "generation": generation, "offset": offset + page_size})
             status = "degraded" if degraded else "ok"
             return {"status": status, "degraded_components": sorted(set(degraded)), "incomplete": health.stale_entries > 0, "omitted_stale_entries": health.stale_entries, "cards": cards, "next_cursor": next_cursor, "embedding": embedding}
+        finally:
+            conn.close()
+
+    def select_evidence(
+        self,
+        *,
+        filters: Mapping[str, Any] | None = None,
+        page_size: int = DEFAULT_PAGE_SIZE,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Select bounded evidence by metadata filters without a search query."""
+        self._validate_page(page_size)
+        normalized_filters = dict(filters or {})
+        health = self._ensure_current()
+        embedding = self.embedding_status(health)
+        try:
+            conn = self._db().connect()
+        except Exception as exc:
+            return {
+                "status": "retrieval_unavailable", "degraded_components": ["index"], "incomplete": True,
+                "omitted_stale_entries": 0, "cards": [], "next_cursor": None, "embedding": embedding,
+                "error": str(exc),
+            }
+        try:
+            try:
+                eligible = self._eligible(conn, normalized_filters)
+            except AmbiguousFilter as exc:
+                return {"status": "ambiguous_filter", "degraded_components": [], "incomplete": health.stale_entries > 0,
+                        "omitted_stale_entries": health.stale_entries, "cards": [], "next_cursor": None,
+                        "error": {"value": exc.value, "candidates": exc.candidates}, "embedding": embedding}
+            fingerprint = hashlib.sha256(canonical_json_bytes({"mode": "select", "filters": normalized_filters, "page_size": page_size})).hexdigest()
+            offset = 0
+            if cursor:
+                decoded = _cursor_decode(cursor)
+                if decoded.get("fingerprint") != fingerprint or decoded.get("generation") != health.generation:
+                    return {"status": "cursor_expired", "degraded_components": [], "incomplete": health.stale_entries > 0,
+                            "omitted_stale_entries": health.stale_entries, "cards": [], "next_cursor": None, "embedding": embedding}
+                offset = int(decoded.get("offset", 0))
+            if not eligible:
+                ordered: list[str] = []
+            else:
+                placeholders = ",".join("?" * len(eligible))
+                ordered = [row["entry_id"] for row in conn.execute(
+                    f"SELECT entry_id FROM retrieval_entries WHERE entry_id IN ({placeholders}) "
+                    "ORDER BY COALESCE(occurrence_start_ms, -1) DESC, entry_id DESC", tuple(sorted(eligible))
+                )]
+            page_ids = ordered[offset:offset + page_size]
+            matches = {entry_id: {"signals": ["filter"]} for entry_id in page_ids}
+            cards = self._cards_for_ids(conn, page_ids, matches=matches)
+            next_cursor = None
+            if offset + page_size < len(ordered):
+                next_cursor = _cursor_encode({"fingerprint": fingerprint, "generation": health.generation, "offset": offset + page_size})
+            degraded = ["index"] if health.index_state != "current" or health.stale_entries else []
+            return {"status": "degraded" if degraded else "ok", "degraded_components": degraded,
+                    "incomplete": bool(degraded), "omitted_stale_entries": health.stale_entries,
+                    "cards": cards, "next_cursor": next_cursor, "embedding": embedding}
         finally:
             conn.close()
 

@@ -41,6 +41,14 @@ warn_unused_ignores = true
 # Keep the authored layout intact when a wheel is installed by pipx so the
 # setup command can expose it to the selected host.
 [tool.setuptools.data-files]
+"share/work-brain/migrations" = [
+  "migrations/001_initial_domain.sql",
+  "migrations/002_retrieval.sql",
+  "migrations/003_project_context.sql",
+  "migrations/004_workspace_context.sql",
+  "migrations/005_domain_tags.sql",
+  "migrations/006_experience_reverse_lookup.sql",
+]
 "share/work-brain/skills/work-brain" = ["skills/work-brain/SKILL.md"]
 "share/work-brain/skills/work-brain/agents" = ["skills/work-brain/agents/openai.yaml"]
 "share/work-brain/skills/work-brain/references/probes" = [

@@ -74,10 +74,12 @@ class RetrievalTests(unittest.TestCase):
             EvidenceRetriever(vault, RevisionChangingProvider()).index_entry(session["entry_id"])
         self.assertEqual(2, vault.get_current_entry(session["entry_id"]).revision)
 
-    def _commit(self, title: str, summary: str) -> dict:
+    def _commit(self, title: str, summary: str, *, project_id: str | None = None) -> dict:
         session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00", modes=["think"], domain_tags=["engineering"])
         self.vault.append_turn(session["session_id"], "user", summary, recorded_at="2026-09-30T10:01:00+01:00")
-        self.vault.commit_entry(session["session_id"], payload(session, title=title, summary=summary))
+        value = payload(session, title=title, summary=summary)
+        value["project_entity_id"] = project_id
+        self.vault.commit_entry(session["session_id"], value)
         EvidenceRetriever(self.vault).reindex()
         return session
 
@@ -120,6 +122,18 @@ class RetrievalTests(unittest.TestCase):
         self.assertIsNone(second["next_cursor"])
         self.assertEqual("cursor_expired", retriever.search("import", page_size=1, cursor=first["next_cursor"], filters={"domain_tags": ["product"]})["status"])
 
+    def test_filter_only_selection_is_deterministic_and_pageable(self) -> None:
+        project = self.vault.upsert_entity(kind="project", canonical_name="Import boundary")
+        first_session = self._commit("Alpha import", "Alpha import investigation.", project_id=project["entity_id"])
+        second_session = self._commit("Beta import", "Beta import investigation.", project_id=project["entity_id"])
+        retriever = EvidenceRetriever(self.vault)
+        first = retriever.select_evidence(filters={"occurred_after": "2026-09-30", "projects": ["Import boundary"]}, page_size=1)
+        self.assertEqual("ok", first["status"])
+        self.assertEqual([second_session["entry_id"]], [card["ref"]["entry_id"] for card in first["cards"]])
+        self.assertIsNotNone(first["next_cursor"])
+        second = retriever.select_evidence(filters={"occurred_after": "2026-09-30", "projects": ["Import boundary"]}, page_size=1, cursor=first["next_cursor"])
+        self.assertEqual([first_session["entry_id"]], [card["ref"]["entry_id"] for card in second["cards"]])
+
     def test_experience_filter_uses_stable_entity_alias(self) -> None:
         experience = self.vault.upsert_entity(kind="experience", canonical_name="Auth migration", aliases=["auth"])
         session = self.vault.create_session(started_at="2026-09-30T10:00:00+01:00")
@@ -133,6 +147,11 @@ class RetrievalTests(unittest.TestCase):
         result = retriever.search("migration", filters={"experiences": ["auth"]})
         self.assertEqual([session["entry_id"]], [card["ref"]["entry_id"] for card in result["cards"]])
         self.assertEqual(experience["entity_id"], result["cards"][0]["experiences"][0]["entity_id"])
+
+    def test_experience_reverse_lookup_migration_is_applied_idempotently(self) -> None:
+        with closing(self.vault._database().connect()) as conn:
+            names = {row[1] for row in conn.execute("PRAGMA index_list('entry_entities')")}
+        self.assertIn("entry_entities_by_entity_relation", names)
 
     def test_reindex_is_idempotent_and_repairs_derived_damage(self) -> None:
         self._commit("Repair index", "The retrieval index can be rebuilt.")
