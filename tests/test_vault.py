@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from work_brain import IntegrityError, PersistenceError, Vault, new_uuid7
+from work_brain import IntegrityError, Vault, new_uuid7
 
 
 def entry_payload(session: dict, *, commit_id: str | None = None, reason: str = "initial_commit", revision: int = 1, supersedes: int | None = None) -> dict:
@@ -138,10 +138,12 @@ class VaultTests(unittest.TestCase):
         payload = entry_payload(self.session)
         original = self.vault.reconcile_database
         self.vault.reconcile_database = lambda: (_ for _ in ()).throw(RuntimeError("simulated SQLite failure"))
-        with self.assertRaises(PersistenceError):
-            self.vault.commit_entry(self.session["session_id"], payload)
+        entry = self.vault.commit_entry(self.session["session_id"], payload)
+        self.assertIsNotNone(entry.commit_id)
         self.vault.reconcile_database = original
         self.assertEqual(1, len(self.vault.all_entry_revisions()))
+        self.vault.rebuild_all()
+        self.assertEqual([], self.vault.doctor())
 
     def test_single_writer_lock(self) -> None:
         from work_brain.lock import VaultLock

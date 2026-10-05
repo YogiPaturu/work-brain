@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from typing import Any, Mapping
 import json
 
 from .domain import ENTRY_SECTIONS, ENTITY_KINDS, STATE_KINDS, MUTATION_OPS, Occurrence, Statement, normalize_domain_tags
 from .errors import IntegrityError, ValidationError
-from .fsutil import read_json
+from .fsutil import canonical_json_bytes, read_json
 from .ids import new_uuid7, validate_uuid7
 from .instructions import SkillLoader
 from .timeutil import timestamp_now
@@ -196,6 +197,16 @@ class CommitResolver:
         self.validator = validator or CommitDraftValidator()
 
     def publish(self, session_id: str, raw_draft: Mapping[str, Any], *, workflow: str, revision_reason: str = "initial_commit"):
+        return self._publish_source(session_id, raw_draft, workflow=workflow, revision_reason=revision_reason)
+
+    def publish_result(self, session_id: str, raw_draft: Mapping[str, Any], *, workflow: str, revision_reason: str = "initial_commit"):
+        """Publish source evidence and report rebuildable subsystem status."""
+        from .services import CommitPublicationResult, ProjectionMaintenance
+
+        entry = self._publish_source(session_id, raw_draft, workflow=workflow, revision_reason=revision_reason)
+        return CommitPublicationResult.from_entry(entry, ProjectionMaintenance(self.vault).after_source_commit(entry))
+
+    def _publish_source(self, session_id: str, raw_draft: Mapping[str, Any], *, workflow: str, revision_reason: str = "initial_commit"):
         session = self.vault.read_session(session_id)
         turns = self.vault.list_turns(session_id)
         draft = self.validator.validate(raw_draft, turn_count=len(turns), workflow=workflow)
@@ -244,7 +255,13 @@ class CommitResolver:
             "sections": draft.sections, "state_mutations": mutations, "entity_refs": entity_refs,
             "artifact_refs": artifact_refs, "source_refs": source_refs,
         }
-        return self.vault.commit_entry(session_id, payload)
+        fingerprint = hashlib.sha256(canonical_json_bytes({
+            "session_id": session_id,
+            "workflow": workflow,
+            "revision_reason": revision_reason,
+            "draft": raw_draft,
+        })).hexdigest()
+        return self.vault.commit_entry(session_id, payload, commit_fingerprint=fingerprint)
 
     @staticmethod
     def _require_user_authored_sources(draft: ValidatedDraft, turns: list[dict[str, Any]]) -> None:

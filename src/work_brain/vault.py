@@ -11,7 +11,7 @@ from typing import Any, Callable, Iterator, Mapping
 
 from .database import Database
 from .domain import SessionEntry, normalize_alias, normalize_domain_tags, validate_session
-from .errors import IntegrityError, PersistenceError, ValidationError
+from .errors import IntegrityError, ValidationError
 from .fsutil import (
     append_jsonl,
     atomic_create_bytes,
@@ -362,12 +362,36 @@ class Vault:
             return (self.root / "catalog/artifacts" / f"{object_id}.json").exists()
         return False
 
-    def commit_entry(self, session_id: str, payload: Mapping[str, Any]) -> SessionEntry:
+    def _best_effort_source_projections(self, *, affected_date: str | None = None) -> bool:
+        """Refresh rebuildable JSON/SQLite projections without changing source status."""
+        try:
+            self.rebuild_projections(affected_date=affected_date)
+            self.reconcile_database()
+            return True
+        except Exception:
+            return False
+
+    def commit_entry(
+        self,
+        session_id: str,
+        payload: Mapping[str, Any],
+        *,
+        commit_fingerprint: str | None = None,
+    ) -> SessionEntry:
+        """Publish one immutable source revision.
+
+        Source publication is the success boundary. Rebuildable projections
+        are refreshed afterward and can be repaired without turning a durable
+        commit into an exception.
+        """
         with self._require_or_lock():
             session = self.read_session(session_id)
             turns = self._read_turns(session_id)
             current_paths = self._entry_paths(session)
             current_revision = len(current_paths)
+            if commit_fingerprint and (session.get("runtime") or {}).get("last_commit_fingerprint") == commit_fingerprint:
+                if current_paths:
+                    return SessionEntry.from_dict(read_json(current_paths[-1]))
             raw = dict(payload)
             raw.setdefault("entry_id", session["entry_id"])
             raw.setdefault("session_id", session_id)
@@ -420,20 +444,20 @@ class Vault:
             target = self.session_dir(session_id) / "entries" / f"{entry.revision:04d}.json"
             atomic_create_bytes(target, canonical_json_bytes(entry.to_dict()))
             session["ended_at"] = timestamp_now()
+            runtime = dict(session.get("runtime") or {})
+            if commit_fingerprint:
+                runtime["last_commit_fingerprint"] = commit_fingerprint
+                runtime["commit_status"] = "committed"
+            session["runtime"] = runtime
             atomic_replace_json(self.session_dir(session_id) / "session.json", session)
+        self._best_effort_source_projections(affected_date=session["local_date"])
+        if self.entry_publish_hook is not None:
             try:
-                self.rebuild_projections(affected_date=session["local_date"])
-                self.reconcile_database()
-                # Source publication remains authoritative; retrieval is a
-                # rebuildable sibling projection.  Indexing happens only
-                # after the source and derived projections are durable.
-                from .retrieval import EvidenceRetriever
-                EvidenceRetriever(self).index_entry(entry.entry_id)
-                if self.entry_publish_hook is not None:
-                    self.entry_publish_hook(entry.entry_id)
-            except Exception as exc:
-                raise PersistenceError(f"source commit published but derived state is stale: {exc}") from exc
-            return entry
+                self.entry_publish_hook(entry.entry_id)
+            except Exception:
+                # Hooks are notifications, never part of the source commit.
+                pass
+        return entry
 
     def backfill_entry_context(
         self,
@@ -590,13 +614,7 @@ class Vault:
                 if amendment.get("source_session_id") == session_id or amendment.get("target", {}).get("id") in entry_ids:
                     amendment_path.unlink()
             shutil.rmtree(self.session_dir(session_id))
-            try:
-                self.rebuild_projections()
-                self.reconcile_database()
-                from .retrieval import EvidenceRetriever
-                EvidenceRetriever(self).reindex()
-            except Exception as exc:
-                raise PersistenceError(f"session deleted but derived state is stale: {exc}") from exc
+        self._best_effort_source_projections()
 
     def quarantine_entry(self, session_id: str, *, reason: str) -> None:
         """Hide a bad structured entry while preserving the session's raw turns."""
@@ -619,13 +637,7 @@ class Vault:
             runtime.update({"quarantine_status": "structured_entry", "quarantine_reason": reason.strip(), "quarantined_at": timestamp_now()})
             session["runtime"] = runtime
             atomic_replace_json(self.session_dir(session_id) / "session.json", session)
-            try:
-                self.rebuild_projections(affected_date=session["local_date"])
-                self.reconcile_database()
-                from .retrieval import EvidenceRetriever
-                EvidenceRetriever(self).reindex()
-            except Exception as exc:
-                raise PersistenceError(f"entry quarantined but derived state is stale: {exc}") from exc
+        self._best_effort_source_projections(affected_date=session["local_date"])
 
     def archive_session(self, session_id: str, *, reason: str) -> None:
         """Hide a closed session from active views while preserving all source data."""
@@ -645,13 +657,7 @@ class Vault:
             })
             session["runtime"] = runtime
             atomic_replace_json(self.session_dir(session_id) / "session.json", session)
-            try:
-                self.rebuild_projections()
-                self.reconcile_database()
-                from .retrieval import EvidenceRetriever
-                EvidenceRetriever(self).reindex()
-            except Exception as exc:
-                raise PersistenceError(f"session archived but derived state is stale: {exc}") from exc
+        self._best_effort_source_projections()
 
     def apply_amendment(self, amendment_id: str, payload: Mapping[str, Any] | None = None) -> SessionEntry:
         """Publish a new user-correction revision linked to an amendment."""
@@ -723,14 +729,8 @@ class Vault:
             value = {"entity_id": entity_id, "kind": kind, "canonical_name": canonical_name, "aliases": deduped,
                      "description": description, "created_at": created_at, "updated_at": now}
             atomic_replace_json(path, value)
-            try:
-                self.reconcile_database()
-                from .retrieval import EvidenceRetriever
-                EvidenceRetriever(self).reindex()
-                if self.dependency_change_hook is not None:
-                    self.dependency_change_hook("entity", entity_id)
-            except Exception as exc:
-                raise PersistenceError(f"entity published but SQLite is stale: {exc}") from exc
+            if self.dependency_change_hook is not None:
+                self.dependency_change_hook("entity", entity_id)
             return value
 
     def upsert_artifact(
@@ -758,14 +758,8 @@ class Vault:
             value = {"artifact_id": artifact_id, "kind": kind.lower(), "label": label, "locator": locator,
                      "external_id": external_id, "notes": notes, "created_at": created_at, "updated_at": now}
             atomic_replace_json(path, value)
-            try:
-                self.reconcile_database()
-                from .retrieval import EvidenceRetriever
-                EvidenceRetriever(self).reindex()
-                if self.dependency_change_hook is not None:
-                    self.dependency_change_hook("artifact", artifact_id)
-            except Exception as exc:
-                raise PersistenceError(f"artifact published but SQLite is stale: {exc}") from exc
+            if self.dependency_change_hook is not None:
+                self.dependency_change_hook("artifact", artifact_id)
             return value
 
     # ----- projections -----------------------------------------------------------
@@ -789,11 +783,6 @@ class Vault:
             self.initialize_projections()
             self.rebuild_projections()
             self.reconcile_database()
-            # Retrieval is a derived sibling projection.  Rebuild it only
-            # after source projections and the SQLite projection are
-            # complete, so a failed index never mutates authoritative files.
-            from .retrieval import EvidenceRetriever
-            EvidenceRetriever(self).reindex()
 
     # ----- SQLite persistence ----------------------------------------------------
 
@@ -952,11 +941,6 @@ class Vault:
                 conn.close()
         except Exception as exc:
             diagnostics.append(f"SQLite integrity error: {exc}")
-        try:
-            from .retrieval import EvidenceRetriever
-            diagnostics.extend(EvidenceRetriever(self).doctor())
-        except Exception as exc:
-            diagnostics.append(f"retrieval integrity error: {exc}")
         repo_root = None
         for parent in (self.root, *self.root.parents):
             try:

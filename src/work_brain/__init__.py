@@ -12,6 +12,7 @@ from .profiles import CommunicationProfile, CommunicationProfileStore, profiles_
 from .capture import CaptureEvent, HarnessCaptureService, normalize_capture_event
 from .setup import HarnessSetup
 from .retrieval import EvidenceRetriever, EvidenceRef, FastEmbedEmbeddingProvider, LocalHashEmbeddingProvider
+from .services import CommitPublicationResult, ProjectionMaintenance, ProjectionMaintenanceResult
 from .career import CareerCandidateMarkStore, CareerService, InterviewQuestion, MarkdownQuestionBankProvider, QuestionBank, QuestionFilters, QuestionRef
 
 __all__ = [
@@ -51,6 +52,9 @@ __all__ = [
     "EvidenceRef",
     "FastEmbedEmbeddingProvider",
     "LocalHashEmbeddingProvider",
+    "CommitPublicationResult",
+    "ProjectionMaintenance",
+    "ProjectionMaintenanceResult",
     "CareerCandidateMarkStore",
     "CareerService",
     "InterviewQuestion",

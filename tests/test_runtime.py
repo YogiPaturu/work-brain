@@ -169,6 +169,22 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual("committed", legacy_status["lifecycle"])
         self.assertEqual("committed", legacy_status["commit_status"])
 
+    def test_commit_result_distinguishes_source_success_from_projection_failure_and_is_idempotent(self) -> None:
+        session = self.vault.create_session(started_at="2026-10-01T16:40:00+01:00", modes=["think"])
+        self.vault.append_turn(session["session_id"], "user", "Keep the source commit durable.")
+        original = self.vault.reconcile_database
+        self.vault.reconcile_database = lambda: (_ for _ in ()).throw(RuntimeError("projection unavailable"))
+        first = CommitResolver(self.vault).publish_result(session["session_id"], draft(), workflow="think")
+        self.assertEqual("committed", first.source_status)
+        self.assertEqual("failed", first.maintenance.projection_status)
+        self.vault.reconcile_database = original
+        second = CommitResolver(self.vault).publish_result(session["session_id"], draft(), workflow="think")
+        self.assertEqual(first.entry_id, second.entry_id)
+        self.assertEqual(first.revision, second.revision)
+        self.assertEqual(1, len(self.vault.all_entry_revisions()))
+        self.vault.rebuild_all()
+        self.assertEqual([], self.vault.doctor())
+
     def test_model_tool_calls_execute_and_return_without_polluting_raw_turns(self) -> None:
         model = ScriptedModel(responses=[
             ModelResponse("", ({"id": "call-1", "name": "get_recent_work", "arguments": {"limit": 1}},)),

@@ -18,6 +18,7 @@ from .instructions import SkillLoader
 from .lifecycle import normalize_runtime
 from .setup import HarnessSetup
 from .retrieval import EvidenceRetriever
+from .services import CommitPublicationResult, ProjectionMaintenance
 from .profiles import CommunicationProfileStore, resolve_profiles_path, set_profiles_path
 from .timeutil import timestamp_now
 from .vault import Vault
@@ -713,11 +714,11 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         return service.mock(question=question, question_text=args.question_text, filters=_question_filters(args), seed=args.seed), True
     if command == "init":
         vault.initialize()
-        EvidenceRetriever(vault).reindex()
+        ProjectionMaintenance(vault).rebuild()
         return {"initialized": True, "vault": str(vault.root)}, machine
     if command == "rebuild":
-        vault.rebuild_all()
-        return {"rebuilt": True, "vault": str(vault.root)}, machine
+        retrieval = ProjectionMaintenance(vault).rebuild()
+        return {"rebuilt": True, "vault": str(vault.root), "retrieval": retrieval}, machine
     if command == "reindex":
         return EvidenceRetriever(vault).reindex(), True
     if command == "backfill-context":
@@ -756,14 +757,16 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         return HarnessCaptureService(vault).import_transcript(_read_transcript(args.file)), True
     if command == "commit":
         entry = vault.commit_entry(args.session_id, _read_payload(args.file))
+        maintenance = ProjectionMaintenance(vault).after_source_commit(entry)
         continuation = _finish_capture_after_commit(vault, args.session_id)
-        return {"entry_id": entry.entry_id, "revision": entry.revision, "commit_id": entry.commit_id, "capture": continuation}, True
+        result = CommitPublicationResult.from_entry(entry, maintenance)
+        return {**result.to_dict(), "capture": continuation}, True
     if command == "commit-draft":
         session = vault.read_session(args.session_id)
         workflow = args.workflow or (session.get("runtime") or {}).get("workflow") or "think"
-        entry = CommitResolver(vault).publish(args.session_id, _read_payload(args.file), workflow=workflow)
+        result = CommitResolver(vault).publish_result(args.session_id, _read_payload(args.file), workflow=workflow)
         continuation = _finish_capture_after_commit(vault, args.session_id, workflow)
-        return {"entry_id": entry.entry_id, "revision": entry.revision, "commit_id": entry.commit_id, "capture": continuation}, True
+        return {**result.to_dict(), "capture": continuation}, True
     if command == "skills":
         loaded = SkillLoader().load(args.workflow, args.domain_tag)
         return {"resources": loaded.identities, "missing": list(loaded.missing)}, True
