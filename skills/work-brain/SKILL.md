@@ -11,6 +11,8 @@ Use this Skill for bounded professional-thinking sessions over a private Work
 Brain vault. The application selects one workflow and loads only the core SOP,
 that workflow SOP, and up to two relevant domain probes. Select probes for the
 actual target (not keyword presence), and replace them when the target changes.
+The durable product model is conversation evidence grouped optionally into
+long-lived source-backed Experiences; calendar-day views are conveniences.
 
 ## Routing
 
@@ -61,8 +63,9 @@ only the CommitDraft shape when durable new evidence exists and let the
 application validate and publish it automatically. A close-day gap check may
 complete without a commit; capture deactivation is a separate lifecycle action.
 If the host/model disappears first, raw turns remain durable and the next live
-start-of-day boundary rolls them over and commits them when meaningful evidence
-exists.
+Work Brain activation rolls them over and commits them when meaningful evidence
+exists. The activation may be `think`, `operate`, `communicate`, `career`, or
+another workflow; it does not require `start my day`.
 “Finish this,” “that’s enough,” and “save this” may finish one bounded session
 while keeping capture active; “stop Work Brain” and “close my day” deactivate it.
 

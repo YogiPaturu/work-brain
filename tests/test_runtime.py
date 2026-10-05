@@ -456,6 +456,25 @@ class RuntimeTests(unittest.TestCase):
         self.assertIsNotNone(self.vault.read_session(old["session_id"])["ended_at"])
         self.assertIsNone(self.vault.read_session(current["session_id"])["ended_at"])
 
+    def test_non_day_activation_also_recovers_stale_capture(self) -> None:
+        capture = HarnessCaptureService(self.vault)
+        old = capture.handle(normalize_capture_event("codex", {
+            "event": "UserPromptSubmit", "session_id": "think-rollover-host",
+            "prompt": "work brain: capture the old architecture decision",
+            "recorded_at": "2026-09-29T10:00:00+01:00",
+        }))
+        capture.handle(normalize_capture_event("codex", {
+            "event": "SessionEnd", "session_id": "think-rollover-host",
+            "recorded_at": "2026-09-29T10:01:00+01:00",
+        }))
+        capture.rollover_stale_sessions(reference_at="2026-10-01T10:00:00+01:00")
+        orchestrator = SessionOrchestrator(self.vault, ScriptedModel(drafts=[draft()]))
+        current = orchestrator.start("think with me about the next decision", workflow="think", started_at="2026-10-01T10:00:00+01:00")
+        self.assertEqual("think", orchestrator.workflow)
+        self.assertEqual(old["session_id"], orchestrator.last_rollover_commits[0]["session_id"])
+        self.assertEqual(1, len(self.vault.all_current_entries()))
+        self.assertIsNone(self.vault.read_session(current["session_id"])["ended_at"])
+
     def test_next_live_start_commits_closed_pending_boundary_without_duplicate_source(self) -> None:
         capture = HarnessCaptureService(self.vault)
         old = capture.handle(normalize_capture_event("codex", {

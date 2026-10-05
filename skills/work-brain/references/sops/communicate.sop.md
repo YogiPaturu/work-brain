@@ -18,6 +18,8 @@ what the intended audience should receive.
 - **share_constraints** (optional): Facts, details, or topics that must or must not be shared.
 - **profile_id** (optional): A user-owned communication profile that supplies the channel, audience, scope, and format defaults.
 - **retrieved_evidence** (optional): Bounded relevant evidence from the private vault.
+- **evidence_scope** (optional): A composable scope such as time range, workspace,
+  project, Experience, domain tags, or current state.
 
 **Constraints for parameter acquisition:**
 
@@ -66,6 +68,9 @@ inference before using any detail in the draft.
 **Constraints:**
 
 - You MUST include only facts appropriate for the named audience and purpose.
+- Daily and weekly updates are time-filtered views, not journal-owned records.
+  Project and Experience updates may span many dates and must use the same
+  composable evidence selection capability.
 - You MUST label uncertainty or omit it rather than turning inference into fact.
 - You MUST NOT expose private vault paths, raw search mechanics, or unrelated personal context.
 - You SHOULD ask the user to approve an ambiguous sensitive detail before including it.

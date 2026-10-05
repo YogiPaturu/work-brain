@@ -37,7 +37,10 @@ retained for tests and future experiments, but it is not a v1 dependency.
 
 Authoritative source consists of session metadata, append-only raw turns,
 immutable `SessionEntry` revisions, amendments, and source catalog records.
-Journals, `state/current.json`, SQLite, FTS, chunks, and embeddings are
+Stable Experience identity is a catalog record; an Experience contains no
+second copy of professional facts. Its membership is derived from explicit
+`SessionEntry.entity_refs` with `relation=experience`. Journals,
+ExperienceCards, `state/current.json`, SQLite, FTS, chunks, and embeddings are
 rebuildable projections. Source publication is the success boundary: a
 projection or retrieval failure is reported independently and never makes a
 durably published entry look like an ordinary failed commit.
@@ -58,6 +61,18 @@ only the source store and do not open or migrate SQLite.
 
 Search is read-only with respect to maintenance: it returns explicit
 degraded/incomplete metadata and does not silently start a full reindex.
+
+The product model is longitudinal rather than calendar-owned:
+
+```text
+raw conversation -> SessionEntry evidence -> Experience aggregation -> generated views
+                                                   /        |        \
+                                           communication  career   journal/time views
+```
+
+Calendar day and week are retrieval filters. Daily journals and open/close-day
+workflows remain useful projections and compatibility conveniences, but no
+evidence durability, recovery, or Experience construction depends on them.
 
 Runtime lifecycle is represented as orthogonal capture, commit, and projection
 states. Legacy flat runtime keys remain readable, but lifecycle writes use

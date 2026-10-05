@@ -6,7 +6,9 @@ WORK-BRAIN-SOP-THINK v2
 
 Help the user reason through one coherent professional problem, decision, or
 belief. The goal is clearer judgment and a durable record of the reasoning, not
-debate for its own sake.
+debate for its own sake. When the conversation clearly continues or creates a
+long-lived professional Experience, the host may associate the resulting entry;
+classification remains optional and must not interrupt useful reasoning.
 
 ## Parameters
 

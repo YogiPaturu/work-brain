@@ -5,6 +5,20 @@ It helps you reason through decisions, recover current work state, prepare
 communication, and practice interviews while preserving the underlying
 conversation and structured evidence in a private vault.
 
+Its long-lived model is:
+
+```text
+useful conversation -> raw turns -> SessionEntry evidence -> Experience -> generated views
+                                                     /          |          \
+                                             communication   career      journals
+```
+
+An `Experience` is a stable, optional grouping over exact SessionEntry
+revisions. It can span days, weeks, or years, and one project can contain many
+Experiences. The evidence remains authoritative; Experience cards, journals,
+weekly updates, and interview candidates are derived views. `start my day` and
+`close my day` remain convenient optional workflows, not durability boundaries.
+
 ## Quick start
 
 For a user install, use `pipx` so the `work-brain` command is available on
@@ -175,8 +189,9 @@ There is no second Work Brain LLM call and no MCP server in v1.
   lifecycle including clean capture deactivation.
 - **Communicate:** turn private context into a concise audience-appropriate
   draft without exposing unrelated private evidence.
-- **Career:** retrieve multiple plausible experiences for interview practice and
-  let the human choose the story or angle.
+- **Career:** retrieve multiple source-backed Experiences for interview practice
+  and let the human choose the story or angle, including relevant ungrouped
+  historical evidence.
 - **Backfill:** reconstruct an older experience while marking it as
   `reconstructed`, not contemporaneous capture.
 
@@ -198,9 +213,10 @@ current work state, and retrieval projections. It also includes:
 - deterministic question-bank lookup, interview preparation, mock practice,
   evidence retrieval, and explicit candidate marks.
 
-The raw conversation and structured source entries remain authoritative.
-Journals, WorkState, SQLite, retrieval indexes, and career views are
-rebuildable projections.
+The raw conversation, structured SessionEntry revisions, amendments, and
+catalog identity records remain authoritative. Experience cards, journals,
+WorkState, SQLite, retrieval indexes, communication selections, and career
+views are rebuildable projections over that source.
 
 ## Install
 

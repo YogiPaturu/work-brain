@@ -4,9 +4,10 @@ WORK-BRAIN-SOP-OPEN-DAY v2
 
 ## Overview
 
-Orient the user to current work at the start of a day using compact state and
-recent committed work. This workflow helps the user choose focus; it does not
-silently create a plan or claim that yesterday’s work is complete.
+Orient the user to current work using compact state and recent committed work.
+This remains a convenient start-of-day view, not the product’s canonical unit.
+It helps the user choose focus; it does not silently create a plan or claim
+that yesterday’s work is complete.
 
 ## Parameters
 

@@ -48,6 +48,10 @@ work-brain work loops --limit 20
 work-brain evidence get --entry-id ENTRY_ID
 work-brain evidence search --query "import reliability" --page-size 10
 work-brain evidence hydrate < refs.json
+work-brain experience list --limit 8
+work-brain experience search --query "influenced the API decision" --page-size 8
+work-brain experience get --experience-id EXPERIENCE_ID
+work-brain experience hydrate --experience-id EXPERIENCE_ID
 work-brain recoverable
 work-brain status
 work-brain status --quiet
@@ -63,6 +67,13 @@ EvidenceCards with stable entry/revision refs and an opaque continuation
 cursor. Use `evidence hydrate` for selected refs and `reindex` for explicit
 retrieval maintenance. Search may report degraded or incomplete state; never
 describe an unavailable search as proof that no history exists.
+
+`experience list/search/get/hydrate` are bounded read operations over stable
+Experience entities and their linked SessionEntry revisions. An Experience is
+optional; unassigned entries remain available through `evidence search` and
+career preparation. Use `experiences` in evidence filters to scope a project,
+communication request, or interview search to one or more Experience IDs or
+aliases.
 
 ## Capture and mutation
 
@@ -98,9 +109,9 @@ that stored the same metadata under `domains`. It renames the key to
 evidence values, rebuilds all derived projections, and supports `--dry-run`.
 Run it before using the renamed filters or profile scopes on an older vault.
 
-Starting a new Work Brain session automatically rolls over inactive recoverable
+Starting any new activated Work Brain workflow automatically rolls over inactive recoverable
 sessions more than one calendar day old. It preserves their raw turns and marks
-them `pending_auto_commit`; the live start-of-day workflow publishes a summary
+them `pending_auto_commit`; the live workflow boundary publishes a summary
 when meaningful evidence exists, or closes them as `no_new_evidence`. A session
 from exactly yesterday is left alone for the midnight edge case, and an active
 host mapping is never silently closed.

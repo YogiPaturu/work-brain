@@ -4,9 +4,11 @@ WORK-BRAIN-SOP-BACKFILL v2
 
 ## Overview
 
-Reconstruct one historical professional experience with explicit uncertainty and
-`reconstructed` provenance. Preserve the distinction between what was known at
-the time, what is remembered now, and what hindsight suggests.
+Reconstruct one historical professional Experience with explicit uncertainty
+and `reconstructed` provenance. Preserve the distinction between what was known
+at the time, what is remembered now, and what hindsight suggests. Attach it to
+an existing stable Experience when the match is clear; create a new one when
+the historical story is distinct; leave it unassigned when uncertain.
 
 ## Parameters
 

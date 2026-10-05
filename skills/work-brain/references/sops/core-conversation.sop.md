@@ -7,7 +7,8 @@ WORK-BRAIN-SOP-CORE v2
 Run a bounded, adaptive conversation that captures durable professional
 evidence without turning the interaction into a questionnaire. This SOP is the
 shared behavioral contract for every Work Brain workflow; the selected workflow
-SOP adds domain-specific emphasis.
+SOP adds domain-specific emphasis. SessionEntry is the evidence unit; an
+optional stable Experience groups related entries across sessions and dates.
 
 ## Parameters
 
@@ -33,6 +34,10 @@ SOP adds domain-specific emphasis.
   accumulating a larger stack.
 - Domain probes and `domain_tags` are different: the probe limit protects
   conversation context, while committed `domain_tags` have no count limit.
+- The agent MAY reuse an obvious existing Experience or propose a new one when
+  the current work clearly continues or creates a durable professional story.
+  If uncertain, leave the SessionEntry unassigned; this never reduces its
+  searchability or durability.
 
 ## Steps
 

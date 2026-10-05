@@ -5,7 +5,7 @@ WORK-BRAIN-SOP-CLOSE-DAY v2
 ## Overview
 
 Optionally help the user reflect at the end of a day. Close-day is a gap check
-and planning aid, not the source of truth for the day: normal sessions must
+and planning aid, not the source of truth for work: normal sessions must
 already have preserved their raw turns and committed evidence.
 
 ## Parameters
@@ -24,6 +24,8 @@ already have preserved their raw turns and committed evidence.
 
 - The application MUST provide current state and bounded recent work when available.
 - The agent MUST treat close-day as optional for journal correctness.
+- Close-day is not required for Experience construction, communication retrieval,
+  interview usefulness, or recovery correctness.
 - The agent MUST NOT reconstruct the entire day from memory or claim exhaustive coverage.
 
 ## Steps

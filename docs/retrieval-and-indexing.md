@@ -127,3 +127,10 @@ Index lifecycle boundary:
 - `search()` checks health and returns current indexed evidence with explicit
   degraded/incomplete metadata when possible. It never launches a full
   rebuild as a read side effect.
+
+Experience scope is a composable evidence filter (`experiences`) resolved
+through the stable entity catalog and `entry_entities` projection. Experience
+cards are derived by grouping ranked evidence references; they do not replace
+entry-level search or store independent facts. Date, workspace, project, and
+domain-tag filters remain available for communication and other generated
+views.

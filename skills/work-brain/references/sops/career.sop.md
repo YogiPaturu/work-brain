@@ -50,16 +50,23 @@ to practise. Bound the session to one question or one coherent story.
 
 For preparation, use the configured question-bank interface, then search
 professional evidence with the selected question text or a user-approved
-refinement. Retrieve a bounded page and use its opaque continuation cursor when
-the user asks for more. Hydrate only the candidates needed for comparison or
-practice. For mock practice, do not reveal these candidates before the user
-answers unless they explicitly ask for help.
+refinement. Aggregate ranked matches into several source-backed Experience
+candidates when possible. Preserve highly relevant ungrouped entries as
+single-entry candidates. Retrieve a bounded page and use its opaque
+continuation cursor when the user asks for more. Hydrate only the candidates
+needed for comparison or practice. For mock practice, do not reveal these
+candidates before the user answers unless they explicitly ask for help.
 
 **Constraints:**
 
 - You MUST preserve evidence provenance and uncertainty.
+- Every Experience candidate MUST expose stable supporting entry refs and remain
+  traceable to SessionEntry revisions and raw turns.
 - You SHOULD present multiple plausible candidates when more than one fits.
 - You MUST NOT select a “best” story for the user or hide later candidates behind an unexplained cap.
+- You MUST expose missing evidence such as outcomes, metrics, contribution, or
+  stakeholder dynamics when the selected Experience lacks it; never invent the
+  gap.
 - You MUST treat unavailable retrieval as an explicit limitation, not as evidence that no story exists.
 
 #### Domain tags for career evidence

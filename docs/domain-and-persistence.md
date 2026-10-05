@@ -45,7 +45,7 @@ This LLD implements the following settled HLD decisions:
 - separate public application repository and private professional vault;
 - raw conversations preserved verbatim;
 - session/conversation is the ingestion and commit unit;
-- day is the journal aggregation unit;
+- calendar day is a journal projection/filter, not the primary work unit;
 - end-of-day closure is optional for durability;
 - structured entries are durable interpretations over raw source;
 - current work state and daily journals are rebuildable projections;
@@ -550,6 +550,7 @@ V1 entity kinds are:
 ```text
 workspace
 project
+experience
 person
 organization
 customer
@@ -602,6 +603,13 @@ set for cross-cutting concerns such as `auth`, `architecture`, and `billing`.
 Workspace and project scope are indexed separately from ordinary entity
 references so communication profiles can retrieve experiences across multiple
 dates without relying on a daily window.
+
+An Experience is a stable catalog entity whose identity survives title changes,
+new evidence, and projection rebuilds. Current SessionEntry revisions may link
+to it with `{"relation": "experience"}`. The entity stores identity and
+aliases only; linked entries remain the authority for context, reasoning,
+contribution, trade-offs, outcomes, and learning. Association is optional, so
+unassigned entries remain valid evidence and remain searchable.
 
 ## 12. Artifact Reference Catalog
 
@@ -797,6 +805,11 @@ At expected personal scale, a full state rebuild is intentionally preferred over
 ### 15.1 Journal authority
 
 `journal/YYYY/MM/YYYY-MM-DD.md` is a human-readable projection. It is not authoritative and SHOULD NOT be manually edited.
+
+The journal is one generated time-based view over SessionEntry evidence. It is
+not an Experience container and does not own the work represented in it. The
+same entry may contribute to a journal, a weekly update, a project update, and
+an Experience simultaneously.
 
 User-visible corrections MUST go through a new session/amendment and then regenerate the journal.
 

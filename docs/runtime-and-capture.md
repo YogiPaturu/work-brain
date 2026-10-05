@@ -24,6 +24,12 @@ Work Brain MUST NOT make a second conversational LLM call in this path. MCP,
 provider-specific adapters, model selection/fallback, and a Work Brain daemon
 are not v1 dependencies.
 
+Capture is organized around explicit bounded conversations, not calendar days.
+Any activated workflow may recover a stale raw session before continuing. The
+open-day workflow can present that recovery together with orientation, but
+recovery and evidence durability do not require the user to invoke open-day.
+Close-day is an optional gap-check and communication handoff.
+
 ## 2. Ownership
 
 LLD-002 owns:

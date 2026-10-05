@@ -32,6 +32,19 @@ QuestionBankProvider                    LLD-03 search/hydrate
 
 The question corpus and professional-evidence corpus remain separate. V1 does not embed or vector-index the question bank. A few hundred tagged interview questions are cheap to parse/filter deterministically. Selected question text becomes an input to professional-evidence retrieval; it does not become professional evidence itself.
 
+Career preparation is Experience-centric over the same evidence corpus:
+
+```text
+question -> ranked evidence -> Experience aggregation -> candidate Experiences
+                         \-> ungrouped single-entry candidates
+```
+
+An Experience candidate is a bounded card with stable identity and supporting
+entry refs. Hydration resolves those refs to SessionEntry revisions and raw
+turns. The system does not persist story scores, fit explanations, or invented
+outcomes. Historical evidence that has no Experience association remains a
+valid single-entry candidate.
+
 The system may internally order search candidates, but it does not score or choose the user's “best” story. LLD-03 returns bounded pages plus an opaque continuation cursor. The Career workflow shows that more candidates exist when appropriate and lets the user continue until satisfied or the search is exhausted.
 
 A user may explicitly mark an entry as an interview candidate. That mark is durable private preference metadata and references the existing entry identity; it does not modify the SessionEntry or assert that the story is objectively strong. Automatic model-derived career annotations are deliberately not required in v1. They can be added later as replaceable projection data over the same stable evidence identities.
