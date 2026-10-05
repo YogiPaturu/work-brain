@@ -35,6 +35,13 @@ class VaultTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tempdir.cleanup()
 
+    def test_raw_source_store_does_not_initialize_sqlite(self) -> None:
+        source_only = Vault(Path(self.tempdir.name) / "source-only").initialize()
+        session = source_only.create_session()
+        source_only.append_turn(session["session_id"], "user", "raw capture survives projection absence")
+        self.assertFalse(source_only.database_path.exists())
+        self.assertEqual(1, len(source_only.list_turns(session["session_id"])))
+
     def test_turn_append_retry_and_middle_corruption(self) -> None:
         turn_id = new_uuid7()
         first = self.vault.append_turn(self.session["session_id"], "user", "hello", turn_id=turn_id, recorded_at="2026-09-30T10:01:00+01:00")

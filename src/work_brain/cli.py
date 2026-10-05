@@ -15,6 +15,7 @@ from .domain import normalize_domain_tags
 from .errors import FeatureUnavailable, IntegrityError, LockError, PersistenceError, ValidationError
 from .fsutil import read_json
 from .instructions import SkillLoader
+from .lifecycle import normalize_runtime
 from .setup import HarnessSetup
 from .retrieval import EvidenceRetriever
 from .profiles import CommunicationProfileStore, resolve_profiles_path, set_profiles_path
@@ -371,16 +372,18 @@ def _session_status(vault: Vault, session_id: str) -> dict[str, Any]:
         if isinstance(value, dict) and value.get("session_id") == session_id
     ]
     entries = [entry for entry in vault.all_current_entries() if entry.session_id == session_id]
-    runtime = dict(session.get("runtime") or {})
+    runtime, lifecycle_state = normalize_runtime(
+        session.get("runtime"),
+        ended_at=session.get("ended_at"),
+        has_entry=bool(entries),
+    )
     if runtime.get("archive_status") == "session":
         lifecycle = "archived"
     elif host_mappings:
         lifecycle = "active_capture"
-    elif entries:
+    elif entries or lifecycle_state.commit.value == "committed":
         lifecycle = "committed"
-    elif runtime.get("commit_status") == "pending_auto_commit" or (
-        session.get("ended_at") is None and runtime.get("capture_status") in {"recoverable", "rolled_over"}
-    ):
+    elif lifecycle_state.commit.value == "pending" or lifecycle_state.capture.value == "recoverable":
         lifecycle = "recoverable_raw"
     elif runtime.get("commit_status") == "no_new_evidence":
         lifecycle = "closed_no_new_evidence"
@@ -413,6 +416,7 @@ def _session_status(vault: Vault, session_id: str) -> dict[str, Any]:
         "message": message,
         "capture_status": runtime.get("capture_status", "not_captured"),
         "commit_status": "committed" if entries else runtime.get("commit_status"),
+        "lifecycle_state": lifecycle_state.to_dict(),
         "capture_active": bool(host_mappings),
         "turn_count": len(turns),
         "last_captured_turn": None if last is None else {

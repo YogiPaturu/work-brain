@@ -54,7 +54,7 @@ class Vault:
 
     # ----- topology and locking -------------------------------------------------
 
-    def initialize(self) -> "Vault":
+    def initialize_source_store(self) -> "Vault":
         for relative in (
             "sessions", "amendments", "catalog/entities", "catalog/artifacts", "journal",
             "state", "context", "questions", "career", "artifacts", "index",
@@ -63,15 +63,26 @@ class Vault:
         state_path = self.root / "state/current.json"
         if not state_path.exists():
             atomic_replace_json(state_path, {"items": []})
-        # Creating the SQLite file and applying checked-in migrations is part
-        # of initialization; its contents remain a rebuildable projection.
+        return self
+
+    def initialize_projections(self) -> "Vault":
+        """Initialize only rebuildable projection storage."""
+        self.initialize_source_store()
         conn = self._database().connect()
         conn.close()
         return self
 
+    def initialize(self) -> "Vault":
+        """Compatibility alias for source initialization.
+
+        Source capture must not open or migrate SQLite.  Callers that need
+        projections must opt into :meth:`initialize_projections`.
+        """
+        return self.initialize_source_store()
+
     @contextlib.contextmanager
     def write_lock(self) -> Iterator[None]:
-        self.initialize()
+        self.initialize_source_store()
         with self._thread_lock:
             outer = self._lock_depth == 0
             if outer:
@@ -775,7 +786,7 @@ class Vault:
 
     def rebuild_all(self) -> None:
         with self._require_or_lock():
-            self.initialize()
+            self.initialize_projections()
             self.rebuild_projections()
             self.reconcile_database()
             # Retrieval is a derived sibling projection.  Rebuild it only
@@ -794,7 +805,7 @@ class Vault:
         return Database(self.database_path, self.migration_dir)
 
     def reconcile_database(self) -> None:
-        self.initialize()
+        self.initialize_projections()
         sessions, current_entries = self._entries_and_sessions()
         revisions = self.all_entry_revisions()
         entities = [read_json(path) for path in sorted((self.root / "catalog/entities").glob("*.json"))]

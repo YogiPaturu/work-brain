@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from .errors import ValidationError
 from .fsutil import atomic_replace_json, ensure_private_file, read_json
+from .lifecycle import normalize_runtime
 from .orchestrator import PromptRoute, route_prompt, select_workflow
 from .timeutil import date_for_timestamp, parse_timestamp, timestamp_now
 
@@ -196,21 +197,23 @@ class HarnessCaptureService:
     def _lifecycle_snapshot(self, session_id: str, *, host: str | None = None, host_session_id: str | None = None) -> dict[str, Any]:
         session = self.vault.read_session(session_id)
         turns = self.vault.list_turns(session_id)
-        runtime = dict(session.get("runtime") or {})
+        runtime, lifecycle_state = normalize_runtime(
+            session.get("runtime"),
+            ended_at=session.get("ended_at"),
+            has_entry=False,
+        )
         if host_session_id is None:
             host_session_id = runtime.get("host_session_id")
         if host is None:
             host = runtime.get("host")
         entries = [entry for entry in self.vault.all_current_entries() if entry.session_id == session_id]
-        if runtime.get("capture_status") == "active":
+        if lifecycle_state.capture.value == "active":
             lifecycle = "active_capture"
             message = "Capture is active; raw turns are being saved."
-        elif entries:
+        elif entries or lifecycle_state.commit.value == "committed":
             lifecycle = "committed"
             message = "Structured entry is committed; raw turns remain preserved."
-        elif runtime.get("commit_status") == "pending_auto_commit" or (
-            session.get("ended_at") is None and runtime.get("capture_status") in {"recoverable", "rolled_over"}
-        ):
+        elif lifecycle_state.commit.value == "pending" or lifecycle_state.capture.value == "recoverable":
             lifecycle = "recoverable_raw"
             message = "Capture is inactive; raw turns are preserved and the structured commit is pending."
         elif runtime.get("capture_status") == "imported":
@@ -233,6 +236,7 @@ class HarnessCaptureService:
             "lifecycle": lifecycle,
             "capture_status": runtime.get("capture_status", "not_captured"),
             "commit_status": "committed" if entries else runtime.get("commit_status"),
+            "lifecycle_state": lifecycle_state.to_dict(),
             "turn_count": len(turns),
             "last_captured_at": last.get("recorded_at") if last else None,
             "host": host,
