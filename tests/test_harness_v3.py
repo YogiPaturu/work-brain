@@ -454,6 +454,19 @@ class HarnessV3Tests(unittest.TestCase):
             normalize_capture_event("codex", {"event": "UserPromptSubmit", "session_id": "bad"})
         self.assertEqual([], self.vault.all_sessions())
 
+    def test_mapping_failure_leaves_raw_turn_recoverable(self) -> None:
+        service = HarnessCaptureService(self.vault)
+        event = normalize_capture_event("codex", {
+            "event": "UserPromptSubmit", "session_id": "mapping-failure",
+            "prompt": "work brain: preserve this raw turn",
+        })
+        with patch.object(service, "_write_mappings", side_effect=RuntimeError("mapping unavailable")):
+            with self.assertRaises(RuntimeError):
+                service.handle(event)
+        session = self.vault.all_sessions()[0]
+        self.assertEqual("work brain: preserve this raw turn", self.vault.list_turns(session["session_id"])[0]["content"])
+        self.assertIsNone(session["ended_at"])
+
 
 if __name__ == "__main__":
     unittest.main()

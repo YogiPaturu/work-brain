@@ -157,6 +157,7 @@ class SessionEntry:
     entity_refs: list[dict[str, str]]
     artifact_refs: list[dict[str, str]]
     source_refs: list[dict[str, Any]]
+    source_fingerprint: str | None = None
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "SessionEntry":
@@ -221,8 +222,18 @@ class SessionEntry:
                 sources.append({"kind": "entry", "id": validate_uuid7(_required(ref, "id"), "source_ref.id"), "revision": _required(ref, "revision")})
         if any(statement.basis == "inferred" and not statement.source_turns for statements in sections.values() for statement in statements) and not artifacts:
             raise ValidationError("inferred statements without source_turns require an artifact reference")
-        return cls(entry_id, session_id, revision, commit_id, created_at, supersedes, reason, provenance, title, summary,
-                   occurrence, modes, domain_tags, workspace_entity_id, project_entity_id, sections, mutations, entities, artifacts, sources)
+        source_fingerprint = raw.get("source_fingerprint")
+        if source_fingerprint is not None and (not isinstance(source_fingerprint, str) or not source_fingerprint):
+            raise ValidationError("source_fingerprint must be a non-empty string")
+        return cls(
+            entry_id=entry_id, session_id=session_id, revision=revision, commit_id=commit_id,
+            created_at=created_at, supersedes_revision=supersedes, revision_reason=reason,
+            provenance_kind=provenance, title=title, summary=summary, occurrence=occurrence,
+            modes=modes, domain_tags=domain_tags, workspace_entity_id=workspace_entity_id,
+            project_entity_id=project_entity_id, sections=sections, state_mutations=mutations,
+            entity_refs=entities, artifact_refs=artifacts, source_refs=sources,
+            source_fingerprint=source_fingerprint,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -235,6 +246,7 @@ class SessionEntry:
             "sections": {k: [s.to_dict() for s in v] for k, v in self.sections.items()},
             "state_mutations": [m.to_dict() for m in self.state_mutations], "entity_refs": self.entity_refs,
             "artifact_refs": self.artifact_refs, "source_refs": self.source_refs,
+            **({"source_fingerprint": self.source_fingerprint} if self.source_fingerprint is not None else {}),
         }
 
 

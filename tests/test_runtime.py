@@ -12,6 +12,7 @@ from unittest.mock import patch
 from work_brain import (
     CommitResolver,
     CommitDraftValidator,
+    EvidenceRetriever,
     RuntimeState,
     ScriptedModel,
     SessionOrchestrator,
@@ -196,6 +197,17 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual([], list((self.vault.root / "catalog/entities").glob("*.json")))
         self.assertEqual([], list((self.vault.root / "catalog/artifacts").glob("*.json")))
         self.assertEqual([], self.vault.all_entry_revisions())
+
+    def test_retrieval_publication_failure_reports_source_success_and_rebuilds(self) -> None:
+        session = self.vault.create_session(started_at="2026-10-01T16:40:00+01:00", modes=["think"])
+        self.vault.append_turn(session["session_id"], "user", "Keep the source when index publication fails.")
+        with patch("work_brain.retrieval.EvidenceRetriever.index_entry", side_effect=RuntimeError("index publication unavailable")):
+            result = CommitResolver(self.vault).publish_result(session["session_id"], draft(), workflow="think")
+        self.assertEqual("committed", result.source_status)
+        self.assertEqual("failed", result.maintenance.retrieval_status)
+        self.assertEqual(1, len(self.vault.all_entry_revisions()))
+        EvidenceRetriever(self.vault).reindex()
+        self.assertEqual([], self.vault.doctor())
 
     def test_codex_hook_failure_is_harmless_but_observable(self) -> None:
         payload = json.dumps({"event": "UserPromptSubmit", "session_id": "hook-failure"})

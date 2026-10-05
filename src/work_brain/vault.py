@@ -49,6 +49,7 @@ class Vault:
         self._thread_lock = threading.RLock()
         self._lock_depth = 0
         self._file_lock: VaultLock | None = None
+        self._source_warnings: list[str] = []
         self.dependency_change_hook = dependency_change_hook
         self.entry_publish_hook = entry_publish_hook
 
@@ -99,6 +100,11 @@ class Vault:
 
     def _require_or_lock(self):
         return self.write_lock() if self._lock_depth == 0 else contextlib.nullcontext()
+
+    def consume_source_warnings(self) -> tuple[str, ...]:
+        warnings = tuple(self._source_warnings)
+        self._source_warnings.clear()
+        return warnings
 
     # ----- sessions and raw turns -----------------------------------------------
 
@@ -393,6 +399,11 @@ class Vault:
             if commit_fingerprint and (session.get("runtime") or {}).get("last_commit_fingerprint") == commit_fingerprint:
                 if current_paths:
                     return SessionEntry.from_dict(read_json(current_paths[-1]))
+            if commit_fingerprint:
+                for existing_path in current_paths:
+                    existing_entry = SessionEntry.from_dict(read_json(existing_path))
+                    if existing_entry.source_fingerprint == commit_fingerprint:
+                        return existing_entry
             raw = dict(payload)
             raw.setdefault("entry_id", session["entry_id"])
             raw.setdefault("session_id", session_id)
@@ -401,6 +412,8 @@ class Vault:
             raw.setdefault("created_at", timestamp_now())
             raw.setdefault("supersedes_revision", current_revision or None)
             raw.setdefault("revision_reason", "initial_commit" if current_revision == 0 else "reextract")
+            if commit_fingerprint:
+                raw.setdefault("source_fingerprint", commit_fingerprint)
             raw.setdefault("workspace_entity_id", None)
             raw.setdefault("project_entity_id", None)
             if current_revision == 0:
@@ -450,7 +463,12 @@ class Vault:
                 runtime["last_commit_fingerprint"] = commit_fingerprint
                 runtime["commit_status"] = "committed"
             session["runtime"] = runtime
-            atomic_replace_json(self.session_dir(session_id) / "session.json", session)
+            try:
+                atomic_replace_json(self.session_dir(session_id) / "session.json", session)
+            except Exception as exc:
+                self._source_warnings.append(
+                    f"session lifecycle metadata was not refreshed after source publication: {type(exc).__name__}"
+                )
         if refresh_projections:
             self._best_effort_source_projections(affected_date=session["local_date"])
         if self.entry_publish_hook is not None:

@@ -5,8 +5,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from work_brain import IntegrityError, Vault, new_uuid7
+from work_brain.vault import atomic_replace_json
 
 
 def entry_payload(session: dict, *, commit_id: str | None = None, reason: str = "initial_commit", revision: int = 1, supersedes: int | None = None) -> dict:
@@ -151,6 +153,29 @@ class VaultTests(unittest.TestCase):
         self.assertEqual(1, len(self.vault.all_entry_revisions()))
         self.vault.rebuild_all()
         self.assertEqual([], self.vault.doctor())
+
+    def test_source_commit_survives_session_lifecycle_update_failure_and_retry(self) -> None:
+        self.vault.append_turn(self.session["session_id"], "user", "Keep the immutable entry even if lifecycle metadata is unavailable.", recorded_at="2026-09-30T10:01:00+01:00")
+        payload = entry_payload(self.session)
+        fingerprint = "f" * 64
+        original_atomic_replace = atomic_replace_json
+
+        def fail_session_metadata(path: Path, value: object) -> None:
+            if path.name == "session.json" and path.parent.name == self.session["session_id"]:
+                raise OSError("simulated lifecycle snapshot failure")
+            original_atomic_replace(path, value)
+
+        with patch("work_brain.vault.atomic_replace_json", side_effect=fail_session_metadata):
+            entry = self.vault.commit_entry(
+                self.session["session_id"], payload, commit_fingerprint=fingerprint, refresh_projections=False
+            )
+        self.assertEqual(fingerprint, entry.source_fingerprint)
+        self.assertTrue(self.vault.consume_source_warnings())
+        retry = self.vault.commit_entry(
+            self.session["session_id"], payload, commit_fingerprint=fingerprint, refresh_projections=False
+        )
+        self.assertEqual(entry.commit_id, retry.commit_id)
+        self.assertEqual(1, len(self.vault.all_entry_revisions()))
 
     def test_single_writer_lock(self) -> None:
         from work_brain.lock import VaultLock

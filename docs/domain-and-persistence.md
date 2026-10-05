@@ -876,6 +876,12 @@ A retry using the same `commit_id` MUST return the already-created entry revisio
 
 A re-extraction or corrected interpretation is a new logical commit and MUST use a new `commit_id`.
 
+Resolver-published entries may also carry an optional `source_fingerprint`.
+This is a runtime-owned idempotency marker derived from the bounded draft and
+workflow; it is persisted on the immutable entry so a retry remains safe even
+if the mutable session lifecycle snapshot could not be updated. It is not a
+CommitDraft field and agents MUST NOT supply it.
+
 ### 16.2 Source-first ordering
 
 The required publication order is:

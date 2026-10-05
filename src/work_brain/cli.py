@@ -773,7 +773,7 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         entry = vault.commit_entry(args.session_id, _read_payload(args.file))
         maintenance = ProjectionMaintenance(vault).after_source_commit(entry)
         continuation = _finish_capture_after_commit(vault, args.session_id)
-        result = CommitPublicationResult.from_entry(entry, maintenance)
+        result = CommitPublicationResult.from_entry(entry, maintenance, vault.consume_source_warnings())
         return {**result.to_dict(), "capture": continuation}, True
     if command == "commit-draft":
         session = vault.read_session(args.session_id)

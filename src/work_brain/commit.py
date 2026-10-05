@@ -15,7 +15,7 @@ from .timeutil import timestamp_now
 
 FORBIDDEN_DRAFT_FIELDS = {
     "session_id", "entry_id", "revision", "commit_id", "created_at", "supersedes_revision",
-    "revision_reason", "provenance_kind", "runtime", "model_id", "sops", "occurrence",
+    "revision_reason", "provenance_kind", "runtime", "model_id", "sops", "occurrence", "source_fingerprint",
 }
 
 
@@ -231,7 +231,8 @@ class CommitResolver:
         from .services import CommitPublicationResult, ProjectionMaintenance
 
         entry = self._publish_source(session_id, raw_draft, workflow=workflow, revision_reason=revision_reason)
-        return CommitPublicationResult.from_entry(entry, ProjectionMaintenance(self.vault).after_source_commit(entry))
+        maintenance = ProjectionMaintenance(self.vault).after_source_commit(entry)
+        return CommitPublicationResult.from_entry(entry, maintenance, self.vault.consume_source_warnings())
 
     def _publish_source(self, session_id: str, raw_draft: Mapping[str, Any], *, workflow: str, revision_reason: str = "initial_commit"):
         session = self.vault.read_session(session_id)

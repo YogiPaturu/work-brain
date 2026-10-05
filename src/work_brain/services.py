@@ -29,10 +29,11 @@ class CommitPublicationResult:
     revision: int
     commit_id: str
     maintenance: ProjectionMaintenanceResult
+    source_warnings: tuple[str, ...] = ()
 
     @classmethod
-    def from_entry(cls, entry: SessionEntry, maintenance: ProjectionMaintenanceResult) -> "CommitPublicationResult":
-        return cls("committed", entry.entry_id, entry.revision, entry.commit_id, maintenance)
+    def from_entry(cls, entry: SessionEntry, maintenance: ProjectionMaintenanceResult, source_warnings: tuple[str, ...] = ()) -> "CommitPublicationResult":
+        return cls("committed", entry.entry_id, entry.revision, entry.commit_id, maintenance, source_warnings)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -40,6 +41,7 @@ class CommitPublicationResult:
             "entry_id": self.entry_id,
             "revision": self.revision,
             "commit_id": self.commit_id,
+            "source_warnings": list(self.source_warnings),
             **self.maintenance.to_dict(),
         }
 
