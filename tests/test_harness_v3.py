@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -253,7 +255,20 @@ class HarnessV3Tests(unittest.TestCase):
 
     def test_setup_uses_module_mode_for_current_python(self) -> None:
         setup = HarnessSetup(home=self.home, skill_source=self.skill_source, executable=sys.executable)
-        self.assertIn(" -m work_brain capture-hook --host codex", setup.hook_command("codex"))
+        self.assertIn(" -m work_brain.hook --host codex", setup.hook_command("codex"))
+
+    def test_hook_module_does_not_import_application_heavy_modules(self) -> None:
+        source_root = Path(__file__).resolve().parents[1] / "src"
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(source_root)
+        probe = subprocess.run(
+            [sys.executable, "-c", "import sys; import work_brain.hook; print(sorted(name for name in sys.modules if name in {'work_brain.career', 'work_brain.commit', 'work_brain.instructions', 'work_brain.retrieval'}))"],
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual("[]", probe.stdout.strip())
 
     def test_setup_can_find_packaged_skill_from_install_prefix(self) -> None:
         self.assertEqual(self.skill_source, HarnessSetup._default_skill_source())

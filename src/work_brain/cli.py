@@ -14,6 +14,7 @@ from .config import default_config_path, read_config, resolve_vault_path, set_va
 from .domain import normalize_domain_tags
 from .errors import FeatureUnavailable, IntegrityError, LockError, PersistenceError, ValidationError
 from .fsutil import read_json
+from .hook import process as process_capture_hook
 from .instructions import SkillLoader
 from .lifecycle import CaptureLifecycle, CommitLifecycle, normalize_runtime, transition
 from .setup import HarnessSetup
@@ -687,11 +688,7 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         return report, True
     if command == "capture-hook":
         vault = _vault(args)
-        event = normalize_capture_event(args.host, _read_payload("-"))
-        result = HarnessCaptureService(vault).handle(event)
-        if args.host == "codex":
-            return {"_hook_output": _codex_hook_output(vault, event, result)}, True
-        return result, True
+        return process_capture_hook(vault, args.host, _read_payload("-")), True
     if command == "capture-stop":
         return HarnessCaptureService(_vault(args)).stop(host=args.host, host_session_id=args.host_session_id, session_id=args.session_id), True
 

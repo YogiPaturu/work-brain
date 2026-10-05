@@ -8,7 +8,7 @@ from typing import Any, Mapping
 from .errors import ValidationError
 from .fsutil import append_jsonl, atomic_replace_json, ensure_private_file, read_json
 from .lifecycle import CaptureLifecycle, CommitLifecycle, normalize_runtime, transition
-from .orchestrator import PromptRoute, route_prompt, select_workflow
+from .routing import PromptRoute, route_prompt, select_workflow
 from .timeutil import date_for_timestamp, parse_timestamp, timestamp_now
 
 

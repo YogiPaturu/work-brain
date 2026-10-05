@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import shlex
-import shutil
 import sys
 import sysconfig
 from typing import Any, Iterable
@@ -76,12 +75,9 @@ class HarnessSetup:
         return candidates[0]
 
     def _default_executable(self) -> Path | None:
-        found = shutil.which("work-brain")
-        if found:
-            return Path(found).resolve()
-        # Keep the virtualenv launcher path intact. Resolving it can turn
-        # ``.venv/bin/python`` into the system interpreter and lose the
-        # virtualenv's import path when the hook is later executed.
+        # Use the interpreter that owns the installed package so hooks can use
+        # the dependency-light module entrypoint.  Searching for the generic
+        # CLI here would route hooks through its much larger import graph.
         return Path(sys.executable)
 
     def _host(self, host: str) -> HostSetup:
@@ -101,7 +97,7 @@ class HarnessSetup:
         executable = self.executable or Path(sys.executable)
         python_executable = Path(sys.executable)
         if executable in {python_executable, python_executable.resolve()}:
-            return shlex.join([str(executable), "-m", "work_brain", "capture-hook", "--host", "claude-code" if host == "claude" else host])
+            return shlex.join([str(executable), "-m", "work_brain.hook", "--host", "claude-code" if host == "claude" else host])
         return shlex.join([str(executable), "capture-hook", "--host", "claude-code" if host == "claude" else host])
 
     def _hook_item(self, host: str, command: str) -> dict[str, Any]:
