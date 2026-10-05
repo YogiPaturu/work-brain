@@ -20,7 +20,8 @@ from work_brain import new_uuid7
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RANQ_PROFILE = ROOT / ".work-brain-local/communication-profiles.json"
+PROFILE_FIXTURE = ROOT / "tests/fixtures/communication-profiles.json"
+LOCAL_PROFILE = ROOT / ".work-brain-local/communication-profiles.json"
 
 
 class CommunicationProfileTests(unittest.TestCase):
@@ -58,7 +59,7 @@ class CommunicationProfileTests(unittest.TestCase):
         EvidenceRetriever(self.vault).reindex()
 
     def test_ranq_whatsapp_profile_is_valid_and_user_scoped(self) -> None:
-        store = CommunicationProfileStore.load(RANQ_PROFILE)
+        store = CommunicationProfileStore.load(PROFILE_FIXTURE)
         profile = store.get("ranq_whatsapp")
         self.assertEqual("communicate", profile.workflow)
         self.assertEqual("WhatsApp", profile.channel)
@@ -71,7 +72,7 @@ class CommunicationProfileTests(unittest.TestCase):
         self.assertIn("technical jargon", profile.exclude)
 
     def test_communicate_can_read_a_validated_profile_through_a_high_level_tool(self) -> None:
-        store = CommunicationProfileStore.load(RANQ_PROFILE)
+        store = CommunicationProfileStore.load(PROFILE_FIXTURE)
         registry = ToolRegistry(self.vault, profile_store=store)
         names = {tool.name for tool in registry.definitions("communicate")}
         self.assertIn("get_communication_profile", names)
@@ -81,7 +82,7 @@ class CommunicationProfileTests(unittest.TestCase):
         self.assertEqual(["ranq"], result.data["scope"]["workspaces"])
 
     def test_profile_search_applies_exact_ranq_work_item_scope(self) -> None:
-        store = CommunicationProfileStore.load(RANQ_PROFILE)
+        store = CommunicationProfileStore.load(PROFILE_FIXTURE)
         seen: dict[str, object] = {}
 
         def search(**arguments: object) -> dict[str, object]:
@@ -107,7 +108,7 @@ class CommunicationProfileTests(unittest.TestCase):
         self.assertNotIn("occurred_before", filters)
 
     def test_ranq_work_item_uses_text_entity_fallback_for_legacy_entries(self) -> None:
-        store = CommunicationProfileStore.load(RANQ_PROFILE)
+        store = CommunicationProfileStore.load(PROFILE_FIXTURE)
         calls: list[dict[str, object]] = []
 
         def search(**arguments: object) -> dict[str, object]:
@@ -133,7 +134,7 @@ class CommunicationProfileTests(unittest.TestCase):
         self.assertEqual("ranq_whatsapp", result.data["profile_scope"]["profile_id"])
 
     def test_profile_id_starts_a_scoped_communicate_session(self) -> None:
-        store = CommunicationProfileStore.load(RANQ_PROFILE)
+        store = CommunicationProfileStore.load(PROFILE_FIXTURE)
         registry = ToolRegistry(self.vault, profile_store=store)
         model = ScriptedModel(responses=["I need one confirmed Ranq outcome before drafting."])
         orchestrator = SessionOrchestrator(self.vault, model, tools=registry)
@@ -174,7 +175,7 @@ class CommunicationProfileTests(unittest.TestCase):
         )
         registry = ToolRegistry(
             self.vault,
-            profile_store=CommunicationProfileStore.load(RANQ_PROFILE),
+            profile_store=CommunicationProfileStore.load(PROFILE_FIXTURE),
             retrieval={"search_evidence": EvidenceRetriever(self.vault).search},
         )
         result = registry.call(
@@ -188,14 +189,14 @@ class CommunicationProfileTests(unittest.TestCase):
         )
 
     def test_close_day_has_no_profile_prompt_for_work_item_only_profiles(self) -> None:
-        store = CommunicationProfileStore.load(RANQ_PROFILE)
+        store = CommunicationProfileStore.load(PROFILE_FIXTURE)
         registry = ToolRegistry(self.vault, profile_store=store)
         result = registry.call("list_post_close_communication_profiles")
         self.assertTrue(result.ok)
         self.assertEqual([], result.data)
 
     def test_discord_and_ranq_progress_profiles_are_event_driven(self) -> None:
-        store = CommunicationProfileStore.load(RANQ_PROFILE)
+        store = CommunicationProfileStore.load(PROFILE_FIXTURE)
         profile = store.get("discord_progress")
         self.assertEqual({"time_window": "work_item"}, profile.scope)
         self.assertEqual("on_demand", profile.cadence)
@@ -255,7 +256,7 @@ class CommunicationProfileTests(unittest.TestCase):
         self.assertEqual(["auth-migration"], profile.retrieval_filters()["experiences"])
 
     def test_close_day_model_can_see_no_profile_when_none_is_opted_in(self) -> None:
-        store = CommunicationProfileStore.load(RANQ_PROFILE)
+        store = CommunicationProfileStore.load(PROFILE_FIXTURE)
         registry = ToolRegistry(self.vault, profile_store=store)
         model = ScriptedModel(responses=[
             ModelResponse("", ({"name": "list_post_close_communication_profiles", "arguments": {}},)),
@@ -270,7 +271,7 @@ class CommunicationProfileTests(unittest.TestCase):
     def test_cli_can_validate_list_and_show_a_profile(self) -> None:
         output = tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False)
         try:
-            output.write(json.dumps({"version": 1, "profiles": [CommunicationProfileStore.load(RANQ_PROFILE).get("ranq_whatsapp").to_dict()]}))
+            output.write(json.dumps({"version": 1, "profiles": [CommunicationProfileStore.load(PROFILE_FIXTURE).get("ranq_whatsapp").to_dict()]}))
             output.close()
             self.assertEqual(0, main(["--profiles", output.name, "profiles", "validate"]))
             self.assertEqual(0, main(["--profiles", output.name, "profiles", "show", "ranq_whatsapp"]))
@@ -278,7 +279,7 @@ class CommunicationProfileTests(unittest.TestCase):
             Path(output.name).unlink(missing_ok=True)
 
     def test_ranq_profile_is_ignored_by_git(self) -> None:
-        relative = RANQ_PROFILE.relative_to(ROOT)
+        relative = LOCAL_PROFILE.relative_to(ROOT)
         result = subprocess.run(
             ["git", "check-ignore", "--no-index", str(relative)],
             cwd=ROOT,

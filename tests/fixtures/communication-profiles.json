@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "id": "ranq_whatsapp",
+      "label": "Ranq WhatsApp update",
+      "workflow": "communicate",
+      "channel": "WhatsApp",
+      "audience": "non-technical Ranq co-founders",
+      "purpose": "Give a concise update on a meaningful Ranq work item as it moves from exploration to completion",
+      "scope": {
+        "workspaces": ["ranq"],
+        "time_window": "work_item"
+      },
+      "tone": "plain-English, concise, commercially relevant, warm",
+      "format": [
+        "progress or outcome",
+        "why it matters",
+        "next step or blocker",
+        "explicit ask when needed"
+      ],
+      "include": [
+        "user-confirmed progress",
+        "business impact",
+        "material risk",
+        "next action"
+      ],
+      "exclude": [
+        "implementation detail unless it changes the business decision",
+        "private speculation",
+        "unapproved commitments",
+        "technical jargon"
+      ],
+      "triggers": ["after_work_item"],
+      "cadence": "on_demand",
+      "rendering": {
+        "markup": "plain_text",
+        "layout": "compact",
+        "max_length": 1200
+      }
+    },
+    {
+      "id": "discord_progress",
+      "label": "Discord progress update",
+      "workflow": "communicate",
+      "channel": "Discord",
+      "audience": "friends, including developer friends",
+      "purpose": "Share meaningful progress when a substantial work item closes",
+      "scope": {
+        "time_window": "work_item"
+      },
+      "tone": "friendly, conversational, curious, technically fluent without being performative",
+      "format": [
+        "what changed",
+        "why it is interesting or useful",
+        "what I learned, explored, or traded off",
+        "what comes next when relevant"
+      ],
+      "include": [
+        "confirmed outcomes",
+        "interesting technical or product detail",
+        "useful experiments and discoveries",
+        "honest uncertainty or open questions",
+        "public links or artifacts when available"
+      ],
+      "exclude": [
+        "private or confidential details",
+        "a task-by-task activity log",
+        "raw implementation detail without a point",
+        "unsupported claims or forced certainty"
+      ],
+      "triggers": ["after_work_item"],
+      "cadence": "on_demand",
+      "rendering": {
+        "markup": "markdown",
+        "layout": "structured",
+        "max_length": 2000
+      }
+    }
+  ]
+}

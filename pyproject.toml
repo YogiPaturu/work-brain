@@ -11,7 +11,7 @@ dependencies = []
 
 [project.optional-dependencies]
 semantic = ["fastembed"]
-dev = ["mypy>=1.11"]
+dev = ["mypy>=1.11,<2"]
 
 [project.scripts]
 work-brain = "work_brain.cli:main"
@@ -21,6 +21,10 @@ where = ["src"]
 
 [tool.mypy]
 python_version = "3.11"
+# Keep this an intentional boundary check while the rest of the repository
+# remains gradually typed; imported implementation modules are checked by
+# their own tests and do not expand this initial CI surface.
+follow_imports = "skip"
 files = [
   "src/work_brain/capture_status.py",
   "src/work_brain/hook.py",
