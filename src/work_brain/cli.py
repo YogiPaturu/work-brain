@@ -7,8 +7,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .capture import HarnessCaptureService, normalize_capture_event, record_capture_hook_failure
+from .capture import HarnessCaptureService, record_capture_hook_failure
 from .career import CareerService, QuestionBank, QuestionFilters, QuestionRef
+from .capture_status import live_status as build_live_status, session_status as build_session_status, status_text
 from .commit import CommitResolver
 from .config import default_config_path, read_config, resolve_vault_path, set_vault_path
 from .domain import normalize_domain_tags
@@ -16,7 +17,7 @@ from .errors import FeatureUnavailable, IntegrityError, LockError, PersistenceEr
 from .fsutil import read_json
 from .hook import process as process_capture_hook
 from .instructions import SkillLoader
-from .lifecycle import CaptureLifecycle, CommitLifecycle, normalize_runtime, transition
+from .lifecycle import CaptureLifecycle, CommitLifecycle, transition
 from .setup import HarnessSetup
 from .retrieval import EvidenceRetriever
 from .services import CommitPublicationResult, ProjectionMaintenance
@@ -358,170 +359,6 @@ def _session_turns(vault: Vault, session_id: str, *, offset: int, limit: int | N
     }
 
 
-def _session_status(vault: Vault, session_id: str) -> dict[str, Any]:
-    session = vault.read_session(session_id)
-    turns = vault.list_turns(session_id)
-    mappings_path = vault.root / HarnessCaptureService.MAP_RELATIVE
-    mappings = read_json(mappings_path) if mappings_path.exists() else {}
-    host_mappings = [
-        {
-            "host": value.get("host"),
-            "host_session_id": value.get("host_session_id"),
-            "workflow": value.get("workflow"),
-            "active": value.get("session_id") == session_id,
-        }
-        for value in mappings.values()
-        if isinstance(value, dict) and value.get("session_id") == session_id
-    ]
-    entries = [entry for entry in vault.all_current_entries() if entry.session_id == session_id]
-    runtime, lifecycle_state = normalize_runtime(
-        session.get("runtime"),
-        ended_at=session.get("ended_at"),
-        has_entry=bool(entries),
-    )
-    if runtime.get("archive_status") == "session":
-        lifecycle = "archived"
-    elif host_mappings:
-        lifecycle = "active_capture"
-    elif entries or lifecycle_state.commit.value == "committed":
-        lifecycle = "committed"
-    elif lifecycle_state.commit.value == "pending" or lifecycle_state.capture.value == "recoverable":
-        lifecycle = "recoverable_raw"
-    elif runtime.get("commit_status") == "no_new_evidence":
-        lifecycle = "closed_no_new_evidence"
-    else:
-        lifecycle = "closed_uncommitted"
-    last = turns[-1] if turns else None
-    if lifecycle == "archived":
-        message = "Session is archived from active views; all raw turns are preserved and readable."
-    elif lifecycle == "active_capture":
-        message = "Capture is active; raw turns are being saved."
-    elif lifecycle == "recoverable_raw":
-        message = "Capture is inactive; raw turns are preserved and the structured commit is pending."
-    elif lifecycle == "closed_no_new_evidence":
-        message = "Capture is closed; no new structured evidence was committed."
-    elif lifecycle == "committed":
-        message = "Structured entry is committed; raw turns remain preserved."
-    elif runtime.get("capture_status") == "imported":
-        lifecycle = "imported"
-        message = "Imported raw transcript is preserved; no structured entry has been committed."
-    else:
-        message = "Capture is closed; raw turns are preserved but no structured entry is committed."
-    active_mapping = host_mappings[0] if host_mappings else None
-    return {
-        "session_id": session["session_id"],
-        "entry_id": session["entry_id"],
-        "local_date": session["local_date"],
-        "started_at": session["started_at"],
-        "ended_at": session.get("ended_at"),
-        "lifecycle": lifecycle,
-        "message": message,
-        "capture_status": runtime.get("capture_status", "not_captured"),
-        "commit_status": "committed" if entries else runtime.get("commit_status"),
-        "lifecycle_state": lifecycle_state.to_dict(),
-        "capture_active": bool(host_mappings),
-        "turn_count": len(turns),
-        "last_captured_turn": None if last is None else {
-            "sequence": last["sequence"], "role": last["role"], "recorded_at": last["recorded_at"],
-        },
-        "last_captured_at": last["recorded_at"] if last else None,
-        "host_session_id": active_mapping["host_session_id"] if active_mapping else runtime.get("host_session_id"),
-        "host_mappings": host_mappings,
-        "has_committed_entry": bool(entries),
-        "current_revision": max((entry.revision for entry in entries), default=None),
-    }
-
-
-def _live_status(vault: Vault) -> dict[str, Any]:
-    """Build a read-only lifecycle snapshot without requiring a session ID."""
-    mappings_path = vault.root / HarnessCaptureService.MAP_RELATIVE
-    mappings = read_json(mappings_path) if mappings_path.exists() else {}
-    if not isinstance(mappings, dict):
-        raise ValidationError("capture mapping state must be a JSON object")
-
-    active_ids: list[str] = []
-    for mapping in mappings.values():
-        if not isinstance(mapping, dict) or not isinstance(mapping.get("session_id"), str):
-            continue
-        session_id = mapping["session_id"]
-        if session_id not in active_ids:
-            active_ids.append(session_id)
-    active_sessions = [_session_status(vault, session_id) for session_id in active_ids]
-
-    entry_session_ids = {entry.session_id for entry in vault.all_current_entries()}
-    recoverable_sessions = []
-    for session in vault.all_sessions():
-        runtime = session.get("runtime") or {}
-        if session["session_id"] not in entry_session_ids and (
-            session.get("ended_at") is None or runtime.get("commit_status") in {"pending_auto_commit", "auto_commit_failed"}
-        ):
-            if session["session_id"] not in active_ids:
-                recoverable_sessions.append(_session_status(vault, session["session_id"]))
-
-    primary = active_sessions[0] if active_sessions else (recoverable_sessions[0] if recoverable_sessions else None)
-    if active_sessions:
-        lifecycle = primary["lifecycle"]
-        message = primary["message"]
-    elif recoverable_sessions:
-        lifecycle = "recoverable_raw"
-        message = "No active capture; raw turns are preserved and a structured commit is pending."
-    else:
-        lifecycle = "inactive"
-        message = "No active Work Brain capture or recoverable raw session."
-    return {
-        "lifecycle": lifecycle,
-        "message": message,
-        "capture_active": bool(active_sessions),
-        "active_sessions": active_sessions,
-        "recoverable_sessions": recoverable_sessions,
-        "active_count": len(active_sessions),
-        "recoverable_count": len(recoverable_sessions),
-        "primary": primary,
-        "capture_hook_health": vault.capture_hook_health(),
-    }
-
-
-def _status_commit_label(status: str | None) -> str:
-    return status or "not_started"
-
-
-def _status_text(snapshot: dict[str, Any], *, quiet: bool = False) -> str:
-    primary = snapshot.get("primary")
-    if quiet:
-        if not primary:
-            return "[Work Brain: inactive]"
-        capture = "ACTIVE" if primary.get("capture_active") else primary.get("lifecycle", "inactive").upper()
-        commit = _status_commit_label(primary.get("commit_status"))
-        return f"[Work Brain: {capture} · {primary.get('turn_count', 0)} turns · commit {commit}]"
-
-    lines = ["WORK BRAIN LIVE", "────────────────────────────────────────"]
-    if primary:
-        lines.extend([
-            f"Capture     {'ACTIVE' if primary.get('capture_active') else primary.get('lifecycle', 'INACTIVE').upper()}",
-            f"Session     {primary.get('session_id', '—')}",
-            f"Turns       {primary.get('turn_count', 0)}",
-            f"Last turn   {primary.get('last_captured_at') or '—'}",
-            f"Commit      {_status_commit_label(primary.get('commit_status'))}",
-            f"Lifecycle   {primary.get('lifecycle', 'unknown')}",
-            f"Message     {primary.get('message', '—')}",
-        ])
-    else:
-        lines.extend([
-            "Capture     INACTIVE",
-            "Session     —",
-            "Turns       0",
-            "Last turn   —",
-            "Commit      —",
-            f"Lifecycle   {snapshot.get('lifecycle', 'inactive')}",
-            f"Message     {snapshot.get('message', '—')}",
-        ])
-    if snapshot.get("active_count", 0) > 1:
-        lines.append(f"Active      {snapshot['active_count']} host sessions")
-    if snapshot.get("recoverable_count", 0):
-        lines.append(f"Recoverable  {snapshot['recoverable_count']} raw session(s)")
-    return "\n".join(lines)
-
-
 def _watch_status(args: argparse.Namespace) -> int:
     if args.json:
         raise ValidationError("--watch cannot be combined with --json")
@@ -530,51 +367,18 @@ def _watch_status(args: argparse.Namespace) -> int:
     vault = _vault(args)
     try:
         while True:
-            snapshot = _live_status(vault)
+            snapshot = build_live_status(vault)
             if sys.stdout.isatty():
                 sys.stdout.write("\033[2J\033[H")
             else:
                 sys.stdout.write("\n")
-            sys.stdout.write(_status_text(snapshot, quiet=args.quiet) + "\n")
+            sys.stdout.write(status_text(snapshot, quiet=args.quiet) + "\n")
             sys.stdout.flush()
             time.sleep(args.interval)
     except KeyboardInterrupt:
         if sys.stdout.isatty():
             sys.stdout.write("\n")
         return 0
-
-
-def _codex_hook_output(vault: Vault, event: Any, result: dict[str, Any]) -> dict[str, Any]:
-    """Return a valid Codex hook response with deterministic lifecycle context."""
-    event_names = {
-        "session_start": "SessionStart",
-        "user_prompt": "UserPromptSubmit",
-        "assistant_message": "Stop",
-    }
-    hook_event_name = event_names.get(event.kind)
-    if hook_event_name is None:
-        return {}
-    snapshot = _live_status(vault)
-    # Ordinary coding conversations remain silent. Once Work Brain is active,
-    # or a recoverable session exists, the host receives the status banner
-    # without asking the model to remember to run a command.
-    if not snapshot.get("primary") and not result.get("captured"):
-        return {}
-    banner = _status_text(snapshot, quiet=True)
-    details = _status_text(snapshot)
-    if hook_event_name == "Stop":
-        # Codex Stop accepts the common systemMessage field, but unlike
-        # SessionStart/UserPromptSubmit it does not accept hookSpecificOutput
-        # additionalContext. Keeping this response minimal avoids the
-        # "invalid stop hook JSON output" failure while retaining visibility.
-        return {"systemMessage": banner}
-    return {
-        "systemMessage": banner,
-        "hookSpecificOutput": {
-            "hookEventName": hook_event_name,
-            "additionalContext": f"Deterministic Work Brain lifecycle status:\n{details}",
-        },
-    }
 
 
 def _open_loops(vault: Vault, limit: int) -> list[dict[str, Any]]:
@@ -663,7 +467,7 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     command = args.command
     machine = bool(args.json or command in {"state", "work", "evidence", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session", "profiles", "backfill-context", "backfill-tags", "migrate-domain-tags"})
     if command == "status":
-        snapshot = _live_status(_vault(args))
+        snapshot = build_live_status(_vault(args))
         return snapshot, bool(args.json)
     if command == "config":
         if args.config_command == "set-vault":
@@ -757,7 +561,7 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     if command == "session" and args.session_command == "turns":
         return _session_turns(vault, args.session_id, offset=args.offset, limit=args.limit), True
     if command == "session" and args.session_command == "status":
-        return _session_status(vault, args.session_id), True
+        return build_session_status(vault, args.session_id), True
     if command == "session" and args.session_command == "close":
         HarnessCaptureService(vault).stop_session(args.session_id)
         return vault.close_session(args.session_id, commit_status=args.reason), True
@@ -861,7 +665,7 @@ def main(argv: list[str] | None = None) -> int:
             for diagnostic in value["diagnostics"]:
                 print(f"diagnostic: {diagnostic}")
         elif args.command == "status":
-            print(_status_text(value, quiet=args.quiet))
+            print(status_text(value, quiet=args.quiet))
         return code
     except SystemExit:
         raise
