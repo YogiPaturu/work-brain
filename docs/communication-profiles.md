@@ -92,7 +92,7 @@ orchestrator.start(
 )
 ```
 
-The profile-scoped search applies `entities`, `workspaces`, `projects`, `domain_tags`, and the supported
+The profile-scoped search applies `entities`, `workspaces`, `projects`, `experiences`, `domain_tags`, and the supported
 `time_window` (`today`, `week_to_date`, or `work_item`) before lexical or
 semantic retrieval. A `work_item` profile uses the named work item as the
 retrieval anchor and deliberately does not impose a calendar-day limit, so the

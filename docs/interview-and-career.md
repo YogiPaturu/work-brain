@@ -418,14 +418,14 @@ select/receive question
 search_evidence(question text / user refinement)
         |
         v
-show first EvidenceCard page
+aggregate matches into candidate Experiences
         |
-        +--> user selects entry --------+
+        +--> user selects Experience ---+
         |                               |
         +--> user asks "show more" ---> next_cursor
                                         |
                                         v
-                               hydrate selected evidence
+                               hydrate selected Experience
                                         |
                                         v
                            discuss story/angle and gaps
@@ -437,6 +437,8 @@ show first EvidenceCard page
 Rules:
 
 - The first page MUST NOT be described as exhaustive when `next_cursor` exists.
+- Grouped candidates MUST expose stable supporting entry refs; relevant
+  ungrouped entries remain single-entry candidates.
 - The agent MUST NOT declare one card the best story.
 - It MAY explain why an experience appears plausibly related to the question using card/hydrated evidence.
 - User marks MAY be displayed as `you marked this as a candidate` but MUST NOT affect retrieval score/fusion.
