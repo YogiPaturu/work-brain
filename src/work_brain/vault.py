@@ -377,6 +377,7 @@ class Vault:
         payload: Mapping[str, Any],
         *,
         commit_fingerprint: str | None = None,
+        refresh_projections: bool = True,
     ) -> SessionEntry:
         """Publish one immutable source revision.
 
@@ -450,7 +451,8 @@ class Vault:
                 runtime["commit_status"] = "committed"
             session["runtime"] = runtime
             atomic_replace_json(self.session_dir(session_id) / "session.json", session)
-        self._best_effort_source_projections(affected_date=session["local_date"])
+        if refresh_projections:
+            self._best_effort_source_projections(affected_date=session["local_date"])
         if self.entry_publish_hook is not None:
             try:
                 self.entry_publish_hook(entry.entry_id)
@@ -790,6 +792,16 @@ class Vault:
     def database_path(self) -> Path:
         return self.root / "index/work-brain.sqlite"
 
+    @property
+    def capture_hook_health_path(self) -> Path:
+        return self.root / "context/capture-hook-health.jsonl"
+
+    def capture_hook_health(self, *, limit: int = 5) -> list[dict[str, Any]]:
+        if not self.capture_hook_health_path.exists():
+            return []
+        records, _ = read_jsonl_with_recovery(self.capture_hook_health_path)
+        return records[-limit:]
+
     def _database(self) -> Database:
         return Database(self.database_path, self.migration_dir)
 
@@ -924,6 +936,9 @@ class Vault:
                     diagnostics.append(f"journal projection is stale or missing: {local_date}")
         except Exception as exc:
             diagnostics.append(f"projection integrity error: {exc}")
+        hook_failures = self.capture_hook_health()
+        if hook_failures:
+            diagnostics.append(f"capture hook has {len(hook_failures)} recorded recent failure(s)")
         try:
             conn = self._database().connect()
             try:

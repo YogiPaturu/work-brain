@@ -10,6 +10,7 @@ from typing import Any, Mapping
 from .commit import CommitResolver
 from .errors import PersistenceError, ValidationError
 from .instructions import LoadedInstructions, SkillLoader, WORKFLOWS
+from .lifecycle import CaptureLifecycle, CommitLifecycle, transition
 from .model import ConversationModel, ModelResponse
 from .timeutil import timestamp_now
 from .tools import ToolRegistry, ToolResult
@@ -276,7 +277,14 @@ class SessionOrchestrator:
                     try:
                         entry = self.resolver.publish(session_id, draft, workflow=chosen, revision_reason="initial_commit")
                         current = self.vault.read_session(session_id)
-                        current.setdefault("runtime", {}).update({
+                        runtime, _ = transition(
+                            current.get("runtime"),
+                            capture=CaptureLifecycle.CLOSED,
+                            commit=CommitLifecycle.COMMITTED,
+                            ended_at=current.get("ended_at"),
+                            has_entry=True,
+                        )
+                        runtime.update({
                             "model": self.model.model_id,
                             "sops": instructions.identities,
                             "workflow": chosen,
@@ -285,6 +293,7 @@ class SessionOrchestrator:
                             "capture_status": "closed",
                             "capture_boundary": "closed",
                         })
+                        current["runtime"] = runtime
                         self.vault.update_session_metadata(session_id, current)
                         results.append({"session_id": session_id, "entry_id": entry.entry_id, "status": "committed"})
                         break
@@ -294,10 +303,16 @@ class SessionOrchestrator:
                         draft = self.model.repair_commit_draft(draft, str(exc), instructions=instructions.text)
             except Exception as exc:
                 current = self.vault.read_session(session_id)
-                current.setdefault("runtime", {}).update({
+                runtime, _ = transition(
+                    current.get("runtime"),
+                    commit=CommitLifecycle.FAILED,
+                    ended_at=current.get("ended_at"),
+                )
+                runtime.update({
                     "commit_status": "auto_commit_failed",
                     "auto_commit_error": str(exc),
                 })
+                current["runtime"] = runtime
                 self.vault.update_session_metadata(session_id, current)
                 results.append({"session_id": session_id, "status": "recoverable", "error": str(exc)})
         return results
@@ -454,7 +469,14 @@ class SessionOrchestrator:
             raise ValidationError("only an active close-day session can complete without a commit")
         session = self.vault.read_session(self.session_id)
         session["ended_at"] = timestamp_now()
-        session.setdefault("runtime", {}).update({"workflow": "close-day", "commit_status": "no_new_evidence", "capture_status": "closed"})
+        runtime, _ = transition(
+            session.get("runtime"),
+            capture=CaptureLifecycle.CLOSED,
+            commit=CommitLifecycle.NO_NEW_EVIDENCE,
+            ended_at=session.get("ended_at"),
+        )
+        runtime.update({"workflow": "close-day", "commit_status": "no_new_evidence", "capture_status": "closed"})
+        session["runtime"] = runtime
         self.vault.update_session_metadata(self.session_id, session)
         self.state = RuntimeState.COMMITTED
 

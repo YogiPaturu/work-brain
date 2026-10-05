@@ -7,6 +7,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 import re
+from unittest.mock import patch
 
 from work_brain import (
     CommitResolver,
@@ -184,6 +185,26 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(1, len(self.vault.all_entry_revisions()))
         self.vault.rebuild_all()
         self.assertEqual([], self.vault.doctor())
+
+    def test_invalid_draft_does_not_publish_planned_catalog_objects(self) -> None:
+        session = self.vault.create_session(started_at="2026-10-01T16:40:00+01:00", modes=["think"])
+        self.vault.append_turn(session["session_id"], "user", "Reject invalid provenance before catalog writes.")
+        invalid = draft()
+        invalid["source_entry_refs"] = [{"entry_id": new_uuid7(), "revision": 1}]
+        with self.assertRaises(ValidationError):
+            CommitResolver(self.vault).publish(session["session_id"], invalid, workflow="think")
+        self.assertEqual([], list((self.vault.root / "catalog/entities").glob("*.json")))
+        self.assertEqual([], list((self.vault.root / "catalog/artifacts").glob("*.json")))
+        self.assertEqual([], self.vault.all_entry_revisions())
+
+    def test_codex_hook_failure_is_harmless_but_observable(self) -> None:
+        payload = json.dumps({"event": "UserPromptSubmit", "session_id": "hook-failure"})
+        with patch("sys.stdin", StringIO(payload)), redirect_stdout(StringIO()) as output:
+            self.assertEqual(0, main(["--vault", str(self.vault.root), "capture-hook", "--host", "codex"]))
+        self.assertEqual({}, json.loads(output.getvalue()))
+        health = self.vault.capture_hook_health()
+        self.assertEqual("codex", health[-1]["host"])
+        self.assertEqual("capture_hook_failure", health[-1]["category"])
 
     def test_model_tool_calls_execute_and_return_without_polluting_raw_turns(self) -> None:
         model = ScriptedModel(responses=[

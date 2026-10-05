@@ -123,6 +123,7 @@ def transition(
         (CommitLifecycle.PENDING, CommitLifecycle.COMMITTED),
         (CommitLifecycle.PENDING, CommitLifecycle.FAILED),
         (CommitLifecycle.PENDING, CommitLifecycle.NO_NEW_EVIDENCE),
+        (CommitLifecycle.NONE, CommitLifecycle.NO_NEW_EVIDENCE),
         (CommitLifecycle.FAILED, CommitLifecycle.PENDING),
         (CommitLifecycle.NONE, CommitLifecycle.COMMITTED),
         (CommitLifecycle.NO_NEW_EVIDENCE, CommitLifecycle.COMMITTED),

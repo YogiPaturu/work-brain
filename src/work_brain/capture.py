@@ -6,8 +6,8 @@ import re
 from typing import Any, Mapping
 
 from .errors import ValidationError
-from .fsutil import atomic_replace_json, ensure_private_file, read_json
-from .lifecycle import normalize_runtime
+from .fsutil import append_jsonl, atomic_replace_json, ensure_private_file, read_json
+from .lifecycle import CaptureLifecycle, CommitLifecycle, normalize_runtime, transition
 from .orchestrator import PromptRoute, route_prompt, select_workflow
 from .timeutil import date_for_timestamp, parse_timestamp, timestamp_now
 
@@ -167,6 +167,22 @@ def normalize_capture_event(host: str, payload: Mapping[str, Any]) -> CaptureEve
     return adapter.normalize(payload)
 
 
+def record_capture_hook_failure(vault: Any, *, host: str, category: str, error: Exception) -> None:
+    """Record non-sensitive hook health without making the host hook fail."""
+    vault.initialize_source_store()
+    message = " ".join(str(error).split())[:240]
+    append_jsonl(
+        vault.root / "context/capture-hook-health.jsonl",
+        {
+            "recorded_at": timestamp_now(),
+            "host": host,
+            "category": category,
+            "error_type": type(error).__name__,
+            "message": message,
+        },
+    )
+
+
 class HarnessCaptureService:
     """Normalizes host lifecycle events into the vault persistence API."""
 
@@ -270,6 +286,12 @@ class HarnessCaptureService:
                     continue
                 if runtime.get("capture_status") != "rolled_over":
                     turns = self.vault.list_turns(session["session_id"])
+                    runtime, _ = transition(
+                        runtime,
+                        capture=CaptureLifecycle.RECOVERABLE,
+                        commit=CommitLifecycle.PENDING if turns else CommitLifecycle.NO_NEW_EVIDENCE,
+                        ended_at=session.get("ended_at"),
+                    )
                     runtime.update({
                         "capture_status": "rolled_over",
                         "capture_boundary": "closed",
@@ -318,20 +340,21 @@ class HarnessCaptureService:
                 rollover = self.rollover_stale_sessions(reference_at=event.recorded_at) if mapping is None else []
                 if mapping is None:
                     workflow = event.workflow_hint or select_workflow(event.text)
+                    runtime = {
+                        "host": event.host,
+                        "host_session_id": event.host_session_id,
+                        "host_model": event.host_model,
+                        "capture_fidelity": "verbatim",
+                        "capture_activation": "explicit",
+                        "activation_trigger": event.text,
+                        "workflow": workflow,
+                        "lifecycle_action": event.lifecycle,
+                    }
+                    runtime, _ = transition(runtime, capture=CaptureLifecycle.ACTIVE)
                     session = self.vault.create_session(
                         started_at=event.recorded_at,
                         modes=[workflow],
-                        runtime={
-                            "host": event.host,
-                            "host_session_id": event.host_session_id,
-                            "host_model": event.host_model,
-                            "capture_fidelity": "verbatim",
-                            "capture_activation": "explicit",
-                            "activation_trigger": event.text,
-                            "capture_status": "active",
-                            "workflow": workflow,
-                            "lifecycle_action": event.lifecycle,
-                        },
+                        runtime=runtime,
                     )
                     session_id = session["session_id"]
                     mappings[key] = {"session_id": session_id, "host": event.host, "host_session_id": event.host_session_id, "workflow": workflow}
@@ -508,6 +531,8 @@ class HarnessCaptureService:
             runtime = dict(previous.get("runtime") or {})
             runtime.pop("commit_status", None)
             runtime.pop("capture_boundary", None)
+            runtime.pop("lifecycle", None)
+            runtime, _ = transition(runtime, capture=CaptureLifecycle.ACTIVE)
             runtime.update({
                 "capture_status": "active",
                 "capture_boundary": "open",
@@ -521,6 +546,13 @@ class HarnessCaptureService:
                 runtime=runtime,
             )
             previous_runtime = dict(previous.get("runtime") or {})
+            previous_runtime, _ = transition(
+                previous_runtime,
+                capture=CaptureLifecycle.CLOSED,
+                commit=CommitLifecycle.COMMITTED,
+                ended_at=previous.get("ended_at"),
+                has_entry=True,
+            )
             previous_runtime.update({
                 "capture_status": "committed",
                 "capture_boundary": "closed",
@@ -547,15 +579,16 @@ class HarnessCaptureService:
     def _deactivate_mapping(self, mappings: dict[str, dict[str, Any]], key: str, session_id: str, *, status: str) -> None:
         try:
             session = self.vault.read_session(session_id)
-            runtime = session.setdefault("runtime", {})
-            runtime.update({"capture_status": status, "capture_boundary": "closed"})
+            runtime = dict(session.get("runtime") or {})
             turns = self.vault.list_turns(session_id)
-            if turns:
-                runtime.setdefault("commit_status", "pending_auto_commit")
-            else:
-                runtime["commit_status"] = "no_new_evidence"
+            capture_state = CaptureLifecycle.RECOVERABLE if status == "recoverable" else CaptureLifecycle.CLOSED
+            commit_state = CommitLifecycle.PENDING if turns else CommitLifecycle.NO_NEW_EVIDENCE
+            runtime, _ = transition(runtime, capture=capture_state, commit=commit_state, ended_at=session.get("ended_at"))
+            runtime.update({"capture_status": status, "capture_boundary": "closed"})
+            runtime["commit_status"] = "pending_auto_commit" if turns else "no_new_evidence"
             if session.get("ended_at") is None:
                 session["ended_at"] = timestamp_now()
+            session["runtime"] = runtime
             self.vault.update_session_metadata(session_id, session)
         finally:
             mappings.pop(key, None)

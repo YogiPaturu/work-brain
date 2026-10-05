@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .capture import HarnessCaptureService, normalize_capture_event
+from .capture import HarnessCaptureService, normalize_capture_event, record_capture_hook_failure
 from .career import CareerService, QuestionBank, QuestionFilters, QuestionRef
 from .commit import CommitResolver
 from .config import default_config_path, read_config, resolve_vault_path, set_vault_path
@@ -15,7 +15,7 @@ from .domain import normalize_domain_tags
 from .errors import FeatureUnavailable, IntegrityError, LockError, PersistenceError, ValidationError
 from .fsutil import read_json
 from .instructions import SkillLoader
-from .lifecycle import normalize_runtime
+from .lifecycle import CaptureLifecycle, CommitLifecycle, normalize_runtime, transition
 from .setup import HarnessSetup
 from .retrieval import EvidenceRetriever
 from .services import CommitPublicationResult, ProjectionMaintenance
@@ -476,6 +476,7 @@ def _live_status(vault: Vault) -> dict[str, Any]:
         "active_count": len(active_sessions),
         "recoverable_count": len(recoverable_sessions),
         "primary": primary,
+        "capture_hook_health": vault.capture_hook_health(),
     }
 
 
@@ -622,11 +623,17 @@ def _finish_capture_after_commit(vault: Vault, session_id: str, workflow: str | 
     # marked as a recoverable raw session, including sessions with no active
     # host mapping.
     session = vault.read_session(session_id)
-    runtime = dict(session.get("runtime") or {})
+    runtime, _ = transition(
+        session.get("runtime"),
+        capture=CaptureLifecycle.CLOSED,
+        commit=CommitLifecycle.COMMITTED,
+        ended_at=session.get("ended_at"),
+        has_entry=True,
+    )
     runtime.update({
         "workflow": chosen,
-        "commit_status": "committed",
         "capture_status": "committed",
+        "commit_status": "committed",
         "capture_boundary": "closed",
     })
     session["runtime"] = runtime
@@ -856,6 +863,10 @@ def main(argv: list[str] | None = None) -> int:
             # Capture is best-effort at the host boundary.  A vault/config
             # problem must not turn an internal error payload into malformed
             # hook output or interfere with the user's Codex turn.
+            try:
+                record_capture_hook_failure(_vault(args), host=args.host, category="capture_hook_failure", error=exc)
+            except Exception:
+                pass
             _json_dump({})
             return 0
         if isinstance(exc, FeatureUnavailable):
