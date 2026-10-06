@@ -53,15 +53,40 @@ class ProjectionMaintenance:
         self.vault = vault
 
     def after_source_commit(self, entry: SessionEntry) -> ProjectionMaintenanceResult:
+        return self.after_source_commits((entry,))
+
+    def after_source_commits(self, entries: tuple[SessionEntry, ...]) -> ProjectionMaintenanceResult:
+        """Refresh derived state after one or more durably published entries.
+
+        The caller has already crossed the authoritative source boundary.  A
+        projection or retrieval failure is therefore recorded in the result,
+        never raised as if the source mutation had failed.  Batch callers use
+        one source-projection refresh and one retriever instance while keeping
+        each entry's optimistic retrieval publication independent.
+        """
+        if not entries:
+            return ProjectionMaintenanceResult("current", "current")
         errors: list[str] = []
         projection_status = "current"
         retrieval_status = "current"
-        if not self.vault._best_effort_source_projections(affected_date=self.vault.read_session(entry.session_id)["local_date"]):
+        local_dates = {self.vault.read_session(entry.session_id)["local_date"] for entry in entries}
+        affected_date = next(iter(local_dates)) if len(local_dates) == 1 else None
+        if not self.vault._best_effort_source_projections(affected_date=affected_date):
             projection_status = "failed"
             errors.append("source projections could not be refreshed")
         try:
-            from .retrieval import EvidenceRetriever
-            EvidenceRetriever(self.vault).index_entry(entry.entry_id)
+            from .retrieval import EvidenceRetriever, StaleIndexWork
+            retriever = EvidenceRetriever(self.vault)
+            for entry in entries:
+                try:
+                    retriever.index_entry(entry.entry_id)
+                except StaleIndexWork as exc:
+                    if retrieval_status != "failed":
+                        retrieval_status = "stale"
+                    errors.append(f"retrieval index: {exc}")
+                except Exception as exc:
+                    retrieval_status = "failed"
+                    errors.append(f"retrieval index: {exc}")
         except Exception as exc:
             retrieval_status = "failed"
             errors.append(f"retrieval index: {exc}")

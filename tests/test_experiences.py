@@ -6,8 +6,9 @@ import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 import json
+from unittest.mock import patch
 
-from work_brain import ExperienceService, ValidationError, Vault, new_uuid7
+from work_brain import EvidenceRetriever, ExperienceService, ValidationError, Vault, new_uuid7
 
 
 SECTIONS = (
@@ -58,6 +59,22 @@ class ExperienceTests(unittest.TestCase):
             refresh_projections=False,
         )
 
+    def _commit_unassigned(self, when: str, *, title: str, tags: list[str]):
+        session = self.vault.create_session(started_at=when)
+        self.vault.append_turn(session["session_id"], "user", title)
+        raw = payload(
+            session,
+            workspace_id=self.workspace["entity_id"],
+            project_id=self.project["entity_id"],
+            experience_id=self.architecture["entity_id"],
+            title=title,
+            summary=title,
+            started_at=when,
+            tags=tags,
+        )
+        raw["entity_refs"] = []
+        return self.vault.commit_entry(session["session_id"], raw, refresh_projections=False)
+
     def test_experience_spans_entries_and_keeps_stable_source_refs(self) -> None:
         first = self._commit("2026-10-01T10:00:00+01:00", self.architecture, title="Architecture options", tags=["architecture"])
         second = self._commit("2026-10-03T10:00:00+01:00", self.architecture, title="Architecture decision", tags=["authentication", "security"], outcome=True)
@@ -77,13 +94,28 @@ class ExperienceTests(unittest.TestCase):
         self.assertEqual({1}, {item["entry_count"] for item in result["experiences"]})
 
     def test_experience_association_is_optional(self) -> None:
-        session = self.vault.create_session(started_at="2026-10-04T10:00:00+01:00")
-        self.vault.append_turn(session["session_id"], "user", "An ungrouped decision remains valid evidence.")
-        raw = payload(session, workspace_id=self.workspace["entity_id"], project_id=self.project["entity_id"], experience_id=self.architecture["entity_id"], title="Ungrouped", summary="Ungrouped", started_at="2026-10-04T10:00:00+01:00", tags=["engineering"])
-        raw["entity_refs"] = []
-        self.vault.commit_entry(session["session_id"], raw, refresh_projections=False)
+        self._commit_unassigned("2026-10-04T10:00:00+01:00", title="Ungrouped", tags=["engineering"])
         self.assertEqual([], ExperienceService(self.vault).list()["experiences"])
         self.assertEqual([], self.vault.all_current_entries()[0].entity_refs)
+
+    def test_batch_experience_association_updates_each_entry(self) -> None:
+        first = self._commit_unassigned("2026-10-04T10:00:00+01:00", title="First ungrouped decision", tags=["engineering"])
+        second = self._commit_unassigned("2026-10-04T11:00:00+01:00", title="Second ungrouped decision", tags=["security"])
+
+        result = ExperienceService(self.vault).associate_entries(
+            [first.entry_id, second.entry_id], experience_id=self.architecture["entity_id"]
+        )
+
+        self.assertEqual("committed", result["source_status"])
+        self.assertEqual(2, result["count"])
+        self.assertEqual("current", result["retrieval_status"])
+        for entry_id in (first.entry_id, second.entry_id):
+            updated = self.vault.get_current_entry(entry_id)
+            self.assertEqual(2, updated.revision)
+            self.assertEqual(
+                [self.architecture["entity_id"]],
+                [ref["entity_id"] for ref in updated.entity_refs if ref["relation"] == "experience"],
+            )
 
     def test_hydration_accepts_only_exact_card_revisions(self) -> None:
         entry = self._commit("2026-10-01T10:00:00+01:00", self.architecture, title="Architecture", tags=["architecture"])
@@ -108,6 +140,26 @@ class ExperienceTests(unittest.TestCase):
         self.assertEqual([], revisions[0].entity_refs)
         self.assertEqual([{"entity_id": self.architecture["entity_id"], "relation": "experience"}], revisions[1].entity_refs)
         self.assertEqual("metadata_backfill", revisions[1].revision_reason)
+
+    def test_post_hoc_association_reports_source_success_when_retrieval_fails(self) -> None:
+        entry = self._commit_unassigned(
+            "2026-10-04T10:00:00+01:00",
+            title="Association survives retrieval failure",
+            tags=["engineering"],
+        )
+
+        with patch.object(EvidenceRetriever, "index_entry", side_effect=RuntimeError("index unavailable")):
+            result = ExperienceService(self.vault).associate(
+                entry.entry_id,
+                experience_id=self.architecture["entity_id"],
+            )
+
+        self.assertEqual("committed", result["source_status"])
+        self.assertEqual("failed", result["retrieval_status"])
+        self.assertEqual(2, self.vault.get_current_entry(entry.entry_id).revision)
+
+        EvidenceRetriever(self.vault).reindex()
+        self.assertEqual([], self.vault.doctor())
 
     def test_post_hoc_association_rejects_mixed_project_context(self) -> None:
         other_project = self.vault.upsert_entity(kind="project", canonical_name="Search")

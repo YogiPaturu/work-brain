@@ -102,6 +102,9 @@ class RuntimeTests(unittest.TestCase):
             self.assertGreaterEqual(len(step_names), 2, path.name)
             self.assertEqual(len(step_names), len(re.findall(r"(?m)^\*\*Constraints:\*\*$", text)), path.name)
             self.assertRegex(text, r"(?m)^- \*\*[a-z][a-z0-9_]*\*\* \((required|optional)")
+        core = (sop_dir / "core-conversation.sop.md").read_text(encoding="utf-8")
+        self.assertIn("Ask the following memory-gap question only when that assessment identifies a", core)
+        self.assertIn("MUST NOT ask it merely to perform a closing ceremony", core)
 
     def test_workflow_selection_is_deterministic(self) -> None:
         self.assertEqual("think", select_workflow("think with me"))

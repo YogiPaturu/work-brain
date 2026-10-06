@@ -132,14 +132,22 @@ question-bank metadata.
 ### 6. Close Without Pressure
 
 Stop when the user says skip, enough, move on, or equivalent, or when further
-questions would repeat without improving the result. Before a normal close, ask:
+questions would repeat without improving the result. Before a normal close,
+first assess whether a specific missing constraint, ownership detail,
+trade-off, outcome, or provenance detail would materially improve the current
+work or prevent important evidence from being reconstructed inaccurately later.
+Ask the following memory-gap question only when that assessment identifies a
+material gap:
 “What important information is likely to be forgotten, distorted by hindsight,
-or impossible to reconstruct from artifacts later?”
+or impossible to reconstruct from artifacts later?” If no material gap is
+apparent, close without asking it.
 
 **Constraints:**
 
 - You MUST respect a stop signal immediately and move to the next requested action.
-- You MUST ask the closing memory-gap question at most once per coherent session.
+- You MAY ask the closing memory-gap question at most once per coherent session,
+  and MUST NOT ask it merely to perform a closing ceremony when no material gap
+  is apparent.
 - You SHOULD summarize the decision, evidence, open questions, and next action in user-visible language.
 - You MUST emit only the configured CommitDraft shape when the application requests a commit; the application owns IDs, timestamps, revisions, provenance, and persistence.
 - Closing a bounded workflow with meaningful evidence MUST invoke the

@@ -614,7 +614,11 @@ An Experience has one workspace/project context in v1. The first linked entry
 establishes that pair; later associations must match it. A mismatch is a
 validation error, not a silent first-entry choice. Historical association is
 published as a metadata-only immutable SessionEntry revision, preserving all
-prior revisions and provenance.
+prior revisions and provenance. The application service crosses that source
+boundary before it performs rebuildable maintenance and reports
+`source_status=committed` separately from `projection_status` and
+`retrieval_status`; an index failure therefore leaves the association durable
+and repairable by `doctor`, `rebuild`, or `reindex`.
 
 ## 12. Artifact Reference Catalog
 

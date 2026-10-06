@@ -16,6 +16,7 @@ from .errors import IntegrityError, ValidationError
 from .fsutil import read_json
 from .ids import validate_uuid7
 from .retrieval import EvidenceRetriever
+from .services import ProjectionMaintenance
 
 
 MAX_EXPERIENCE_CARD_REFS = 12
@@ -123,14 +124,15 @@ class ExperienceService:
             remove=remove,
             move=move,
         )
-        maintenance: dict[str, Any] | None = None
+        maintenance = None
         if _maintain:
-            maintenance = self.retriever.reindex()
+            maintenance = ProjectionMaintenance(self.vault).after_source_commit(entry)
         result = {"entry_id": entry.entry_id, "revision": entry.revision, "experience_ids": [
             ref["entity_id"] for ref in entry.entity_refs if ref["relation"] == "experience"
         ]}
+        result["source_status"] = "committed"
         if maintenance is not None:
-            result["retrieval"] = maintenance
+            result.update(maintenance.to_dict())
         return result
 
     def associate_entries(
@@ -167,15 +169,24 @@ class ExperienceService:
                     )
             experience_id = resolved_experience_id
         updated = [self.associate(
-            entry.entry_id,
+            entry_id,
             experience_id=experience_id,
             experience_name=experience_name,
             remove=remove,
             move=move,
             _maintain=False,
-        ) for entry_id in entry_ids]
-        maintenance = self.retriever.reindex() if updated else None
-        return {"updated": updated, "count": len(updated), "retrieval": maintenance}
+        ) for entry_id in selected_ids]
+        maintenance = ProjectionMaintenance(self.vault).after_source_commits(
+            tuple(self.vault.get_current_entry(item["entry_id"]) for item in updated)
+        ) if updated else None
+        result: dict[str, Any] = {
+            "source_status": "committed",
+            "updated": updated,
+            "count": len(updated),
+        }
+        if maintenance is not None:
+            result.update(maintenance.to_dict())
+        return result
 
     def candidates_from_evidence(self, evidence: Mapping[str, Any]) -> dict[str, Any]:
         """Aggregate ranked evidence cards without inventing story quality."""

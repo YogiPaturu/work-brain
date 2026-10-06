@@ -525,7 +525,14 @@ class Vault:
             raw["domain_tags"] = merged
             return self._publish_metadata_backfill(current, raw)
 
-    def _publish_metadata_backfill(self, current: SessionEntry, raw: dict[str, Any], *, reason: str = "metadata_backfill") -> SessionEntry:
+    def _publish_metadata_backfill(
+        self,
+        current: SessionEntry,
+        raw: dict[str, Any],
+        *,
+        reason: str = "metadata_backfill",
+        refresh_projections: bool = True,
+    ) -> SessionEntry:
         raw.update({
             "revision": current.revision + 1,
             "commit_id": new_uuid7(),
@@ -538,7 +545,7 @@ class Vault:
         if previous_ref not in refs:
             refs.append(previous_ref)
         raw["source_refs"] = refs
-        return self.commit_entry(current.session_id, raw)
+        return self.commit_entry(current.session_id, raw, refresh_projections=refresh_projections)
 
     def associate_entry_experience(
         self,
@@ -575,7 +582,10 @@ class Vault:
                 return current
             raw = current.to_dict()
             raw["entity_refs"] = refs
-            return self._publish_metadata_backfill(current, raw)
+            # The application service owns post-publication maintenance.  Do
+            # not hold the source writer lock while rebuilding/indexing this
+            # metadata-only association.
+            return self._publish_metadata_backfill(current, raw, refresh_projections=False)
 
     def _resolve_experience_entity(self, entity_id: str | None, name: str | None) -> str:
         if entity_id is not None:
