@@ -231,19 +231,22 @@ class ExperienceTests(unittest.TestCase):
 
     def test_related_enforces_exact_workspace_project_tuple(self) -> None:
         other_workspace = self.vault.upsert_entity(kind="workspace", canonical_name="Personal")
+        local_project = self.vault.upsert_entity(
+            kind="project", canonical_name="Website", workspace_entity_id=self.workspace["entity_id"]
+        )
         other_project = self.vault.upsert_entity(kind="project", canonical_name="Website", workspace_entity_id=other_workspace["entity_id"])
         other_same_project = self.vault.upsert_entity(kind="project", canonical_name="Authentication Personal")
         anchor = self._commit_context(
-            "2026-10-01T10:00:00+01:00", workspace_id=self.workspace["entity_id"], project_id=self.project["entity_id"],
-            title="Authentication migration", summary="Authentication migration decision",
+            "2026-10-01T10:00:00+01:00", workspace_id=self.workspace["entity_id"], project_id=local_project["entity_id"],
+            title="Website migration", summary="Website migration decision",
         )
         same_context = self._commit_context(
-            "2026-10-02T10:00:00+01:00", workspace_id=self.workspace["entity_id"], project_id=self.project["entity_id"],
-            title="Authentication migration rollout", summary="Authentication migration rollout",
+            "2026-10-02T10:00:00+01:00", workspace_id=self.workspace["entity_id"], project_id=local_project["entity_id"],
+            title="Website migration rollout", summary="Website migration rollout",
         )
         wrong_workspace = self._commit_context(
             "2026-10-03T10:00:00+01:00", workspace_id=other_workspace["entity_id"], project_id=other_project["entity_id"],
-            title="Authentication migration rollout", summary="Authentication migration rollout",
+            title="Website migration rollout", summary="Website migration rollout",
         )
         wrong_project = self._commit_context(
             "2026-10-04T10:00:00+01:00", workspace_id=self.workspace["entity_id"], project_id=other_same_project["entity_id"],
