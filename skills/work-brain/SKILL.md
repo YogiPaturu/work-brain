@@ -71,42 +71,27 @@ while keeping capture active; “stop Work Brain” and “close my day” deact
 
 ## Session and provenance contract
 
-The host capture session is the source of truth for the current conversation.
-The agent MUST NOT create a second session to summarize the conversation, and
-MUST NOT append a model-written summary with the low-level `turn` command. The
-raw-turn append API is an internal integration/testing primitive, not a normal
-hosted-agent operation. Raw user and assistant turns are written by host hooks;
-the agent only reads them and emits a semantic CommitDraft.
+The host-captured Work Brain session is authoritative for the current
+conversation. Never manufacture missing evidence by creating a replacement
+session, appending synthetic or model-written raw turns, or combining
+unrelated sessions.
 
-Before committing, the agent MUST identify the exact active `session_id` from
-the host mapping or `session status`. It MUST NOT choose a session merely
-because it is the newest recoverable session. If the active mapping is absent
-or ambiguous, inspect status and leave the raw session recoverable rather than
-starting a replacement session.
+Before reading bounded turns or committing, identify and verify the exact
+active `session_id` from the host mapping/status; never select merely the
+newest recoverable session. If the mapping is absent or ambiguous, inspect
+status and leave the raw session recoverable rather than starting a replacement.
+Every durable CommitDraft statement or state change must cite exact persisted
+source turns from that target session, including at least one user-authored
+turn. Evidence from another session requires a separate linked entry, not a
+revision of the current entry.
 
-An entry revision is valid only when it belongs to the same bounded session as
-the new evidence. A separate conversation session produces a new linked entry;
-it does not become a revision by combining summaries. Use `source_entry_refs`
-to relate a new entry to an older entry when appropriate. The runtime owns
-entry IDs, revisions, and supersession metadata; the agent never invents them.
+If validation fails, repair provenance against the same target session and retry
+the canonical workflow; never create a replacement session to work around the
+error. Imported transcripts retain imported/reconstructed capture semantics and
+must not be presented as verbatim host capture.
 
-Every statement and state change in a CommitDraft MUST cite exact persisted
-turn sequences from the target session, including at least one user-authored
-turn. Assistant-only or model-generated turns are not durable evidence. If a
-claim cannot be supported by the target session, omit it or keep the session
-recoverable.
-
-If CommitDraft validation fails, the agent MUST NOT work around the error by
-creating a new session, appending synthetic turns, or combining unrelated
-entries. Read the target session's bounded turns, correct the draft's
-provenance, and retry once; if the evidence is unavailable, report the failure
-and defer the commit to the next live workflow boundary.
-
-When the user supplies a transcript whose original host capture was missed, use
-the explicit transcript-import operation. Treat the imported session as raw
-source evidence with `capture_fidelity: imported`; do not pretend it was
-verbatim host capture, do not assign unknown historical timestamps, and do not
-merge it into an existing entry before review.
+Detailed session, revision, CommitDraft, import, recovery, and CLI mechanics
+are owned by the referenced core SOP, schema, and tool documentation below.
 
 Lifecycle visibility is part of the user contract. The runtime/hook owns the
 routine compact lifecycle banner at valid host boundaries; do not repeat a
