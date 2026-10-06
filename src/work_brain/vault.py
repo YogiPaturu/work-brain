@@ -311,9 +311,9 @@ class Vault:
     def _entry_paths(self, session: Mapping[str, Any]) -> list[Path]:
         return sorted((self.session_dir(session["session_id"]) / "entries").glob("*.json"))
 
-    def all_current_entries(self) -> list[SessionEntry]:
+    def all_current_entries(self, *, include_archived: bool = False) -> list[SessionEntry]:
         result = []
-        for session in self.all_sessions():
+        for session in self.all_sessions(include_archived=include_archived):
             paths = self._entry_paths(session)
             if not paths:
                 continue
@@ -882,6 +882,140 @@ class Vault:
             if self.dependency_change_hook is not None:
                 self.dependency_change_hook("entity", entity_id)
             return value
+
+    def project_workspace_backfill_plan(self) -> dict[str, Any]:
+        """Plan deterministic ownership assignments from current source entries.
+
+        This deliberately scans source catalog and current entry revisions only.
+        SQLite and retrieval data are projections and must not participate in
+        deciding authoritative project ownership.
+        """
+        entities = [
+            read_json(path)
+            for path in sorted((self.root / "catalog/entities").glob("*.json"))
+        ]
+        by_id = {entity["entity_id"]: entity for entity in entities}
+        projects = [entity for entity in entities if entity.get("kind") == "project"]
+        current_entries = self.all_current_entries(include_archived=True)
+        assignments: list[dict[str, Any]] = []
+        conflicts: list[dict[str, Any]] = []
+        unresolved: list[dict[str, Any]] = []
+        already_owned: list[dict[str, Any]] = []
+        for project in sorted(projects, key=lambda item: (item["canonical_name"], item["entity_id"])):
+            if project.get("workspace_entity_id") is not None:
+                already_owned.append({
+                    "project_entity_id": project["entity_id"],
+                    "project_name": project["canonical_name"],
+                    "workspace_entity_id": project["workspace_entity_id"],
+                })
+                continue
+            evidence: dict[str, list[SessionEntry]] = {}
+            for entry in current_entries:
+                if entry.project_entity_id != project["entity_id"] or entry.workspace_entity_id is None:
+                    continue
+                workspace = by_id.get(entry.workspace_entity_id)
+                if workspace is None:
+                    raise IntegrityError(
+                        "project workspace backfill found missing workspace evidence: "
+                        f"{entry.workspace_entity_id} in entry {entry.entry_id}"
+                    )
+                if workspace.get("kind") != "workspace":
+                    raise IntegrityError(
+                        "project workspace backfill found non-workspace evidence: "
+                        f"{entry.workspace_entity_id} in entry {entry.entry_id}"
+                    )
+                evidence.setdefault(entry.workspace_entity_id, []).append(entry)
+            if not evidence:
+                unresolved.append({
+                    "project_entity_id": project["entity_id"],
+                    "project_name": project["canonical_name"],
+                    "reason": "no_workspace_evidence",
+                })
+                continue
+            if len(evidence) > 1:
+                candidates = []
+                for workspace_id, entries in sorted(evidence.items()):
+                    workspace = by_id[workspace_id]
+                    candidates.append({
+                        "workspace_entity_id": workspace_id,
+                        "workspace_name": workspace["canonical_name"],
+                        "evidence_entry_count": len(entries),
+                    })
+                conflicts.append({
+                    "project_entity_id": project["entity_id"],
+                    "project_name": project["canonical_name"],
+                    "workspace_candidates": candidates,
+                })
+                continue
+            workspace_id, entries = next(iter(evidence.items()))
+            occurrences = [
+                entry.occurrence.end or entry.occurrence.start or entry.created_at
+                for entry in entries
+            ]
+            starts = [entry.occurrence.start or entry.created_at for entry in entries]
+            assignments.append({
+                "project_entity_id": project["entity_id"],
+                "project_name": project["canonical_name"],
+                "workspace_entity_id": workspace_id,
+                "workspace_name": by_id[workspace_id]["canonical_name"],
+                "evidence_entry_count": len(entries),
+                "first_occurrence": min(starts),
+                "last_occurrence": max(occurrences),
+            })
+        return {
+            "assignments": assignments,
+            "conflicts": conflicts,
+            "unresolved": unresolved,
+            "already_owned": already_owned,
+            "counts": {
+                "assignments": len(assignments),
+                "conflicts": len(conflicts),
+                "unresolved": len(unresolved),
+                "already_owned": len(already_owned),
+            },
+        }
+
+    def backfill_project_workspace(
+        self,
+        project_entity_id: str,
+        workspace_entity_id: str,
+    ) -> dict[str, Any]:
+        """Explicitly assign ownership to one legacy project.
+
+        Ordinary entity upserts intentionally cannot assign ownership to a
+        legacy project. This narrow maintenance operation is the only source
+        mutation used by deterministic historical ownership backfill.
+        """
+        project_entity_id = validate_uuid7(project_entity_id, "project_entity_id")
+        workspace_entity_id = validate_uuid7(workspace_entity_id, "workspace_entity_id")
+        with self._require_or_lock():
+            project_path = self.root / "catalog/entities" / f"{project_entity_id}.json"
+            workspace_path = self.root / "catalog/entities" / f"{workspace_entity_id}.json"
+            if not project_path.exists():
+                raise ValidationError(f"project entity does not exist: {project_entity_id}")
+            if not workspace_path.exists():
+                raise ValidationError(f"workspace entity does not exist: {workspace_entity_id}")
+            project = read_json(project_path)
+            workspace = read_json(workspace_path)
+            if project.get("kind") != "project":
+                raise ValidationError(f"entity is not a project: {project_entity_id}")
+            if workspace.get("kind") != "workspace":
+                raise ValidationError(f"entity is not a workspace: {workspace_entity_id}")
+            owner = project.get("workspace_entity_id")
+            if owner == workspace_entity_id:
+                return {"entity": project, "changed": False}
+            if owner is not None:
+                raise IntegrityError(
+                    "project workspace ownership cannot be changed: "
+                    f"project={owner}, requested={workspace_entity_id}"
+                )
+            updated = dict(project)
+            updated["workspace_entity_id"] = workspace_entity_id
+            updated["updated_at"] = timestamp_now()
+            atomic_replace_json(project_path, updated)
+            if self.dependency_change_hook is not None:
+                self.dependency_change_hook("entity", project_entity_id)
+            return {"entity": updated, "changed": True}
 
     def upsert_artifact(
         self,

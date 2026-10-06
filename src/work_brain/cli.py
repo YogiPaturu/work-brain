@@ -61,6 +61,11 @@ def _parser() -> argparse.ArgumentParser:
     backfill_tags = sub.add_parser("backfill-tags", help="add domain tags as new entry revisions")
     backfill_tags.add_argument("--file", required=True, help="JSON mapping with defaults and entry assignments")
     backfill_tags.add_argument("--dry-run", action="store_true")
+    backfill_project_workspaces = sub.add_parser(
+        "backfill-project-workspaces",
+        help="assign deterministic workspace ownership to legacy projects",
+    )
+    backfill_project_workspaces.add_argument("--dry-run", action="store_true")
     migrate_tags = sub.add_parser("migrate-domain-tags", help="rename legacy domains keys in structured vault JSON")
     migrate_tags.add_argument("--dry-run", action="store_true")
 
@@ -365,6 +370,49 @@ def _backfill_tags(vault: Vault, payload: dict[str, Any], *, dry_run: bool) -> d
     return {"dry_run": False, "updated": updated, "unchanged": unchanged, "count": len(updated)}
 
 
+def _backfill_project_workspaces(vault: Vault, *, dry_run: bool) -> dict[str, Any]:
+    if dry_run:
+        plan = vault.project_workspace_backfill_plan()
+        return {"dry_run": True, **plan}
+
+    # Compute and apply under one source writer lock. The explicit source
+    # operation also revalidates each target, so a stale plan cannot reparent
+    # an already-owned project.
+    with vault.write_lock():
+        plan = vault.project_workspace_backfill_plan()
+        updated: list[dict[str, Any]] = []
+        unchanged = [item["project_entity_id"] for item in plan["already_owned"]]
+        for assignment in plan["assignments"]:
+            result = vault.backfill_project_workspace(
+                assignment["project_entity_id"], assignment["workspace_entity_id"]
+            )
+            if result["changed"]:
+                updated.append({
+                    "project_entity_id": assignment["project_entity_id"],
+                    "workspace_entity_id": assignment["workspace_entity_id"],
+                })
+            else:
+                unchanged.append(assignment["project_entity_id"])
+
+    maintenance: dict[str, Any] = {"status": "not_needed"}
+    if updated:
+        try:
+            retrieval = ProjectionMaintenance(vault).rebuild()
+            maintenance = {"status": "current", "retrieval": retrieval}
+        except Exception as exc:
+            # Source ownership is authoritative and already committed. Keep
+            # projection repair visible without reporting the source mutation
+            # as an ordinary failed operation.
+            maintenance = {"status": "failed", "error": str(exc)}
+    return {
+        "dry_run": False,
+        **plan,
+        "updated": updated,
+        "unchanged": unchanged,
+        "maintenance": maintenance,
+    }
+
+
 def _vault(args: argparse.Namespace) -> Vault:
     return Vault(resolve_vault_path(args.vault, config_path=args.config))
 
@@ -507,7 +555,7 @@ def _question_ref(value: str | None) -> QuestionRef | None:
 
 def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     command = args.command
-    machine = bool(args.json or command in {"state", "work", "evidence", "context", "experience", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session", "profiles", "backfill-context", "backfill-tags", "migrate-domain-tags"})
+    machine = bool(args.json or command in {"state", "work", "evidence", "context", "experience", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session", "profiles", "backfill-context", "backfill-tags", "backfill-project-workspaces", "migrate-domain-tags"})
     if command == "status":
         snapshot = build_live_status(_vault(args))
         return snapshot, bool(args.json)
@@ -618,6 +666,8 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         return _backfill_context(vault, _read_payload(args.file), dry_run=args.dry_run), True
     if command == "backfill-tags":
         return _backfill_tags(vault, _read_payload(args.file), dry_run=args.dry_run), True
+    if command == "backfill-project-workspaces":
+        return _backfill_project_workspaces(vault, dry_run=args.dry_run), True
     if command == "migrate-domain-tags":
         return vault.migrate_domain_tags(dry_run=args.dry_run), True
     if command == "doctor":

@@ -130,6 +130,15 @@ that stored the same metadata under `domains`. It renames the key to
 evidence values, rebuilds all derived projections, and supports `--dry-run`.
 Run it before using the renamed filters or profile scopes on an older vault.
 
+`work-brain backfill-project-workspaces --dry-run` and
+`work-brain backfill-project-workspaces` are explicit maintenance commands for legacy
+unparented projects. They derive ownership only from stable project/workspace
+IDs on authoritative current entries, apply only projects with exactly one
+known workspace, and never guess conflicts or projects with no workspace
+evidence. Run the dry run first. Applying the plan changes only project source
+metadata; it does not rewrite historical entries and refreshes rebuildable
+projections afterward.
+
 Starting any new activated Work Brain workflow automatically rolls over inactive recoverable
 sessions more than one calendar day old. It preserves their raw turns and marks
 them `pending_auto_commit`; the live workflow boundary publishes a summary
