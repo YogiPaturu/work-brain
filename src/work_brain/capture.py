@@ -414,12 +414,13 @@ class HarnessCaptureService:
                 }
             if event.kind in {"session_end", "interrupt"}:
                 self._deactivate_mapping(mappings, key, session_id, status="recoverable")
+                snapshot = self._lifecycle_snapshot(session_id, host=event.host, host_session_id=event.host_session_id)
                 return {
                     "captured": False,
-                    "status": "recoverable",
+                    "status": snapshot["capture_status"],
                     "session_id": session_id,
                     "event": event.kind,
-                    **self._lifecycle_snapshot(session_id, host=event.host, host_session_id=event.host_session_id),
+                    **snapshot,
                 }
             raise ValidationError(f"unsupported normalized capture event: {event.kind}")
 
@@ -580,6 +581,18 @@ class HarnessCaptureService:
         try:
             session = self.vault.read_session(session_id)
             runtime = dict(session.get("runtime") or {})
+            _, lifecycle_state = normalize_runtime(
+                runtime,
+                ended_at=session.get("ended_at"),
+                has_entry=False,
+            )
+            # Host end/interrupt events can arrive after the source boundary
+            # was already closed.  Treat those events as stale cleanup rather
+            # than attempting to reopen or downgrade the persisted state.
+            if lifecycle_state.capture == CaptureLifecycle.CLOSED:
+                return
+            if status == "recoverable" and lifecycle_state.capture == CaptureLifecycle.RECOVERABLE:
+                return
             turns = self.vault.list_turns(session_id)
             capture_state = CaptureLifecycle.RECOVERABLE if status == "recoverable" else CaptureLifecycle.CLOSED
             commit_state = CommitLifecycle.PENDING if turns else CommitLifecycle.NO_NEW_EVIDENCE

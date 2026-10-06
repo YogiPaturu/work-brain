@@ -18,6 +18,7 @@ from work_brain.config import resolve_vault_path, set_vault_path
 from work_brain.setup import HarnessSetup
 from work_brain.vault import Vault
 from work_brain.orchestrator import route_prompt
+from work_brain.lifecycle import CaptureLifecycle, CommitLifecycle, transition
 
 
 class HarnessV3Tests(unittest.TestCase):
@@ -31,6 +32,48 @@ class HarnessV3Tests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tempdir.cleanup()
+
+    def _map_session(self, host: str, host_session_id: str, session_id: str) -> None:
+        path = self.vault.root / "context/capture-mappings.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_text("{}", encoding="utf-8")
+        mappings = json.loads(path.read_text(encoding="utf-8"))
+        mappings[f"{host}:{host_session_id}"] = {
+            "session_id": session_id,
+            "host": host,
+            "host_session_id": host_session_id,
+        }
+        path.write_text(json.dumps(mappings), encoding="utf-8")
+
+    def _stale_mapped_session(
+        self,
+        *,
+        capture: CaptureLifecycle,
+        commit: CommitLifecycle,
+        host_session_id: str,
+    ) -> str:
+        session = self.vault.create_session(
+            started_at="2026-10-01T10:00:00+01:00",
+            runtime={
+                "host": "codex",
+                "host_session_id": host_session_id,
+                "capture_status": "active",
+            },
+        )
+        self.vault.append_turn(session["session_id"], "user", "Preserve this captured evidence.")
+        runtime, _ = transition(
+            session["runtime"],
+            capture=capture,
+            commit=commit,
+            ended_at="2026-10-01T10:01:00+01:00",
+            has_entry=commit == CommitLifecycle.COMMITTED,
+        )
+        session["ended_at"] = "2026-10-01T10:01:00+01:00"
+        session["runtime"] = runtime
+        self.vault.update_session_metadata(session["session_id"], session)
+        self._map_session("codex", host_session_id, session["session_id"])
+        return session["session_id"]
 
     def test_all_host_payloads_normalize_to_shared_events(self) -> None:
         codex = normalize_capture_event("codex", {"event": "UserPromptSubmit", "session_id": "c1", "prompt": "work brain: think", "model": "codex-model"})
@@ -172,6 +215,109 @@ class HarnessV3Tests(unittest.TestCase):
         self.assertEqual("recoverable", session["runtime"]["capture_status"])
         self.assertEqual("closed", session["runtime"]["capture_boundary"])
         self.assertEqual("pending_auto_commit", session["runtime"]["commit_status"])
+
+    def test_interrupt_deactivates_active_capture_as_recoverable(self) -> None:
+        service = HarnessCaptureService(self.vault)
+        started = service.handle(normalize_capture_event("codex", {
+            "event": "UserPromptSubmit", "session_id": "active-interrupt",
+            "prompt": "work brain: preserve this interruption",
+        }))
+        result = service.handle(normalize_capture_event("codex", {
+            "event": "Interrupt", "session_id": "active-interrupt",
+        }))
+        self.assertEqual("recoverable", result["status"])
+        session = self.vault.read_session(started["session_id"])
+        self.assertEqual("recoverable", session["runtime"]["capture_status"])
+        self.assertEqual("pending_auto_commit", session["runtime"]["commit_status"])
+
+    def test_late_session_end_does_not_reopen_closed_committed_session(self) -> None:
+        session_id = self._stale_mapped_session(
+            capture=CaptureLifecycle.CLOSED,
+            commit=CommitLifecycle.COMMITTED,
+            host_session_id="closed-session-end",
+        )
+        before = self.vault.read_session(session_id)
+        result = HarnessCaptureService(self.vault).handle(normalize_capture_event("codex", {
+            "event": "SessionEnd", "session_id": "closed-session-end",
+        }))
+        after = self.vault.read_session(session_id)
+        self.assertEqual("closed", result["status"])
+        self.assertEqual(before, after)
+        self.assertEqual({}, json.loads((self.vault.root / "context/capture-mappings.json").read_text(encoding="utf-8")))
+
+    def test_late_interrupt_does_not_reopen_closed_committed_session(self) -> None:
+        session_id = self._stale_mapped_session(
+            capture=CaptureLifecycle.CLOSED,
+            commit=CommitLifecycle.COMMITTED,
+            host_session_id="closed-interrupt",
+        )
+        before = self.vault.read_session(session_id)
+        result = HarnessCaptureService(self.vault).handle(normalize_capture_event("codex", {
+            "event": "Interrupt", "session_id": "closed-interrupt",
+        }))
+        after = self.vault.read_session(session_id)
+        self.assertEqual("closed", result["status"])
+        self.assertEqual(before, after)
+        self.assertEqual({}, json.loads((self.vault.root / "context/capture-mappings.json").read_text(encoding="utf-8")))
+
+    def test_late_session_end_preserves_closed_no_new_evidence(self) -> None:
+        session_id = self._stale_mapped_session(
+            capture=CaptureLifecycle.CLOSED,
+            commit=CommitLifecycle.NO_NEW_EVIDENCE,
+            host_session_id="closed-no-new-evidence",
+        )
+        before = self.vault.read_session(session_id)
+        HarnessCaptureService(self.vault).handle(normalize_capture_event("codex", {
+            "event": "SessionEnd", "session_id": "closed-no-new-evidence",
+        }))
+        self.assertEqual(before, self.vault.read_session(session_id))
+        self.assertEqual({}, json.loads((self.vault.root / "context/capture-mappings.json").read_text(encoding="utf-8")))
+
+    def test_repeated_late_session_end_is_idempotent_for_recoverable_session(self) -> None:
+        session_id = self._stale_mapped_session(
+            capture=CaptureLifecycle.RECOVERABLE,
+            commit=CommitLifecycle.PENDING,
+            host_session_id="recoverable-repeat",
+        )
+        service = HarnessCaptureService(self.vault)
+        first = service.handle(normalize_capture_event("codex", {
+            "event": "SessionEnd", "session_id": "recoverable-repeat",
+        }))
+        self.assertEqual("recoverable", first["status"])
+        self._map_session("codex", "recoverable-repeat", session_id)
+        before = self.vault.read_session(session_id)
+        second = service.handle(normalize_capture_event("codex", {
+            "event": "SessionEnd", "session_id": "recoverable-repeat",
+        }))
+        self.assertEqual("recoverable", second["status"])
+        self.assertEqual(before, self.vault.read_session(session_id))
+        self.assertEqual({}, json.loads((self.vault.root / "context/capture-mappings.json").read_text(encoding="utf-8")))
+
+    def test_codex_hook_late_end_is_successful_and_not_recorded_as_failure(self) -> None:
+        session_id = self._stale_mapped_session(
+            capture=CaptureLifecycle.CLOSED,
+            commit=CommitLifecycle.COMMITTED,
+            host_session_id="closed-hook",
+        )
+        before_health = self.vault.capture_hook_health()
+        output = StringIO()
+        with redirect_stdout(output):
+            with patch("sys.stdin", StringIO(json.dumps({
+                "hook_event_name": "SessionEnd", "session_id": "closed-hook",
+            }))):
+                self.assertEqual(0, main([
+                    "--vault", str(self.vault.root), "capture-hook", "--host", "codex",
+                ]))
+        self.assertEqual({}, json.loads(output.getvalue()))
+        self.assertEqual(before_health, self.vault.capture_hook_health())
+        self.assertEqual("closed", self.vault.read_session(session_id)["runtime"]["capture_status"])
+
+    def test_lifecycle_rejects_closed_to_recoverable_transition(self) -> None:
+        with self.assertRaisesRegex(ValueError, "closed -> recoverable"):
+            transition(
+                {"capture_status": "closed", "commit_status": "committed"},
+                capture=CaptureLifecycle.RECOVERABLE,
+            )
 
     def test_explicit_close_deactivates_mapping(self) -> None:
         service = HarnessCaptureService(self.vault)
