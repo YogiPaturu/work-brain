@@ -108,12 +108,17 @@ source evidence with `capture_fidelity: imported`; do not pretend it was
 verbatim host capture, do not assign unknown historical timestamps, and do not
 merge it into an existing entry before review.
 
-Lifecycle visibility is part of the user contract. Whenever Work Brain starts,
-resumes, or reaches a boundary, report capture state and commit state
-separately: whether raw turns are actively being saved, whether a recoverable
-raw session exists, the turn count and last-captured time, and whether a
-structured entry is committed, pending, absent, or imported. If capture is
-inactive, say so plainly and tell the user how to reactivate it.
+Lifecycle visibility is part of the user contract. The runtime/hook owns the
+routine compact lifecycle banner at valid host boundaries; do not repeat a
+banner that the runtime already supplied. Still inspect and distinguish capture
+state and commit state separately when required: whether raw turns are actively
+being saved, whether a recoverable raw session exists, the turn count and
+last-captured time, and whether a structured entry is committed, pending,
+absent, or imported. Explain exceptional or ambiguous conditions when they
+affect the user's work, including recoverable raw sessions, failed or pending
+structured commits, ambiguous or missing active mappings, imported capture, or
+capture unexpectedly being inactive. If capture is inactive, say so plainly
+when relevant and tell the user how to reactivate it.
 
 Use the read-only `work-brain status --json` operation as the first lifecycle
 check because it discovers the active host mapping. Use `session status` with
@@ -122,10 +127,11 @@ The human-facing `work-brain status`, `status --quiet`, and `status --watch`
 views are optional terminal conveniences; they never replace exact session
 verification and never mutate raw turns.
 
-On Codex, the host capture hook supplies the same compact lifecycle banner at
-the host's valid session, prompt, and stop hook boundaries. Treat that banner
-as runtime-provided state, not as a reason to invent a session or skip exact
-provenance checks.
+On Codex, the host capture hook supplies the compact lifecycle banner at the
+host's valid session, prompt, and stop hook boundaries. Treat that banner as
+runtime-owned routine status: do not duplicate it, and do not treat it as a
+reason to invent a session or skip exact provenance checks. Explain the state
+yourself when the banner is absent or an exceptional condition needs context.
 
 Resources:
 

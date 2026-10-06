@@ -35,10 +35,12 @@ At every Work Brain start, resume, workflow boundary, or commit boundary, use
 the read-only `work-brain status --json` dashboard first. It auto-detects the
 active host mapping and prevents choosing a session merely because it is the
 newest recoverable one. For a selected session, use `session status` to verify
-the exact session ID before reading turns or committing. Report capture and
-commit independently: `capture_active`, `lifecycle`, `turn_count`,
-`last_captured_at`, `commit_status`, and `message`. An empty `work recent`
-result does not mean that no raw session exists.
+the exact session ID before reading turns or committing. The runtime/hook owns
+routine lifecycle display; do not duplicate its banner. Inspect capture and
+commit independently using `capture_active`, `lifecycle`, `turn_count`,
+`last_captured_at`, `commit_status`, and `message`, and explain exceptional or
+ambiguous conditions when they matter. An empty `work recent` result does not
+mean that no raw session exists.
 
 An ordinary `commit-draft` closes only the current bounded logical session and
 keeps the host capture envelope active. `close-day` and explicit stop commands

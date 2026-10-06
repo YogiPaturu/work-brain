@@ -85,11 +85,15 @@ twice.
   report the recoverable session and defer it rather than manufacturing turns
   or merging it into an older entry.
 
-At the start of the response, show a compact lifecycle banner with both
-capture and commit state. Use the application’s `session status` fields rather
-than inferring state from whether `work recent` is empty. The banner should
-identify whether capture is active, whether raw turns are recoverable, whether
-the session is imported, and whether a structured entry exists.
+Rely on the runtime-provided lifecycle banner when present; do not repeat it in
+the model response. Use the application’s `session status` fields rather than
+inferring state from whether `work recent` is empty. If no runtime lifecycle
+information was supplied, the agent MAY present the compact capture and commit
+state from the verified application status. In either case, explain an
+exceptional, ambiguous, or decision-relevant condition concisely before
+continuing. The verified state should distinguish whether capture is active,
+whether raw turns are recoverable, whether the session is imported, and whether
+a structured entry exists.
 
 For example:
 

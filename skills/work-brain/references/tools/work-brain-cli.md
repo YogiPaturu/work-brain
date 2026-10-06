@@ -134,11 +134,13 @@ time, commit state, and recoverable-session count. `status --quiet` prints a
 single prompt-friendly line; `status --watch` refreshes the dashboard until
 interrupted. These are read-only views and never modify raw turns or entries.
 
-For Codex, the installed capture hook also emits the compact lifecycle banner
-through Codex's valid `SessionStart`, `UserPromptSubmit`, and `Stop` hook
-output once Work Brain is active or recoverable. The agent does not need to
-remember to run `status` for the banner; it must still verify the exact session
-with `session status` before reading turns or committing.
+For Codex, the installed capture hook owns and emits the compact lifecycle
+banner through Codex's valid `SessionStart`, `UserPromptSubmit`, and `Stop`
+hook output once Work Brain is active or recoverable. The agent does not need
+to remember to run `status` for routine display and must not duplicate the
+banner. It must still verify the exact session with `session status` before
+reading turns or committing, and explain exceptional or ambiguous lifecycle
+conditions when relevant.
 
 `session quarantine --session-id SESSION_ID --reason REASON` is a maintenance
 operation for an explicitly identified closed session with a known bad
