@@ -195,6 +195,61 @@ class VaultTests(unittest.TestCase):
             ).fetchone()
             self.assertEqual(ranq["entity_id"], row["workspace_entity_id"])
 
+    def test_commit_entry_rejects_conflicting_workspace_and_owned_project(self) -> None:
+        ranq = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        personal = self.vault.upsert_entity(kind="workspace", canonical_name="Personal")
+        project = self.vault.upsert_entity(
+            kind="project", canonical_name="Website", workspace_entity_id=ranq["entity_id"],
+        )
+        self.vault.append_turn(self.session["session_id"], "user", "Commit the Website context.")
+        payload = entry_payload(self.session)
+        payload.update({
+            "workspace_entity_id": personal["entity_id"],
+            "project_entity_id": project["entity_id"],
+        })
+
+        with self.assertRaisesRegex(IntegrityError, "does not match project workspace ownership"):
+            self.vault.commit_entry(self.session["session_id"], payload, refresh_projections=False)
+        self.assertEqual([], self.vault.all_entry_revisions())
+
+    def test_context_backfill_rejects_conflicting_workspace_and_owned_project(self) -> None:
+        ranq = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        personal = self.vault.upsert_entity(kind="workspace", canonical_name="Personal")
+        project = self.vault.upsert_entity(
+            kind="project", canonical_name="Website", workspace_entity_id=ranq["entity_id"],
+        )
+        self.vault.append_turn(self.session["session_id"], "user", "Backfill the Website context.")
+        self.vault.commit_entry(self.session["session_id"], entry_payload(self.session), refresh_projections=False)
+
+        with self.assertRaisesRegex(IntegrityError, "does not match project workspace ownership"):
+            self.vault.backfill_entry_context(
+                self.session["entry_id"],
+                workspace=personal["entity_id"],
+                project=project["entity_id"],
+            )
+        self.assertEqual([1], [entry.revision for entry, _ in self.vault.all_entry_revisions()])
+        current = self.vault.get_current_entry(self.session["entry_id"])
+        self.assertIsNone(current.workspace_entity_id)
+        self.assertIsNone(current.project_entity_id)
+
+    def test_doctor_reports_conflicting_source_entry_context(self) -> None:
+        ranq = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        personal = self.vault.upsert_entity(kind="workspace", canonical_name="Personal")
+        project = self.vault.upsert_entity(
+            kind="project", canonical_name="Website", workspace_entity_id=ranq["entity_id"],
+        )
+        self.vault.append_turn(self.session["session_id"], "user", "Record the Website context.")
+        self.vault.commit_entry(self.session["session_id"], entry_payload(self.session), refresh_projections=False)
+        entry_path = self.vault.session_dir(self.session["session_id"]) / "entries/0001.json"
+        raw = json.loads(entry_path.read_text(encoding="utf-8"))
+        raw["workspace_entity_id"] = personal["entity_id"]
+        raw["project_entity_id"] = project["entity_id"]
+        entry_path.write_text(json.dumps(raw), encoding="utf-8")
+
+        diagnostics = self.vault.doctor()
+
+        self.assertTrue(any("entry context conflict" in diagnostic for diagnostic in diagnostics))
+
     def test_source_commit_survives_session_lifecycle_update_failure_and_retry(self) -> None:
         self.vault.append_turn(self.session["session_id"], "user", "Keep the immutable entry even if lifecycle metadata is unavailable.", recorded_at="2026-09-30T10:01:00+01:00")
         payload = entry_payload(self.session)

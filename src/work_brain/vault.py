@@ -450,8 +450,19 @@ class Vault:
                 project_path = self.root / "catalog/entities" / f"{entry.project_entity_id}.json"
                 if not project_path.exists():
                     raise IntegrityError(f"missing project reference: {entry.project_entity_id}")
-                if read_json(project_path).get("kind") != "project":
+                project = read_json(project_path)
+                if project.get("kind") != "project":
                     raise IntegrityError(f"project reference is not a project entity: {entry.project_entity_id}")
+                project_workspace_id = project.get("workspace_entity_id")
+                if (
+                    entry.workspace_entity_id is not None
+                    and project_workspace_id is not None
+                    and project_workspace_id != entry.workspace_entity_id
+                ):
+                    raise IntegrityError(
+                        "entry workspace does not match project workspace ownership: "
+                        f"entry={entry.workspace_entity_id}, project={project_workspace_id}"
+                    )
             for ref in entry.artifact_refs:
                 if not self._catalog_exists("artifact", ref["artifact_id"]):
                     raise IntegrityError(f"missing artifact reference: {ref['artifact_id']}")
@@ -1063,6 +1074,22 @@ class Vault:
                     if entry.commit_id in commits:
                         diagnostics.append(f"duplicate commit ID: {entry.commit_id}")
                     commits.add(entry.commit_id)
+                    if entry.workspace_entity_id is not None and entry.project_entity_id is not None:
+                        project_path = self.root / "catalog/entities" / f"{entry.project_entity_id}.json"
+                        if project_path.exists():
+                            project = read_json(project_path)
+                            project_workspace_id = project.get("workspace_entity_id")
+                            if (
+                                project.get("kind") == "project"
+                                and project_workspace_id is not None
+                                and project_workspace_id != entry.workspace_entity_id
+                            ):
+                                diagnostics.append(
+                                    "entry context conflict: "
+                                    f"{entry.entry_id} revision {entry.revision} has workspace "
+                                    f"{entry.workspace_entity_id} but project {entry.project_entity_id} "
+                                    f"is owned by workspace {project_workspace_id}"
+                                )
                     expected += 1
             except Exception as exc:
                 diagnostics.append(f"entry integrity {session['session_id']}: {exc}")
