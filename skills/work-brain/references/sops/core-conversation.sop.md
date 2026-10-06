@@ -162,6 +162,11 @@ apparent, close without asking it.
   user’s explicit words, the active work item, an active communication profile,
   or supplied retrieved context; it MUST NOT invent a name when the context is
   genuinely ambiguous.
+- Before inventing a workspace or project name, or asking the user to classify
+  an apparently previously known context, the agent SHOULD use the read-only
+  `resolve_context` operation. Use a deterministic canonical result; if only
+  historical candidates are returned, choose one only when the conversation
+  makes it unambiguous, otherwise ask one concise clarification question.
 - If workspace or project classification is materially ambiguous, the agent
   MUST ask one concise clarification question before committing. It MUST always
   emit both required names in the final draft. Missing, empty, or null values

@@ -44,6 +44,7 @@ the default:
 ```sh
 work-brain state current
 work-brain work recent --limit 8
+work-brain context resolve --workspace "Ranq" --project "token refresh work" --limit 5
 work-brain work loops --limit 20
 work-brain evidence get --entry-id ENTRY_ID
 work-brain evidence search --query "import reliability" --page-size 10
@@ -62,6 +63,14 @@ work-brain session turns --session-id SESSION_ID --offset 0 --limit 100
 work-brain session status --session-id SESSION_ID
 work-brain session import --file transcript.json
 ```
+
+`context resolve` is the read-only application operation for resolving existing
+workspace/project identities from canonical names, aliases, or bounded
+historical evidence. The model calls this operation rather than constructing
+SQL or inspecting SQLite. SQLite is a fast lookup/retrieval projection;
+source catalog entities remain authoritative. A deterministic exact match may
+be used for CommitDraft's plain-string `workspace` and `project` fields;
+historical matches are candidates and should be clarified if ambiguous.
 
 `evidence search` is the retrieval application operation. It returns bounded
 EvidenceCards with stable entry/revision refs and an opaque continuation

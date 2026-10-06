@@ -29,17 +29,17 @@ class ToolDefinition:
 
 
 PROFILES: dict[str, tuple[str, ...]] = {
-    "think": ("search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "get_current_state"),
-    "operate": ("get_current_state", "get_recent_work", "search_evidence", "select_evidence", "hydrate_evidence", "list_work_item_communication_profiles"),
-    "communicate": ("get_current_state", "get_recent_work", "search_evidence", "select_evidence", "search_profile_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "get_communication_profile"),
+    "think": ("resolve_context", "search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "get_current_state"),
+    "operate": ("resolve_context", "get_current_state", "get_recent_work", "search_evidence", "select_evidence", "hydrate_evidence", "list_work_item_communication_profiles"),
+    "communicate": ("resolve_context", "get_current_state", "get_recent_work", "search_evidence", "select_evidence", "search_profile_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "get_communication_profile"),
     "career": (
-        "search_questions", "get_question", "choose_question",
+        "resolve_context", "search_questions", "get_question", "choose_question",
         "search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience",
         "mark_interview_candidate", "unmark_interview_candidate", "list_interview_candidates", "associate_entry_experience",
     ),
     "open-day": ("get_current_state", "get_recent_work"),
     "close-day": ("get_current_state", "get_close_day_record", "list_post_close_communication_profiles"),
-    "backfill": ("search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "associate_entry_experience"),
+    "backfill": ("resolve_context", "search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "associate_entry_experience"),
 }
 
 
@@ -54,6 +54,7 @@ class ToolRegistry:
             "Read target-day committed entries, committed entries missing from their journal projection, and all uncommitted raw sessions.",
         ),
         "search_evidence": ToolDefinition("search_evidence", "Search evidence through the configured retrieval adapter."),
+        "resolve_context": ToolDefinition("resolve_context", "Resolve existing workspace/project identities from names or historical evidence."),
         "select_evidence": ToolDefinition("select_evidence", "Select bounded evidence by deterministic metadata filters without a text query."),
         "search_profile_evidence": ToolDefinition("search_profile_evidence", "Search evidence using a validated communication profile's exact scope."),
         "hydrate_evidence": ToolDefinition("hydrate_evidence", "Hydrate selected stable evidence references."),
@@ -108,6 +109,18 @@ class ToolRegistry:
         self.active_profile_id = profile.profile_id
 
     def call(self, name: str, **arguments: Any) -> ToolResult:
+        if name == "resolve_context":
+            try:
+                from .context_resolver import ContextResolver
+
+                resolver = ContextResolver(self.vault, search_evidence=self.retrieval.get("search_evidence"))
+                return ToolResult(True, resolver.resolve_context(
+                    workspace_hint=arguments.get("workspace_hint"),
+                    project_hint=arguments.get("project_hint"),
+                    limit=arguments.get("limit", 5),
+                ))
+            except (ValidationError, ValueError) as exc:
+                return ToolResult(False, error=str(exc))
         if name == "get_current_state":
             path = self.vault.root / "state/current.json"
             return ToolResult(True, json.loads(path.read_text(encoding="utf-8")))

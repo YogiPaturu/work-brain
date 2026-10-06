@@ -12,6 +12,7 @@ from .career import CareerService, QuestionBank, QuestionFilters, QuestionRef
 from .capture_status import live_status as build_live_status, session_status as build_session_status, status_text
 from .commit import CommitResolver
 from .config import default_config_path, read_config, resolve_vault_path, set_vault_path
+from .context_resolver import ContextResolver
 from .domain import normalize_domain_tags
 from .errors import FeatureUnavailable, IntegrityError, LockError, PersistenceError, ValidationError
 from .experiences import ExperienceService
@@ -143,6 +144,13 @@ def _parser() -> argparse.ArgumentParser:
     get = evidence_sub.add_parser("get")
     get.add_argument("--entry-id", required=True)
     get.add_argument("--revision", type=int)
+
+    context = sub.add_parser("context", help="agent-facing context resolution")
+    context_sub = context.add_subparsers(dest="context_command", required=True)
+    context_resolve = context_sub.add_parser("resolve", help="resolve existing workspace/project identities")
+    context_resolve.add_argument("--workspace", dest="workspace_hint")
+    context_resolve.add_argument("--project", dest="project_hint")
+    context_resolve.add_argument("--limit", type=int, default=5)
 
     experience = sub.add_parser("experience", help="read source-backed professional Experiences")
     experience_sub = experience.add_subparsers(dest="experience_command", required=True)
@@ -499,7 +507,7 @@ def _question_ref(value: str | None) -> QuestionRef | None:
 
 def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     command = args.command
-    machine = bool(args.json or command in {"state", "work", "evidence", "experience", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session", "profiles", "backfill-context", "backfill-tags", "migrate-domain-tags"})
+    machine = bool(args.json or command in {"state", "work", "evidence", "context", "experience", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session", "profiles", "backfill-context", "backfill-tags", "migrate-domain-tags"})
     if command == "status":
         snapshot = build_live_status(_vault(args))
         return snapshot, bool(args.json)
@@ -531,6 +539,12 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         return HarnessCaptureService(_vault(args)).stop(host=args.host, host_session_id=args.host_session_id, session_id=args.session_id), True
 
     vault = _vault(args)
+    if command == "context" and args.context_command == "resolve":
+        return ContextResolver(vault).resolve_context(
+            workspace_hint=args.workspace_hint,
+            project_hint=args.project_hint,
+            limit=args.limit,
+        ), True
     if command == "experience":
         service = ExperienceService(vault)
         if args.experience_command == "list":

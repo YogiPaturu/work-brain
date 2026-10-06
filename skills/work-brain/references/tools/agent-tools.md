@@ -8,6 +8,8 @@ commands through the harness's existing shell capability:
 - `get_recent_work`
 - `get_close_day_record` for target-day committed entries, committed entries
   missing from their journal projection, and every uncommitted raw session
+- `resolve_context` for read-only resolution of existing workspace/project
+  identities from a name, alias, or bounded historical evidence search
 - `search_evidence`
 - `select_evidence` for bounded filter-only selection without a text query
 - `hydrate_evidence`
@@ -53,6 +55,13 @@ exposes raw SQL, vector primitives, arbitrary vault filesystem mutation, or
 internal persistence operations as part of its supported application
 interface. Retrieval implementation belongs behind the application adapter
 and retrieval contract.
+
+For context classification, the model calls `resolve_context`; it never
+constructs SQL. The application may use SQLite entity and retrieval indexes
+internally, but source catalog entities remain authoritative and resolution is
+read-only. Use a canonical result when it is deterministic, ask one concise
+clarification question when candidates remain ambiguous, and do not invent a
+durable workspace or project name when no candidate is supported.
 
 The host agent can read other files that its own permissions allow. A Skill is
 not a security boundary; the documented CLI is the supported Work Brain

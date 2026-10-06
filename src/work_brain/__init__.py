@@ -31,6 +31,7 @@ _EXPORTS = {
     "ToolDefinition": (".tools", "ToolDefinition"),
     "ToolRegistry": (".tools", "ToolRegistry"),
     "ToolResult": (".tools", "ToolResult"),
+    "ContextResolver": (".context_resolver", "ContextResolver"),
     "CommunicationProfile": (".profiles", "CommunicationProfile"),
     "CommunicationProfileStore": (".profiles", "CommunicationProfileStore"),
     "profiles_document": (".profiles", "profiles_document"),
