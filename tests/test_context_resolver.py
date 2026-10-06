@@ -124,6 +124,32 @@ class ContextResolverTests(unittest.TestCase):
             {item["entity_id"] for item in result["project"]["candidates"]},
         )
 
+    def test_partial_projection_cannot_hide_authoritative_exact_ambiguity(self) -> None:
+        first = self.vault.upsert_entity(kind="project", canonical_name="Authentication")
+        second = self.vault.upsert_entity(kind="project", canonical_name="Authentication")
+        self._rebuild_indexes()
+
+        conn = self.vault._database().connect()
+        try:
+            conn.execute("DELETE FROM entity_aliases WHERE entity_id = ?", (second["entity_id"],))
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = ContextResolver(self.vault).resolve_context(project_hint="Authentication")
+
+        self.assertEqual("ambiguous", result["project"]["status"])
+        self.assertEqual(
+            {first["entity_id"], second["entity_id"]},
+            {item["entity_id"] for item in result["project"]["candidates"]},
+        )
+
+    def test_open_and_close_day_expose_context_resolution(self) -> None:
+        registry = ToolRegistry(self.vault)
+
+        self.assertIn("resolve_context", {item.name for item in registry.definitions("open-day")})
+        self.assertIn("resolve_context", {item.name for item in registry.definitions("close-day")})
+
     def test_workspace_cooccurrence_disambiguates_exact_project_alias(self) -> None:
         workspace = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
         first = self.vault.upsert_entity(kind="project", canonical_name="Authentication", aliases=["Auth"])

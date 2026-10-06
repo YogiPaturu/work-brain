@@ -265,7 +265,10 @@ class CommunicationProfileTests(unittest.TestCase):
         orchestrator = SessionOrchestrator(self.vault, model, tools=registry)
         orchestrator.start(workflow="close-day")
         response = orchestrator.turn("close my day")
-        self.assertEqual("list_post_close_communication_profiles", model.calls[0]["tools"][2])
+        self.assertIn(
+            "list_post_close_communication_profiles",
+            model.calls[0]["tools"],
+        )
         self.assertIn("No post-close", response.text)
 
     def test_cli_can_validate_list_and_show_a_profile(self) -> None:

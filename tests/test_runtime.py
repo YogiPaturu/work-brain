@@ -420,7 +420,8 @@ class RuntimeTests(unittest.TestCase):
         validator = CommitDraftValidator()
         self.assertEqual("reconstructed", "reconstructed" if validator.validate(draft(workflow="backfill"), turn_count=1, workflow="backfill") else "")
         registry = ToolRegistry(self.vault)
-        self.assertEqual({"get_current_state", "get_recent_work"}, {tool.name for tool in registry.definitions("open-day")})
+        self.assertEqual({"resolve_context", "get_current_state", "get_recent_work"}, {tool.name for tool in registry.definitions("open-day")})
+        self.assertIn("resolve_context", {tool.name for tool in registry.definitions("close-day")})
         self.assertIn("list_post_close_communication_profiles", {tool.name for tool in registry.definitions("close-day")})
         self.assertFalse(any(tool.name in {"sql", "filesystem", "vector"} for tool in registry.definitions("think")))
 

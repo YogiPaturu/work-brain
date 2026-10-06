@@ -112,34 +112,49 @@ class ContextResolver:
             finally:
                 conn.close()
 
-        candidates: list[dict[str, Any]] = []
+        candidates_by_id: dict[str, dict[str, Any]] = {}
         for row in rows:
             source = self._source_entity(row["entity_id"], kind)
             if source is None:
                 continue
-            candidates.append({
-                "entity_id": source["entity_id"],
-                "canonical_name": source["canonical_name"],
-                "matched_by": "canonical" if normalize_alias(source["canonical_name"]) == normalized else "alias",
-            })
-        if not candidates:
-            # A missing or stale derived entity projection must not make an
-            # existing authoritative identity impossible to resolve. This is
-            # only a bounded read fallback; it never repairs or mutates the
-            # source catalog.
-            for path in sorted((self.vault.root / "catalog/entities").glob("*.json")):
-                source = read_json(path)
-                if source.get("kind") != kind:
-                    continue
-                names = [source.get("canonical_name", ""), *source.get("aliases", [])]
-                if any(isinstance(name, str) and normalize_alias(name) == normalized for name in names):
-                    candidates.append({
-                        "entity_id": source["entity_id"],
-                        "canonical_name": source["canonical_name"],
-                        "matched_by": "canonical" if normalize_alias(source["canonical_name"]) == normalized else "alias",
-                    })
+            candidate = self._source_exact_candidate(source, kind, normalized)
+            if candidate is not None:
+                candidates_by_id[candidate["entity_id"]] = candidate
+
+        # The source catalog is authoritative for completeness. Always union
+        # its matches with the fast projection result so a stale or partial
+        # SQLite index cannot turn an authoritative ambiguity into a
+        # deterministic resolution. This is a bounded read fallback; it never
+        # repairs or mutates the source catalog.
+        for path in sorted((self.vault.root / "catalog/entities").glob("*.json")):
+            source = read_json(path)
+            candidate = self._source_exact_candidate(source, kind, normalized)
+            if candidate is not None:
+                candidates_by_id[candidate["entity_id"]] = candidate
+
+        candidates = list(candidates_by_id.values())
         candidates.sort(key=lambda item: (normalize_alias(item["canonical_name"]), item["entity_id"]))
         return candidates[:limit]
+
+    @staticmethod
+    def _source_exact_candidate(
+        source: Mapping[str, Any], kind: str, normalized: str,
+    ) -> dict[str, Any] | None:
+        if source.get("kind") != kind:
+            return None
+        entity_id = source.get("entity_id")
+        canonical_name = source.get("canonical_name")
+        aliases = source.get("aliases", [])
+        if not isinstance(entity_id, str) or not isinstance(canonical_name, str) or not canonical_name:
+            return None
+        names = [canonical_name, *(aliases if isinstance(aliases, list) else [])]
+        if not any(isinstance(name, str) and normalize_alias(name) == normalized for name in names):
+            return None
+        return {
+            "entity_id": entity_id,
+            "canonical_name": canonical_name,
+            "matched_by": "canonical" if normalize_alias(canonical_name) == normalized else "alias",
+        }
 
     def _scope_exact_projects(
         self,

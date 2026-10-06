@@ -37,8 +37,8 @@ PROFILES: dict[str, tuple[str, ...]] = {
         "search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience",
         "mark_interview_candidate", "unmark_interview_candidate", "list_interview_candidates", "associate_entry_experience",
     ),
-    "open-day": ("get_current_state", "get_recent_work"),
-    "close-day": ("get_current_state", "get_close_day_record", "list_post_close_communication_profiles"),
+    "open-day": ("resolve_context", "get_current_state", "get_recent_work"),
+    "close-day": ("resolve_context", "get_current_state", "get_close_day_record", "list_post_close_communication_profiles"),
     "backfill": ("resolve_context", "search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "associate_entry_experience"),
 }
 
