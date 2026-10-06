@@ -7,22 +7,30 @@ SessionEntry revisions and can be rebuilt at any time.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
+import json
 from dataclasses import dataclass
+from datetime import timezone
 from typing import Any, Iterable, Mapping
 
 from .domain import SessionEntry
 from .domain import normalize_alias
 from .errors import IntegrityError, ValidationError
-from .fsutil import read_json
+from .fsutil import canonical_json_bytes, read_json
 from .ids import validate_uuid7
 from .retrieval import EvidenceRetriever
 from .services import ProjectionMaintenance
+from .timeutil import parse_timestamp
 
 
 MAX_EXPERIENCE_CARD_REFS = 12
 MAX_EXPERIENCE_RESULTS = 20
 MAX_RELATED_RESULTS = 20
 MAX_RELATED_QUERY_CHARS = 1000
+MAX_MINING_PAGE_SIZE = 20
+MINING_CURSOR_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -163,6 +171,84 @@ class ExperienceService:
         if "omitted_stale_entries" in evidence:
             result["omitted_stale_entries"] = evidence["omitted_stale_entries"]
         return result
+
+    def mine(
+        self,
+        *,
+        page_size: int = 5,
+        related_limit: int = 6,
+        filters: Mapping[str, Any] | None = None,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a bounded, source-backed page of ungrouped entry anchors.
+
+        Anchor selection is deliberately independent of retrieval.  The
+        opaque cursor is a keyset continuation over the source chronology, so
+        associations made between requests cannot cause offset drift.
+        """
+        if not isinstance(page_size, int) or not 1 <= page_size <= MAX_MINING_PAGE_SIZE:
+            raise ValidationError(f"page_size must be between 1 and {MAX_MINING_PAGE_SIZE}")
+        if not isinstance(related_limit, int) or not 1 <= related_limit <= MAX_RELATED_RESULTS:
+            raise ValidationError(f"related_limit must be between 1 and {MAX_RELATED_RESULTS}")
+        if filters is not None and not isinstance(filters, Mapping):
+            raise ValidationError("filters must be an object")
+        normalized_filters = dict(filters or {})
+        self._validate_filters(normalized_filters)
+        fingerprint = hashlib.sha256(canonical_json_bytes({
+            "version": MINING_CURSOR_VERSION,
+            "filters": normalized_filters,
+        })).hexdigest()
+
+        continuation = self._decode_mining_cursor(cursor) if cursor else None
+        if continuation is not None and (
+            continuation.get("version") != MINING_CURSOR_VERSION
+            or continuation.get("filter_fingerprint") != fingerprint
+        ):
+            return {
+                "status": "cursor_expired",
+                "items": [],
+                "next_cursor": None,
+                "incomplete": False,
+                "degraded_components": [],
+            }
+
+        anchors = [
+            entry for entry in self.vault.all_current_entries()
+            if not self._experience_ids(entry) and self._matches(entry, normalized_filters)
+        ]
+        anchors.sort(key=self._mining_key)
+        if continuation is not None:
+            last_key = continuation["last_key"]
+            last_entry_id = continuation["last_entry_id"]
+            anchors = [
+                entry for entry in anchors
+                if (self._mining_key(entry), entry.entry_id) > (last_key, last_entry_id)
+            ]
+
+        page = anchors[:page_size]
+        items = [self.related(entry.entry_id, limit=related_limit) for entry in page]
+        degraded_components = sorted({
+            component
+            for item in items
+            for component in item.get("degraded_components", [])
+        })
+        incomplete = any(bool(item.get("incomplete")) or item.get("status") != "ok" for item in items)
+        next_cursor = None
+        if len(anchors) > len(page) and page:
+            last = page[-1]
+            next_cursor = self._encode_mining_cursor({
+                "version": MINING_CURSOR_VERSION,
+                "filter_fingerprint": fingerprint,
+                "last_key": self._mining_key(last),
+                "last_entry_id": last.entry_id,
+            })
+        return {
+            "status": "degraded" if incomplete else "ok",
+            "items": items,
+            "next_cursor": next_cursor,
+            "incomplete": incomplete,
+            "degraded_components": degraded_components,
+        }
 
     def get(self, experience_id: str) -> dict[str, Any]:
         experience_id = validate_uuid7(experience_id, "experience_id")
@@ -360,6 +446,40 @@ class ExperienceService:
         query = " ".join(part.strip() for part in parts if part and part.strip())
         return query[:MAX_RELATED_QUERY_CHARS]
 
+    @staticmethod
+    def _mining_key(entry: SessionEntry) -> str:
+        value = entry.occurrence.start or entry.created_at
+        if entry.occurrence.precision == "instant" or entry.occurrence.start is None:
+            return parse_timestamp(value).astimezone(timezone.utc).isoformat()
+        return value
+
+    @staticmethod
+    def _encode_mining_cursor(payload: Mapping[str, Any]) -> str:
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    @staticmethod
+    def _decode_mining_cursor(value: str) -> dict[str, Any]:
+        if not isinstance(value, str) or not value:
+            raise ValidationError("cursor must be an opaque mining continuation")
+        try:
+            padded = value + "=" * (-len(value) % 4)
+            decoded = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
+        except (binascii.Error, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValidationError("cursor must be an opaque mining continuation") from exc
+        if not isinstance(decoded, dict):
+            raise ValidationError("cursor must be an opaque mining continuation")
+        required = ("version", "filter_fingerprint", "last_key", "last_entry_id")
+        if (
+            not isinstance(decoded.get("version"), int)
+            or not isinstance(decoded.get("filter_fingerprint"), str)
+            or not isinstance(decoded.get("last_key"), str)
+            or not isinstance(decoded.get("last_entry_id"), str)
+            or any(key not in decoded for key in required)
+        ):
+            raise ValidationError("cursor must be an opaque mining continuation")
+        return decoded
+
     def _groups(self, *, filters: Mapping[str, Any] | None = None) -> dict[str, list[SessionEntry]]:
         groups: dict[str, list[SessionEntry]] = {}
         for entry in self.vault.all_current_entries():
@@ -433,14 +553,9 @@ class ExperienceService:
         return None
 
     def _matches(self, entry: SessionEntry, filters: Mapping[str, Any]) -> bool:
-        allowed = {"workspaces", "projects", "domain_tags", "occurred_after", "occurred_before"}
-        unknown = sorted(set(filters) - allowed)
-        if unknown:
-            raise ValidationError(f"unknown experience filter: {unknown[0]}")
+        self._validate_filters(filters)
         for field, entity_id in (("workspaces", entry.workspace_entity_id), ("projects", entry.project_entity_id)):
             values = filters.get(field, [])
-            if not isinstance(values, list) or any(not isinstance(value, str) or not value.strip() for value in values):
-                raise ValidationError(f"{field} must be a list of non-empty strings")
             if values:
                 if entity_id is None:
                     return False
@@ -453,8 +568,6 @@ class ExperienceService:
                 if not all(value in names or normalize_alias(value) in names for value in values):
                     return False
         tags = filters.get("domain_tags", [])
-        if not isinstance(tags, list) or any(not isinstance(tag, str) or not tag.strip() for tag in tags):
-            raise ValidationError("domain_tags must be a list of non-empty strings")
         if tags and not set(tags).issubset(set(entry.domain_tags)):
             return False
         value = entry.occurrence.start or entry.created_at
@@ -463,3 +576,14 @@ class ExperienceService:
         if filters.get("occurred_before") is not None and value >= str(filters["occurred_before"]):
             return False
         return True
+
+    @staticmethod
+    def _validate_filters(filters: Mapping[str, Any]) -> None:
+        allowed = {"workspaces", "projects", "domain_tags", "occurred_after", "occurred_before"}
+        unknown = sorted(set(filters) - allowed)
+        if unknown:
+            raise ValidationError(f"unknown experience filter: {unknown[0]}")
+        for field in ("workspaces", "projects", "domain_tags"):
+            values = filters.get(field, [])
+            if not isinstance(values, list) or any(not isinstance(value, str) or not value.strip() for value in values):
+                raise ValidationError(f"{field} must be a list of non-empty strings")

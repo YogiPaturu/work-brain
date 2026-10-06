@@ -18,6 +18,9 @@ commands through the harness's existing shell capability:
 - `hydrate_experience`
 - `find_related_experience_entries` for bounded read-only discovery of current
   entries that may continue an anchor entry's Experience
+- `get_experience_mining_batch` for one bounded, read-only page of ungrouped
+  historical anchors plus related-entry candidate recall; use only from
+  historical mining/backfill
 - `search_questions`
 - `get_question`
 - `choose_question`

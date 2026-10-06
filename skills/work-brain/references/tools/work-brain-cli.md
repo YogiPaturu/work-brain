@@ -54,6 +54,7 @@ work-brain experience list --limit 8
 work-brain experience search --query "influenced the API decision" --page-size 8
 work-brain experience get --experience-id EXPERIENCE_ID
 work-brain experience related --entry-id ENTRY_ID --limit 8
+work-brain experience mine --page-size 5 --related-limit 6
 work-brain experience hydrate --experience-id EXPERIENCE_ID
 work-brain recoverable
 work-brain status
@@ -98,6 +99,14 @@ before `experience associate` when an entry may continue an existing
 Experience, and load `references/experience-review.md` for the bounded
 include/exclude/uncertain review. Candidate recall is not a grouping decision;
 leave the entry unassigned when the evidence remains uncertain.
+
+`experience mine` is a read-only, cursor-paginated historical-mining operation.
+It selects visible current entries with no Experience ref from authoritative
+source data, then delegates bounded related discovery for only that page. Use
+the returned cursor for the next batch after reviewing and explicitly
+associating any approved entries. It does not cluster, associate, create an
+Experience, or load the whole vault; retrieval degradation keeps anchors in the
+response and is not evidence that no related history exists.
 
 ## Capture and mutation
 

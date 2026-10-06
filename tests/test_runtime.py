@@ -121,6 +121,9 @@ class RuntimeTests(unittest.TestCase):
             "Do not invent confidence or similarity scores",
             "scan hundreds of entries",
             "Do not add merge or split behavior",
+            "experience mine --page-size 5 --related-limit 6",
+            "returned opaque cursor",
+            "automatic clustering",
         ):
             self.assertIn(phrase, review)
         self.assertIn("load `references/experience-review.md`", agent_tools)

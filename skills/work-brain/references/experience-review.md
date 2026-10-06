@@ -82,3 +82,14 @@ no relationship exists. Do not invent confidence or similarity scores. This
 review defines bounded selection semantics for future historical mining; do not
 scan hundreds of entries, add a background miner, or automatically create,
 merge, split, or associate Experiences.
+
+## Historical mining batches
+
+When the user explicitly asks to mine historical work, request one bounded
+batch with `experience mine --page-size 5 --related-limit 6`. Review the
+returned ungrouped anchors and their related-entry recall with the same
+INCLUDE/EXCLUDE/UNCERTAIN criteria, hydrating only evidence needed to resolve a
+plausible group. Present proposed post-hoc groupings for explicit approval,
+then use `experience associate` only for the approved entries and target. Use
+the returned opaque cursor for the next page; do not load hundreds of anchors
+or candidates into one context and do not treat mining as automatic clustering.

@@ -54,6 +54,13 @@ related-entry discovery and load `references/experience-review.md` before
 grouping it. Do not merge or associate entries automatically; leave them
 unassigned when the relationship is uncertain.
 
+For an explicit request to mine existing history, request one bounded
+`experience mine` batch at a time. Review its anchors and related candidates
+using the Experience-review reference, hydrate only promising evidence, obtain
+explicit approval before using `experience associate`, and continue with the
+returned cursor. Do not exhaust the corpus into one model context or treat the
+batch as automatic clustering.
+
 ### 3. Reconstruct the Evidence Shape
 
 Capture context, observations, significance, contribution, reasoning, evidence,

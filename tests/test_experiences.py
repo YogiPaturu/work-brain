@@ -8,7 +8,7 @@ from io import StringIO
 import json
 from unittest.mock import patch
 
-from work_brain import EvidenceRetriever, ExperienceService, LocalHashEmbeddingProvider, ValidationError, Vault, new_uuid7
+from work_brain import EvidenceRetriever, ExperienceService, LocalHashEmbeddingProvider, ToolRegistry, ValidationError, Vault, new_uuid7
 
 
 SECTIONS = (
@@ -59,7 +59,7 @@ class ExperienceTests(unittest.TestCase):
             refresh_projections=False,
         )
 
-    def _commit_unassigned(self, when: str, *, title: str, tags: list[str]):
+    def _commit_unassigned(self, when: str, *, title: str, tags: list[str], occurrence: dict | None = None):
         session = self.vault.create_session(started_at=when)
         self.vault.append_turn(session["session_id"], "user", title)
         raw = payload(
@@ -73,6 +73,8 @@ class ExperienceTests(unittest.TestCase):
             tags=tags,
         )
         raw["entity_refs"] = []
+        if occurrence is not None:
+            raw["occurrence"] = occurrence
         return self.vault.commit_entry(session["session_id"], raw, refresh_projections=False)
 
     def _commit_context(self, when: str, *, workspace_id: str, project_id: str, title: str, summary: str | None = None, experience_id: str | None = None):
@@ -314,6 +316,161 @@ class ExperienceTests(unittest.TestCase):
         self.assertEqual(1, len(result["candidates"]))
         self.assertEqual(before_entries, [(entry.entry_id, entry.revision, entry.entity_refs) for entry in self.vault.all_current_entries()])
         self.assertEqual(before_entities, sorted(path.read_text(encoding="utf-8") for path in (self.vault.root / "catalog/entities").glob("*.json")))
+
+    def test_mine_selects_visible_current_ungrouped_entries_oldest_first(self) -> None:
+        grouped = self._commit("2026-10-01T10:00:00+01:00", self.architecture, title="Already grouped", tags=["engineering"])
+        older = self._commit_unassigned("2026-10-02T10:00:00+01:00", title="Older ungrouped", tags=["engineering"])
+        newer = self._commit_unassigned("2026-10-03T10:00:00+01:00", title="Newer ungrouped", tags=["engineering"])
+
+        result = self._related_service().mine(page_size=10, related_limit=1)
+
+        self.assertEqual([older.entry_id, newer.entry_id], [item["anchor"]["entry_id"] for item in result["items"]])
+        self.assertNotIn(grouped.entry_id, [item["anchor"]["entry_id"] for item in result["items"]])
+
+    def test_mine_excludes_archived_and_quarantined_entries(self) -> None:
+        archived = self._commit_unassigned("2026-09-01T10:00:00+01:00", title="Archived anchor", tags=["engineering"])
+        quarantined = self._commit_unassigned("2026-09-02T10:00:00+01:00", title="Quarantined anchor", tags=["engineering"])
+        visible = self._commit_unassigned("2026-09-03T10:00:00+01:00", title="Visible anchor", tags=["engineering"])
+        self.vault.archive_session(archived.session_id, reason="not part of normal views")
+        self.vault.quarantine_entry(quarantined.session_id, reason="fixture quarantine")
+
+        result = self._related_service().mine(page_size=10, related_limit=1)
+
+        self.assertEqual([visible.entry_id], [item["anchor"]["entry_id"] for item in result["items"]])
+
+    def test_mine_uses_occurrence_then_entry_id_for_deterministic_order(self) -> None:
+        occurrence_first = self._commit_unassigned(
+            "2026-10-03T10:00:00+01:00",
+            title="Occurrence is earlier",
+            tags=["engineering"],
+            occurrence={"start": "2025-01-01T00:00:00+00:00", "end": "2025-01-01T00:00:00+00:00", "precision": "instant", "label": None},
+        )
+        # The fixture is committed with a known occurrence by default; use a
+        # separate entry with unknown occurrence to exercise the created_at
+        # fallback without rewriting source after publication.
+        unknown = self._commit_unassigned(
+            "2025-06-01T10:00:00+01:00", title="Unknown occurrence fallback", tags=["engineering"],
+            occurrence={"start": None, "end": None, "precision": "unknown", "label": None},
+        )
+
+        result = self._related_service().mine(page_size=10, related_limit=1)
+        ids = [item["anchor"]["entry_id"] for item in result["items"]]
+        self.assertLess(ids.index(occurrence_first.entry_id), ids.index(unknown.entry_id))
+        same_time = [
+            self._commit_unassigned(
+                "2025-07-01T10:00:00+01:00", title=f"Tie {index}", tags=["engineering"],
+                occurrence={"start": "2025-07-01T00:00:00+00:00", "end": "2025-07-01T00:00:00+00:00", "precision": "instant", "label": None},
+            ) for index in range(2)
+        ]
+        result = self._related_service().mine(page_size=10, related_limit=1)
+        tie_ids = [item["anchor"]["entry_id"] for item in result["items"] if item["anchor"]["entry_id"] in {entry.entry_id for entry in same_time}]
+        self.assertEqual(sorted(tie_ids), tie_ids)
+
+    def test_mine_keyset_cursor_survives_association_of_earlier_entries(self) -> None:
+        entries = [
+            self._commit_unassigned(f"2026-09-{index:02d}T10:00:00+01:00", title=f"Anchor {index}", tags=["engineering"])
+            for index in range(1, 8)
+        ]
+        service = self._related_service()
+        first = service.mine(page_size=3, related_limit=1)
+        first_ids = [item["anchor"]["entry_id"] for item in first["items"]]
+        self.assertEqual([entry.entry_id for entry in entries[:3]], first_ids)
+        service.associate_entries(first_ids, experience_id=self.architecture["entity_id"])
+
+        second = service.mine(page_size=3, related_limit=1, cursor=first["next_cursor"])
+
+        self.assertEqual([entry.entry_id for entry in entries[3:6]], [item["anchor"]["entry_id"] for item in second["items"]])
+
+    def test_mine_keyset_cursor_skips_a_future_entry_without_offset_drift(self) -> None:
+        entries = [
+            self._commit_unassigned(f"2026-09-{index:02d}T10:00:00+01:00", title=f"Future anchor {index}", tags=["engineering"])
+            for index in range(1, 6)
+        ]
+        service = self._related_service()
+        first = service.mine(page_size=2, related_limit=1)
+        service.associate(entries[3].entry_id, experience_id=self.architecture["entity_id"])
+
+        second = service.mine(page_size=3, related_limit=1, cursor=first["next_cursor"])
+
+        self.assertEqual([entries[2].entry_id, entries[4].entry_id], [item["anchor"]["entry_id"] for item in second["items"]])
+
+    def test_mine_filters_and_rejects_changed_or_malformed_cursors(self) -> None:
+        self._commit_unassigned("2026-10-01T10:00:00+01:00", title="Engineering anchor", tags=["engineering"])
+        self._commit_unassigned("2026-10-02T10:00:00+01:00", title="Second engineering anchor", tags=["engineering"])
+        self._commit_unassigned("2026-10-03T10:00:00+01:00", title="Security anchor", tags=["security"])
+        other_workspace = self.vault.upsert_entity(kind="workspace", canonical_name="Personal")
+        other_project = self.vault.upsert_entity(kind="project", canonical_name="Side project")
+        scoped = self._commit_context(
+            "2026-10-04T10:00:00+01:00", workspace_id=other_workspace["entity_id"],
+            project_id=other_project["entity_id"], title="Scoped engineering anchor",
+        )
+        service = self._related_service()
+        first = service.mine(page_size=1, related_limit=1, filters={"domain_tags": ["engineering"]})
+        scoped_result = service.mine(
+            page_size=5, related_limit=1,
+            filters={"workspaces": [other_workspace["entity_id"]], "projects": [other_project["entity_id"]]},
+        )
+        self.assertEqual([scoped.entry_id], [item["anchor"]["entry_id"] for item in scoped_result["items"]])
+        with self.assertRaisesRegex(ValidationError, "cursor"):
+            service.mine(page_size=1, related_limit=1, cursor="not-a-cursor")
+        changed = service.mine(
+            page_size=1, related_limit=1, filters={"domain_tags": ["security"]}, cursor=first["next_cursor"]
+        )
+        self.assertEqual("cursor_expired", changed["status"])
+        with self.assertRaisesRegex(ValidationError, "page_size"):
+            service.mine(page_size=0)
+        with self.assertRaisesRegex(ValidationError, "related_limit"):
+            service.mine(related_limit=0)
+
+    def test_mine_preserves_anchor_when_related_retrieval_is_degraded(self) -> None:
+        anchor = self._commit_unassigned("2026-10-01T10:00:00+01:00", title="Degraded mining anchor", tags=["engineering"])
+
+        class DegradedRetriever:
+            def search(self, query: str, *, filters: dict[str, list[str]], page_size: int) -> dict:
+                return {"status": "retrieval_unavailable", "degraded_components": ["index"], "incomplete": True, "cards": [], "embedding": {"status": "failed"}}
+
+        result = ExperienceService(self.vault, retriever=DegradedRetriever()).mine(page_size=1, related_limit=1)
+
+        self.assertEqual([anchor.entry_id], [item["anchor"]["entry_id"] for item in result["items"]])
+        self.assertEqual("degraded", result["status"])
+        self.assertTrue(result["incomplete"])
+        self.assertEqual(["index"], result["degraded_components"])
+
+    def test_mine_is_read_only_and_delegates_related_for_only_page_anchors(self) -> None:
+        anchors = [
+            self._commit_unassigned(f"2026-09-{index:02d}T10:00:00+01:00", title=f"Read-only {index}", tags=["engineering"])
+            for index in range(1, 4)
+        ]
+        service = ExperienceService(self.vault)
+        calls: list[str] = []
+
+        def related(entry_id: str, *, limit: int) -> dict:
+            calls.append(entry_id)
+            return {"status": "ok", "anchor": {"entry_id": entry_id}, "candidates": [], "degraded_components": [], "incomplete": False}
+
+        service.related = related  # type: ignore[method-assign]
+        before_entries = [(entry.entry_id, entry.revision, entry.entity_refs) for entry in self.vault.all_current_entries()]
+        before_entities = sorted(path.read_text(encoding="utf-8") for path in (self.vault.root / "catalog/entities").glob("*.json"))
+        result = service.mine(page_size=2, related_limit=3)
+
+        self.assertEqual([entry.entry_id for entry in anchors[:2]], calls)
+        self.assertEqual([entry.entry_id for entry in anchors[:2]], [item["anchor"]["entry_id"] for item in result["items"]])
+        self.assertEqual(before_entries, [(entry.entry_id, entry.revision, entry.entity_refs) for entry in self.vault.all_current_entries()])
+        self.assertEqual(before_entities, sorted(path.read_text(encoding="utf-8") for path in (self.vault.root / "catalog/entities").glob("*.json")))
+
+    def test_mine_cli_and_backfill_tool_return_machine_readable_batches(self) -> None:
+        anchor = self._commit_unassigned("2026-10-01T10:00:00+01:00", title="CLI mining anchor", tags=["engineering"])
+        self._related_service()
+        from work_brain.cli import main
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(0, main(["--vault", str(self.vault.root), "experience", "mine", "--page-size", "1", "--related-limit", "1"]))
+        value = json.loads(output.getvalue())
+        self.assertEqual(anchor.entry_id, value["items"][0]["anchor"]["entry_id"])
+        registry = ToolRegistry(self.vault)
+        self.assertIn("get_experience_mining_batch", {tool.name for tool in registry.definitions("backfill")})
+        tool_result = registry.call("get_experience_mining_batch", page_size=1, related_limit=1)
+        self.assertTrue(tool_result.ok)
 
     def test_related_validates_limit_and_cli_returns_json(self) -> None:
         anchor = self._commit_context(

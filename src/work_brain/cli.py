@@ -169,6 +169,11 @@ def _parser() -> argparse.ArgumentParser:
     experience_search.add_argument("--cursor")
     experience_get = experience_sub.add_parser("get")
     experience_get.add_argument("--experience-id", required=True)
+    experience_mine = experience_sub.add_parser("mine", help="enumerate bounded ungrouped historical entries for Experience review")
+    experience_mine.add_argument("--page-size", type=int, default=5)
+    experience_mine.add_argument("--related-limit", type=int, default=6)
+    experience_mine.add_argument("--filters", help="JSON object containing anchor filters")
+    experience_mine.add_argument("--cursor")
     experience_related = experience_sub.add_parser("related", help="find bounded evidence related to one entry")
     experience_related.add_argument("--entry-id", required=True)
     experience_related.add_argument("--limit", type=int, default=8)
@@ -610,6 +615,16 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
             return service.search(args.query, filters=filters, page_size=args.page_size, cursor=args.cursor), True
         if args.experience_command == "get":
             return service.get(args.experience_id), True
+        if args.experience_command == "mine":
+            filters = json.loads(args.filters) if args.filters else None
+            if filters is not None and not isinstance(filters, dict):
+                raise ValidationError("--filters must be a JSON object")
+            return service.mine(
+                page_size=args.page_size,
+                related_limit=args.related_limit,
+                filters=filters,
+                cursor=args.cursor,
+            ), True
         if args.experience_command == "related":
             return service.related(args.entry_id, limit=args.limit), True
         if args.experience_command == "associate":
