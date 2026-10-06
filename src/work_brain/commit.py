@@ -5,7 +5,7 @@ import hashlib
 from typing import Any, Mapping
 import json
 
-from .domain import ENTRY_SECTIONS, ENTITY_KINDS, STATE_KINDS, MUTATION_OPS, Occurrence, Statement, normalize_domain_tags
+from .domain import ENTRY_SECTIONS, ENTITY_KINDS, STATE_KINDS, MUTATION_OPS, Occurrence, Statement, normalize_alias, normalize_domain_tags
 from .errors import IntegrityError, ValidationError
 from .fsutil import canonical_json_bytes, read_json
 from .ids import new_uuid7, validate_uuid7
@@ -17,6 +17,7 @@ FORBIDDEN_DRAFT_FIELDS = {
     "session_id", "entry_id", "revision", "commit_id", "created_at", "supersedes_revision",
     "revision_reason", "provenance_kind", "runtime", "model_id", "sops", "occurrence", "source_fingerprint",
 }
+FORBIDDEN_PERSISTED_CONTEXT_FIELDS = {"workspace_entity_id", "project_entity_id"}
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,9 @@ class ValidatedDraft:
     historical_occurrence: dict[str, Any] | None
     domain_tags: list[str]
     workspace_name: str
+    workspace_ref: str | None
     project_name: str
+    project_ref: str | None
     sections: dict[str, list[dict[str, Any]]]
     state_changes: list[dict[str, Any]]
     entity_candidates: list[dict[str, Any]]
@@ -68,6 +71,12 @@ class CommitDraftValidator:
         forbidden = sorted(FORBIDDEN_DRAFT_FIELDS.intersection(raw))
         if forbidden:
             raise ValidationError(f"CommitDraft contains runtime-owned fields: {', '.join(forbidden)}")
+        persisted_context = sorted(FORBIDDEN_PERSISTED_CONTEXT_FIELDS.intersection(raw))
+        if persisted_context:
+            raise ValidationError(
+                "CommitDraft contains persisted context fields: "
+                f"{', '.join(persisted_context)}; use workspace_ref/project_ref"
+            )
         title, summary = raw.get("title"), raw.get("summary")
         if not isinstance(title, str) or not 1 <= len(title.strip()) <= 240:
             raise ValidationError("title must be a non-empty string of at most 240 characters")
@@ -88,7 +97,9 @@ class CommitDraftValidator:
         if "project" not in raw:
             raise ValidationError("CommitDraft must include project; infer it or clarify it before committing")
         workspace = self._context_name(raw["workspace"], "workspace")
+        workspace_ref = self._optional_entity_ref(raw, "workspace_ref")
         project = self._context_name(raw["project"], "project")
+        project_ref = self._optional_entity_ref(raw, "project_ref")
         sections_raw = raw.get("sections")
         if not isinstance(sections_raw, Mapping) or set(sections_raw) != set(ENTRY_SECTIONS):
             raise ValidationError("sections must contain exactly the supported entry section names")
@@ -102,7 +113,11 @@ class CommitDraftValidator:
         entities = [self._entity(value) for value in self._list_field(raw, "entity_candidates")]
         artifacts = [self._artifact(value) for value in self._list_field(raw, "artifact_candidates")]
         source_refs = [self._source_ref(value) for value in self._list_field(raw, "source_entry_refs")]
-        return ValidatedDraft(title.strip(), summary.strip(), historical, domain_tags, workspace, project, sections, state_changes, entities, artifacts, source_refs)
+        return ValidatedDraft(
+            title.strip(), summary.strip(), historical, domain_tags,
+            workspace, workspace_ref, project, project_ref, sections,
+            state_changes, entities, artifacts, source_refs,
+        )
 
     @staticmethod
     def _list_field(raw: Mapping[str, Any], name: str) -> list[Any]:
@@ -194,6 +209,15 @@ class CommitDraftValidator:
         if not isinstance(value, str) or not value.strip():
             raise ValidationError(f"CommitDraft {field} must be a required non-empty string")
         return value.strip()
+
+    @staticmethod
+    def _optional_entity_ref(raw: Mapping[str, Any], field: str) -> str | None:
+        if field not in raw:
+            return None
+        value = raw[field]
+        if value is None:
+            raise ValidationError(f"CommitDraft {field} must be a valid existing entity ID when supplied")
+        return validate_uuid7(value, field)
 
     @staticmethod
     def _artifact(value: Any) -> dict[str, Any]:
@@ -328,11 +352,15 @@ class CommitResolver:
         source_refs: list[dict[str, Any]],
     ) -> CommitPlan:
         entity_refs, entity_creations, catalog = self._plan_entities(draft.entity_candidates)
-        workspace_entity_id, workspace_creation = self._plan_context_name(draft.workspace_name, "workspace", catalog)
+        workspace_entity_id, workspace_creation = self._plan_context_name(
+            draft.workspace_name, "workspace", catalog, entity_ref=draft.workspace_ref,
+        )
         if workspace_creation is not None:
             entity_creations.append(workspace_creation)
             catalog.append(self._creation_as_catalog(workspace_creation))
-        project_entity_id, project_creation = self._plan_context_name(draft.project_name, "project", catalog)
+        project_entity_id, project_creation = self._plan_context_name(
+            draft.project_name, "project", catalog, entity_ref=draft.project_ref,
+        )
         if project_creation is not None:
             entity_creations.append(project_creation)
             catalog.append(self._creation_as_catalog(project_creation))
@@ -434,7 +462,23 @@ class CommitResolver:
         name: str,
         kind: str,
         catalog: list[dict[str, Any]],
+        *,
+        entity_ref: str | None = None,
     ) -> tuple[str, EntityCreation | None]:
+        if entity_ref is not None:
+            matches = [item for item in catalog if item.get("entity_id") == entity_ref]
+            if not matches:
+                raise ValidationError(f"{kind}_ref does not identify an existing {kind}: {entity_ref}")
+            entity = matches[0]
+            if entity.get("kind") != kind:
+                raise ValidationError(f"{kind}_ref must identify a {kind} entity: {entity_ref}")
+            names = [entity.get("canonical_name"), *(entity.get("aliases") or [])]
+            if not any(
+                isinstance(candidate, str) and normalize_alias(candidate) == normalize_alias(name)
+                for candidate in names
+            ):
+                raise ValidationError(f"{kind}_ref does not match the supplied {kind} name: {name}")
+            return entity_ref, None
         key = SkillLoader.normalize_token(name)
         matches = [item for item in catalog if item["kind"] == kind and
                    (SkillLoader.normalize_token(item["canonical_name"]) == key or

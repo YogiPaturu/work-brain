@@ -92,6 +92,13 @@ returns a compact JSON result. Unknown, malformed, or failed calls become
 stable structured errors; they MUST NOT mutate the vault. Tool payloads and
 host shell details are not appended to the raw visible-turn transcript.
 
+When `resolve_context` returns a deterministic existing workspace or project,
+the model may copy its `entity_id` as `workspace_ref` or `project_ref` while
+also emitting the returned canonical name. These refs are validated against
+the authoritative source catalog; the model must never invent them. The
+persisted fields `workspace_entity_id` and `project_entity_id` are not
+CommitDraft inputs.
+
 Raw-turn append is not exposed as a normal CLI operation. The internal append
 API is reserved for adapters, fixtures, and explicit integration tests. A
 hosted agent MUST NOT use it to append its own summary or manufacture missing

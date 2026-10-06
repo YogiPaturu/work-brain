@@ -13,8 +13,12 @@ The model emits only semantic fields:
   by the conversation.
 - `workspace`: required non-empty string naming the broad working context, such
   as `Ranq`, `Health Tech`, or `Work Brain`.
+- `workspace_ref`: optional existing workspace entity ID returned by the
+  read-only `resolve_context` operation. Never invent this ID.
 - `project`: required non-empty string naming the specific effort, such as
   `Auth implementation` or `Billing Right Code`.
+- `project_ref`: optional existing project entity ID returned by the
+  read-only `resolve_context` operation. Never invent this ID.
 - `sections`: exactly the supported entry section names; each statement has `text`,
   `basis` (`stated` or `inferred`), and one or more exact `source_turns` from the
   persisted raw conversation. Every statement must identify the raw turn numbers
@@ -36,14 +40,26 @@ For an existing Experience, prefer the explicit shape
 An Experience candidate must always use `relation: "experience"`; the
 application rejects unrelated relations and rejects ambiguous catalog matches.
 
-The context fields are plain names:
+The context fields retain required plain names. When `resolve_context`
+deterministically identifies an existing identity, preserve both its returned
+canonical name and its returned entity ID:
 
 ```json
 {
   "workspace": "Ranq",
-  "project": "Auth"
+  "workspace_ref": "WORKSPACE_ENTITY_ID",
+  "project": "Authentication",
+  "project_ref": "PROJECT_ENTITY_ID"
 }
 ```
+
+For historical candidates, emit a ref only after the conversation makes the
+selection unambiguous; otherwise ask one concise clarification question. For
+unresolved or genuinely new context, omit the ref and keep the existing
+name-only behavior. The application validates refs against the authoritative
+source catalog, checks their kind, and checks that each supplied name matches
+the entity's canonical name or an existing alias. A mismatch or unknown ref is
+invalid; the application does not silently prefer the name or ID.
 
 Detailed assignment guidance and the extensible starter vocabulary are in
 `WORK-BRAIN-DOMAIN-TAGS@1`, loaded alongside this schema during commit
@@ -57,8 +73,12 @@ from another session to manufacture a revision. If the evidence comes from a
 different session, create a separate entry and use `source_entry_refs` only to
 link the related prior entry.
 
-The runtime supplies IDs, timestamps, revisions, provenance, and persistence
-metadata. The model must not emit those authoritative fields.
+The runtime supplies session, entry, commit, revision, timestamp, provenance,
+and persistence metadata. The model must not emit those runtime-owned or
+persisted fields, including `workspace_entity_id` and `project_entity_id`.
+`workspace_ref` and `project_ref` are the narrow exception: they may copy an
+already-existing entity ID returned by Work Brain; they are not IDs invented or
+allocated by the model.
 
 ## Context classification before emission
 
@@ -71,9 +91,12 @@ Before emitting a CommitDraft, classify the evidence:
    work item; do not create a new near-duplicate name.
 4. If the workspace or project is materially ambiguous, ask one concise
    clarification question before committing. Do not guess a catalog name.
-5. Always emit both keys as non-empty strings. Missing, empty, or null values
-   are invalid; ask for the missing classification before committing.
+5. When a deterministic existing identity was returned by `resolve_context`,
+   emit its canonical name and matching `workspace_ref` or `project_ref`.
+   Otherwise omit the ref. Always emit both name keys as non-empty strings;
+   missing, empty, or null values are invalid; ask for the missing
+   classification before committing.
 
 The application may create or reuse internal catalog entities from these names.
-The model emits names only and does not emit entity IDs, kinds, relations, or
-catalog metadata.
+Except for the narrow trusted `workspace_ref`/`project_ref` references above,
+the model does not emit entity IDs, kinds, relations, or catalog metadata.

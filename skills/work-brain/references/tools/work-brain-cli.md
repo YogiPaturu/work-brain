@@ -110,6 +110,11 @@ The application validates and resolves IDs, revisions, provenance, and
 persistence. An ordinary commit rotates to a fresh bounded session while the
 host capture mapping stays active. A close-day commit deactivates the mapping.
 Do not write `turns.jsonl`, SQLite, journals, state, or vector data directly.
+When `context resolve` deterministically identifies an existing workspace or
+project, preserve its canonical name in `workspace`/`project` and its returned
+ID in `workspace_ref`/`project_ref`; the application verifies the ref against
+the source catalog. Do not invent refs or emit persisted fields such as
+`workspace_entity_id` or `project_entity_id` in a CommitDraft.
 
 `backfill-tags` is the documented historical-maintenance operation for adding
 domain tags to existing current entries. Its JSON input is an explicit mapping

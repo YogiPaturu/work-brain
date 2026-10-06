@@ -167,6 +167,12 @@ apparent, close without asking it.
   `resolve_context` operation. Use a deterministic canonical result; if only
   historical candidates are returned, choose one only when the conversation
   makes it unambiguous, otherwise ask one concise clarification question.
+- When `resolve_context` deterministically identifies an existing workspace or
+  project, emit its returned `canonical_name` in the required name field and
+  its returned `entity_id` in `workspace_ref` or `project_ref`. These are the
+  only model-emitted identity references permitted: never invent them. Omit
+  the ref for unresolved or genuinely new context; the application validates
+  supplied refs against the source catalog and rejects name/ref mismatches.
 - If workspace or project classification is materially ambiguous, the agent
   MUST ask one concise clarification question before committing. It MUST always
   emit both required names in the final draft. Missing, empty, or null values

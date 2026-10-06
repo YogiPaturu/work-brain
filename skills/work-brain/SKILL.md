@@ -62,6 +62,11 @@ Work Brain LLM call and no MCP server in v1. At a live workflow boundary, emit
 only the CommitDraft shape when durable new evidence exists and let the
 application validate and publish it automatically. A close-day gap check may
 complete without a commit; capture deactivation is a separate lifecycle action.
+When `resolve_context` deterministically identifies an existing workspace or
+project, the model may copy its returned `entity_id` into the narrow semantic
+`workspace_ref` or `project_ref` CommitDraft field alongside the returned
+canonical name; the application validates it. This does not permit invented
+IDs or runtime-owned fields such as `session_id`, `entry_id`, or `commit_id`.
 If the host/model disappears first, raw turns remain durable and the next live
 Work Brain activation rolls them over and commits them when meaningful evidence
 exists. The activation may be `think`, `operate`, `communicate`, `career`, or

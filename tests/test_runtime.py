@@ -7,6 +7,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 import re
+from typing import Any
 from unittest.mock import patch
 
 from work_brain import (
@@ -323,6 +324,115 @@ class RuntimeTests(unittest.TestCase):
         value = draft()
         value["project"] = None
         with self.assertRaisesRegex(ValidationError, "project must be a required non-empty string"):
+            CommitDraftValidator().validate(value, turn_count=1, workflow="think")
+
+    def _publish_context_ref_draft(self, value: dict) -> Any:
+        session = self.vault.create_session(started_at="2026-10-01T16:40:00+01:00", modes=["think"])
+        self.vault.append_turn(session["session_id"], "user", "Use the resolved work context.")
+        return CommitResolver(self.vault).publish(session["session_id"], value, workflow="think")
+
+    def test_existing_context_refs_commit_exact_catalog_ids(self) -> None:
+        workspace = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        project = self.vault.upsert_entity(kind="project", canonical_name="Authentication", aliases=["Auth"])
+        value = draft()
+        value.update({
+            "workspace": "Ranq", "workspace_ref": workspace["entity_id"],
+            "project": "Authentication", "project_ref": project["entity_id"],
+        })
+
+        entry = self._publish_context_ref_draft(value)
+
+        self.assertEqual(workspace["entity_id"], entry.workspace_entity_id)
+        self.assertEqual(project["entity_id"], entry.project_entity_id)
+
+    def test_explicit_project_ref_bypasses_ambiguous_name_resolution(self) -> None:
+        workspace = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        first = self.vault.upsert_entity(kind="project", canonical_name="Auth")
+        second = self.vault.upsert_entity(kind="project", canonical_name="Auth")
+        value = draft()
+        value.update({
+            "workspace": "Ranq", "workspace_ref": workspace["entity_id"],
+            "project": "Auth", "project_ref": second["entity_id"],
+        })
+
+        entry = self._publish_context_ref_draft(value)
+
+        self.assertEqual(second["entity_id"], entry.project_entity_id)
+        self.assertNotEqual(first["entity_id"], entry.project_entity_id)
+
+    def test_nonexistent_context_ref_is_rejected(self) -> None:
+        value = draft()
+        value["workspace_ref"] = new_uuid7()
+
+        with self.assertRaisesRegex(ValidationError, "workspace_ref does not identify an existing workspace"):
+            self._publish_context_ref_draft(value)
+        self.assertEqual([], self.vault.all_entry_revisions())
+
+    def test_context_refs_must_have_the_expected_kind(self) -> None:
+        workspace = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        project = self.vault.upsert_entity(kind="project", canonical_name="Authentication")
+
+        value = draft()
+        value["workspace_ref"] = project["entity_id"]
+        with self.assertRaisesRegex(ValidationError, "workspace_ref must identify a workspace"):
+            self._publish_context_ref_draft(value)
+
+        value = draft()
+        value["project_ref"] = workspace["entity_id"]
+        with self.assertRaisesRegex(ValidationError, "project_ref must identify a project"):
+            self._publish_context_ref_draft(value)
+        self.assertEqual([], self.vault.all_entry_revisions())
+
+    def test_context_ref_name_mismatch_is_rejected(self) -> None:
+        workspace = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        value = draft()
+        value.update({"workspace": "Other", "workspace_ref": workspace["entity_id"]})
+
+        with self.assertRaisesRegex(ValidationError, "workspace_ref does not match"):
+            self._publish_context_ref_draft(value)
+        self.assertEqual([], self.vault.all_entry_revisions())
+
+    def test_valid_context_refs_do_not_create_entities_or_modify_aliases(self) -> None:
+        workspace = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq", aliases=["R"])
+        project = self.vault.upsert_entity(kind="project", canonical_name="Authentication", aliases=["Auth"])
+        before = {
+            path.name: path.read_text(encoding="utf-8")
+            for path in (self.vault.root / "catalog/entities").glob("*.json")
+        }
+        value = draft()
+        value.update({
+            "workspace": "Ranq",
+            "workspace_ref": workspace["entity_id"],
+            "project": "Auth", "project_ref": project["entity_id"],
+        })
+
+        self._publish_context_ref_draft(value)
+
+        after = {
+            path.name: path.read_text(encoding="utf-8")
+            for path in (self.vault.root / "catalog/entities").glob("*.json")
+        }
+        self.assertEqual(before, after)
+
+    def test_name_only_context_drafts_remain_compatible(self) -> None:
+        existing_workspace = self.vault.upsert_entity(kind="workspace", canonical_name="Work Brain")
+        existing_project = self.vault.upsert_entity(kind="project", canonical_name="Import boundary")
+        entry = self._publish_context_ref_draft(draft())
+
+        self.assertEqual(existing_workspace["entity_id"], entry.workspace_entity_id)
+        self.assertEqual(existing_project["entity_id"], entry.project_entity_id)
+
+        new_value = draft()
+        new_value.update({"workspace": "New workspace", "project": "New project"})
+        new_entry = self._publish_context_ref_draft(new_value)
+        self.assertIsNotNone(new_entry.workspace_entity_id)
+        self.assertIsNotNone(new_entry.project_entity_id)
+        self.assertEqual(4, len(list((self.vault.root / "catalog/entities").glob("*.json"))))
+
+    def test_persisted_context_fields_are_not_commitdraft_inputs(self) -> None:
+        value = draft()
+        value["project_entity_id"] = new_uuid7()
+        with self.assertRaisesRegex(ValidationError, "use workspace_ref/project_ref"):
             CommitDraftValidator().validate(value, turn_count=1, workflow="think")
 
     def test_domain_tags_have_no_artificial_count_limit(self) -> None:
