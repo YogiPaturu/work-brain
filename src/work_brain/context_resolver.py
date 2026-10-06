@@ -169,8 +169,26 @@ class ContextResolver:
         candidates: list[dict[str, Any]],
         workspace_id: str | None,
     ) -> list[dict[str, Any]]:
-        if workspace_id is None or len(candidates) <= 1:
+        if workspace_id is None:
             return candidates
+        sources = {
+            item["entity_id"]: self._source_entity(item["entity_id"], "project")
+            for item in candidates
+        }
+        parented = [
+            item for item in candidates
+            if sources[item["entity_id"]] is not None
+            and sources[item["entity_id"]].get("workspace_entity_id") == workspace_id
+        ]
+        if parented:
+            return parented
+        legacy = [
+            item for item in candidates
+            if sources[item["entity_id"]] is not None
+            and sources[item["entity_id"]].get("workspace_entity_id") is None
+        ]
+        if len(legacy) <= 1:
+            return legacy
         candidate_ids = {item["entity_id"] for item in candidates}
         try:
             conn = self.vault._database().connect()
@@ -185,11 +203,11 @@ class ContextResolver:
             finally:
                 conn.close()
         except Exception:
-            return candidates
+            return legacy
         scoped = candidate_ids & {row["project_entity_id"] for row in rows}
         if len(scoped) == 1:
-            return [item for item in candidates if item["entity_id"] in scoped]
-        return candidates
+            return [item for item in legacy if item["entity_id"] in scoped]
+        return legacy
 
     def _historical_projects(
         self,

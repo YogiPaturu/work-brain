@@ -44,6 +44,7 @@ class EntityCreation:
     canonical_name: str
     aliases: list[str]
     description: str | None
+    workspace_entity_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -316,6 +317,7 @@ class CommitResolver:
                     aliases=creation.aliases,
                     description=creation.description,
                     entity_id=creation.entity_id,
+                    **({"workspace_entity_id": creation.workspace_entity_id} if creation.workspace_entity_id is not None else {}),
                 )
             for creation in plan.artifact_creations:
                 self.vault.upsert_artifact(
@@ -360,6 +362,7 @@ class CommitResolver:
             catalog.append(self._creation_as_catalog(workspace_creation))
         project_entity_id, project_creation = self._plan_context_name(
             draft.project_name, "project", catalog, entity_ref=draft.project_ref,
+            workspace_entity_id=workspace_entity_id,
         )
         if project_creation is not None:
             entity_creations.append(project_creation)
@@ -418,6 +421,7 @@ class CommitResolver:
             "canonical_name": creation.canonical_name,
             "aliases": creation.aliases,
             "description": creation.description,
+            **({"workspace_entity_id": creation.workspace_entity_id} if creation.workspace_entity_id is not None else {}),
         }
 
     def _plan_entities(
@@ -464,6 +468,7 @@ class CommitResolver:
         catalog: list[dict[str, Any]],
         *,
         entity_ref: str | None = None,
+        workspace_entity_id: str | None = None,
     ) -> tuple[str, EntityCreation | None]:
         if entity_ref is not None:
             matches = [item for item in catalog if item.get("entity_id") == entity_ref]
@@ -478,17 +483,30 @@ class CommitResolver:
                 for candidate in names
             ):
                 raise ValidationError(f"{kind}_ref does not match the supplied {kind} name: {name}")
+            if kind == "project":
+                owner = entity.get("workspace_entity_id")
+                if owner is not None and owner != workspace_entity_id:
+                    raise ValidationError(
+                        f"project_ref belongs to a different workspace: {entity_ref}"
+                    )
             return entity_ref, None
         key = SkillLoader.normalize_token(name)
         matches = [item for item in catalog if item["kind"] == kind and
                    (SkillLoader.normalize_token(item["canonical_name"]) == key or
                     any(SkillLoader.normalize_token(alias) == key for alias in item.get("aliases", [])))]
+        if kind == "project":
+            parented = [item for item in matches if item.get("workspace_entity_id") == workspace_entity_id]
+            if len(parented) > 1:
+                raise IntegrityError(f"ambiguous project name in workspace: {name}")
+            if parented:
+                return parented[0]["entity_id"], None
+            matches = [item for item in matches if item.get("workspace_entity_id") is None]
         if len(matches) > 1:
             raise IntegrityError(f"ambiguous {kind} name: {name}")
         if matches:
             return matches[0]["entity_id"], None
         entity_id = new_uuid7()
-        return entity_id, EntityCreation(entity_id, kind, name, [], None)
+        return entity_id, EntityCreation(entity_id, kind, name, [], None, workspace_entity_id if kind == "project" else None)
 
     def _plan_artifacts(self, candidates: list[dict[str, Any]]) -> tuple[list[dict[str, str]], list[ArtifactCreation]]:
         catalog = [read_json(path) for path in sorted((self.vault.root / "catalog/artifacts").glob("*.json"))]

@@ -207,6 +207,47 @@ class ContextResolverTests(unittest.TestCase):
         self.assertLessEqual(len(result["workspace"]["candidates"]), 1)
         self.assertLessEqual(len(result["project"]["candidates"]), 1)
 
+    def test_workspace_owned_exact_projects_resolve_without_history(self) -> None:
+        ranq = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        personal = self.vault.upsert_entity(kind="workspace", canonical_name="Personal")
+        ranq_project = self.vault.upsert_entity(
+            kind="project", canonical_name="Website", workspace_entity_id=ranq["entity_id"],
+        )
+        personal_project = self.vault.upsert_entity(
+            kind="project", canonical_name="Website", workspace_entity_id=personal["entity_id"],
+        )
+        self._rebuild_indexes()
+
+        ranq_result = ContextResolver(self.vault).resolve_context(
+            workspace_hint="Ranq", project_hint="Website",
+        )
+        personal_result = ContextResolver(self.vault).resolve_context(
+            workspace_hint="Personal", project_hint="Website",
+        )
+        self.assertEqual("resolved", ranq_result["project"]["status"])
+        self.assertEqual(ranq_project["entity_id"], ranq_result["project"]["candidates"][0]["entity_id"])
+        self.assertEqual("resolved", personal_result["project"]["status"])
+        self.assertEqual(personal_project["entity_id"], personal_result["project"]["candidates"][0]["entity_id"])
+
+    def test_workspace_owned_duplicate_project_names_are_ambiguous_without_workspace(self) -> None:
+        ranq = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        personal = self.vault.upsert_entity(kind="workspace", canonical_name="Personal")
+        first = self.vault.upsert_entity(
+            kind="project", canonical_name="Website", workspace_entity_id=ranq["entity_id"],
+        )
+        second = self.vault.upsert_entity(
+            kind="project", canonical_name="Website", workspace_entity_id=personal["entity_id"],
+        )
+        self._rebuild_indexes()
+
+        result = ContextResolver(self.vault).resolve_context(project_hint="Website")
+
+        self.assertEqual("ambiguous", result["project"]["status"])
+        self.assertEqual(
+            {first["entity_id"], second["entity_id"]},
+            {item["entity_id"] for item in result["project"]["candidates"]},
+        )
+
     def test_historical_unavailability_does_not_hide_exact_resolution(self) -> None:
         workspace = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
         self._rebuild_indexes()

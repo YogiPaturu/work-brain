@@ -58,8 +58,13 @@ selection unambiguous; otherwise ask one concise clarification question. For
 unresolved or genuinely new context, omit the ref and keep the existing
 name-only behavior. The application validates refs against the authoritative
 source catalog, checks their kind, and checks that each supplied name matches
-the entity's canonical name or an existing alias. A mismatch or unknown ref is
-invalid; the application does not silently prefer the name or ID.
+the entity's canonical name or an existing alias. A project ref with workspace
+ownership must also belong to the selected workspace; legacy unparented project
+refs remain compatible without being mutated. A mismatch or unknown ref is
+invalid; the application does not silently prefer the name or ID. When no ref
+is supplied, project lookup is scoped to the selected workspace when possible;
+projects owned by another workspace are not reused, and a new project is
+created with that workspace owner when no eligible project exists.
 
 Detailed assignment guidance and the extensible starter vocabulary are in
 `WORK-BRAIN-DOMAIN-TAGS@1`, loaded alongside this schema during commit

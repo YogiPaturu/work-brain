@@ -568,9 +568,10 @@ The entity-kind set is an application vocabulary rather than a persistence-versi
 {
   "entity_id": "0199aaf1-c215-75ec-b2df-76f43ef7ae33",
   "kind": "project",
-  "canonical_name": "Ranq",
+  "canonical_name": "Website",
   "aliases": ["ranq"],
-  "description": "Current founder venture",
+  "workspace_entity_id": "0199aaf1-c215-75ec-b2df-76f43ef7ae34",
+  "description": "Public website migration",
   "created_at": "2026-09-30T09:00:00+01:00",
   "updated_at": "2026-09-30T09:00:00+01:00"
 }
@@ -579,6 +580,12 @@ The entity-kind set is an application vocabulary rather than a persistence-versi
 Rules:
 
 - `entity_id`, `kind`, `canonical_name`, `created_at`, and `updated_at` are required.
+- A `project` may optionally carry `workspace_entity_id`, which must identify an
+  existing `workspace` entity. Other entity kinds must not carry this field.
+  Project names are scoped by this ownership when it is present, so distinct
+  workspaces may each have a project with the same canonical name. Existing
+  projects without an owner remain valid legacy/unparented projects until an
+  explicit future backfill.
 - Aliases are case-insensitive for lookup but original display casing is preserved. The application computes `alias_norm` using Unicode NFKC normalization followed by Unicode case-folding; SQLite's built-in ASCII-oriented `NOCASE` collation is not the identity rule.
 - Renaming an entity keeps the same `entity_id`; the previous canonical name SHOULD be retained as an alias unless the user explicitly says it was incorrect rather than renamed.
 - Two semantically distinct entities MUST NOT be merged merely because their names are similar.

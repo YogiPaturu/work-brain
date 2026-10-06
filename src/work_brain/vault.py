@@ -31,6 +31,7 @@ from .timeutil import date_for_timestamp, parse_timestamp, timestamp_now, valida
 
 
 _CONTEXT_UNSET = object()
+_WORKSPACE_UNSET = object()
 
 
 class Vault:
@@ -815,6 +816,7 @@ class Vault:
         entity_id: str | None = None,
         created_at: str | None = None,
         updated_at: str | None = None,
+        workspace_entity_id: str | None | object = _WORKSPACE_UNSET,
     ) -> dict[str, Any]:
         with self._require_or_lock():
             if kind not in ENTITY_KINDS:
@@ -830,6 +832,25 @@ class Vault:
             created_at = created_at or now
             parse_timestamp(created_at, "entity.created_at")
             parse_timestamp(now, "entity.updated_at")
+            previous_owner = previous.get("workspace_entity_id") if previous else None
+            if previous and previous.get("kind") != "project" and "workspace_entity_id" in previous:
+                raise IntegrityError("only project entities may have workspace_entity_id")
+            if kind != "project" and workspace_entity_id is not _WORKSPACE_UNSET:
+                raise ValidationError("only project entities may have workspace_entity_id")
+            if previous and previous_owner is not None and workspace_entity_id not in (_WORKSPACE_UNSET, previous_owner):
+                raise IntegrityError("project workspace ownership cannot be changed by ordinary upsert")
+            if previous and previous.get("kind") == "project" and previous_owner is None and workspace_entity_id not in (_WORKSPACE_UNSET, None):
+                raise IntegrityError("legacy unparented project ownership cannot be assigned by ordinary upsert")
+            owner = previous_owner if previous else None
+            if workspace_entity_id is not _WORKSPACE_UNSET:
+                owner = workspace_entity_id
+            if owner is not None:
+                owner = validate_uuid7(owner, "workspace_entity_id")
+                owner_path = self.root / "catalog/entities" / f"{owner}.json"
+                if not owner_path.exists():
+                    raise ValidationError(f"workspace entity does not exist: {owner}")
+                if read_json(owner_path).get("kind") != "workspace":
+                    raise ValidationError(f"workspace_entity_id must identify a workspace: {owner}")
             merged_aliases = list(aliases or [])
             if previous and previous.get("canonical_name") != canonical_name:
                 merged_aliases.append(previous["canonical_name"])
@@ -844,6 +865,8 @@ class Vault:
                     deduped.append(alias)
             value = {"entity_id": entity_id, "kind": kind, "canonical_name": canonical_name, "aliases": deduped,
                      "description": description, "created_at": created_at, "updated_at": now}
+            if kind == "project" and owner is not None:
+                value["workspace_entity_id"] = owner
             atomic_replace_json(path, value)
             if self.dependency_change_hook is not None:
                 self.dependency_change_hook("entity", entity_id)
@@ -929,6 +952,19 @@ class Vault:
         for entity in entities:
             validate_uuid7(entity.get("entity_id"), "entity_id")
         entity_ids = {entity["entity_id"] for entity in entities}
+        entities_by_id = {entity["entity_id"]: entity for entity in entities}
+        for entity in entities:
+            if "workspace_entity_id" in entity and entity.get("kind") != "project":
+                raise IntegrityError("only project entities may have workspace_entity_id")
+            owner = entity.get("workspace_entity_id")
+            if owner is None:
+                continue
+            validate_uuid7(owner, "workspace_entity_id")
+            workspace = entities_by_id.get(owner)
+            if workspace is None:
+                raise IntegrityError(f"missing project workspace reference during rebuild: {owner}")
+            if workspace.get("kind") != "workspace":
+                raise IntegrityError(f"project workspace reference is not a workspace entity during rebuild: {owner}")
         artifact_ids = {artifact["artifact_id"] for artifact in artifacts}
         for entry in current_entries.values():
             for ref in entry.entity_refs:
@@ -975,7 +1011,11 @@ class Vault:
                         str(path), content_hash(read_json(path))))
                 for entity in entities:
                     path = self.root / "catalog/entities" / f"{entity['entity_id']}.json"
-                    conn.execute("INSERT INTO entities VALUES (?, ?, ?, ?, ?)", (entity["entity_id"], entity["kind"], entity["canonical_name"], str(path), entity["updated_at"]))
+                    conn.execute(
+                        "INSERT INTO entities (entity_id, kind, canonical_name, path, updated_at, workspace_entity_id) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (entity["entity_id"], entity["kind"], entity["canonical_name"], str(path), entity["updated_at"], entity.get("workspace_entity_id")),
+                    )
                     for alias in entity.get("aliases", []):
                         conn.execute("INSERT INTO entity_aliases VALUES (?, ?, ?)", (entity["entity_id"], alias, normalize_alias(alias)))
                     conn.execute("INSERT OR IGNORE INTO entity_aliases VALUES (?, ?, ?)", (entity["entity_id"], entity["canonical_name"], normalize_alias(entity["canonical_name"])))

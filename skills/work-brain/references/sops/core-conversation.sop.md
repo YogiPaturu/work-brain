@@ -173,6 +173,10 @@ apparent, close without asking it.
   only model-emitted identity references permitted: never invent them. Omit
   the ref for unresolved or genuinely new context; the application validates
   supplied refs against the source catalog and rejects name/ref mismatches.
+- Project identities may be owned by a workspace. When a selected workspace is
+  known, rely on that ownership for exact project resolution; legacy unparented
+  projects remain a compatibility fallback and projects owned by another
+  workspace must not be reused.
 - If workspace or project classification is materially ambiguous, the agent
   MUST ask one concise clarification question before committing. It MUST always
   emit both required names in the final draft. Missing, empty, or null values

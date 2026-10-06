@@ -429,6 +429,58 @@ class RuntimeTests(unittest.TestCase):
         self.assertIsNotNone(new_entry.project_entity_id)
         self.assertEqual(4, len(list((self.vault.root / "catalog/entities").glob("*.json"))))
 
+    def test_name_only_project_resolution_is_scoped_to_workspace(self) -> None:
+        ranq = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        personal = self.vault.upsert_entity(kind="workspace", canonical_name="Personal")
+        existing = self.vault.upsert_entity(
+            kind="project", canonical_name="Website", workspace_entity_id=ranq["entity_id"],
+        )
+
+        ranq_draft = draft()
+        ranq_draft.update({"workspace": "Ranq", "project": "Website"})
+        ranq_entry = self._publish_context_ref_draft(ranq_draft)
+        self.assertEqual(existing["entity_id"], ranq_entry.project_entity_id)
+
+        personal_draft = draft()
+        personal_draft.update({"workspace": "Personal", "project": "Website"})
+        personal_entry = self._publish_context_ref_draft(personal_draft)
+        self.assertNotEqual(existing["entity_id"], personal_entry.project_entity_id)
+        created = json.loads(
+            (self.vault.root / "catalog/entities" / f"{personal_entry.project_entity_id}.json").read_text()
+        )
+        self.assertEqual(personal["entity_id"], created["workspace_entity_id"])
+
+    def test_explicit_project_ref_cannot_cross_workspace_ownership(self) -> None:
+        ranq = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        personal = self.vault.upsert_entity(kind="workspace", canonical_name="Personal")
+        project = self.vault.upsert_entity(
+            kind="project", canonical_name="Website", workspace_entity_id=ranq["entity_id"],
+        )
+        value = draft()
+        value.update({
+            "workspace": "Personal", "workspace_ref": personal["entity_id"],
+            "project": "Website", "project_ref": project["entity_id"],
+        })
+        with self.assertRaisesRegex(ValidationError, "different workspace"):
+            self._publish_context_ref_draft(value)
+
+    def test_new_workspace_and_project_are_persisted_with_ownership(self) -> None:
+        value = draft()
+        value.update({"workspace": "New workspace", "project": "New project"})
+
+        entry = self._publish_context_ref_draft(value)
+
+        workspace = next(
+            json.loads(path.read_text())
+            for path in (self.vault.root / "catalog/entities").glob("*.json")
+            if json.loads(path.read_text())["entity_id"] == entry.workspace_entity_id
+        )
+        project = json.loads(
+            (self.vault.root / "catalog/entities" / f"{entry.project_entity_id}.json").read_text()
+        )
+        self.assertEqual("workspace", workspace["kind"])
+        self.assertEqual(workspace["entity_id"], project["workspace_entity_id"])
+
     def test_persisted_context_fields_are_not_commitdraft_inputs(self) -> None:
         value = draft()
         value["project_entity_id"] = new_uuid7()

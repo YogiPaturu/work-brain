@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from work_brain import IntegrityError, Vault, new_uuid7
+from work_brain import IntegrityError, ValidationError, Vault, new_uuid7
 from work_brain.vault import atomic_replace_json
 
 
@@ -153,6 +153,47 @@ class VaultTests(unittest.TestCase):
         self.assertEqual(1, len(self.vault.all_entry_revisions()))
         self.vault.rebuild_all()
         self.assertEqual([], self.vault.doctor())
+
+    def test_project_workspace_ownership_is_validated_and_projected(self) -> None:
+        ranq = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        personal = self.vault.upsert_entity(kind="workspace", canonical_name="Personal")
+        project = self.vault.upsert_entity(
+            kind="project", canonical_name="Website", workspace_entity_id=ranq["entity_id"],
+        )
+        self.assertEqual(ranq["entity_id"], project["workspace_entity_id"])
+
+        with self.assertRaisesRegex(ValidationError, "workspace entity does not exist"):
+            self.vault.upsert_entity(kind="project", canonical_name="Missing", workspace_entity_id=new_uuid7())
+        with self.assertRaisesRegex(ValidationError, "workspace_entity_id must identify a workspace"):
+            self.vault.upsert_entity(
+                kind="project", canonical_name="Wrong kind", workspace_entity_id=project["entity_id"],
+            )
+        with self.assertRaisesRegex(ValidationError, "only project entities"):
+            self.vault.upsert_entity(
+                kind="topic", canonical_name="Topic", workspace_entity_id=ranq["entity_id"],
+            )
+        with self.assertRaisesRegex(IntegrityError, "cannot be changed"):
+            self.vault.upsert_entity(
+                kind="project", canonical_name="Website", entity_id=project["entity_id"],
+                workspace_entity_id=personal["entity_id"],
+            )
+
+        self.vault.upsert_entity(kind="project", canonical_name="Website", workspace_entity_id=personal["entity_id"])
+        self.vault.reconcile_database()
+        with closing(self.vault._database().connect()) as conn:
+            row = conn.execute(
+                "SELECT workspace_entity_id FROM entities WHERE entity_id = ?", (project["entity_id"],)
+            ).fetchone()
+            self.assertEqual(ranq["entity_id"], row["workspace_entity_id"])
+            self.assertIsNotNone(conn.execute("SELECT 1 FROM schema_migrations WHERE migration_id = '007_project_workspace.sql'").fetchone())
+
+        self.vault.database_path.unlink()
+        self.vault.rebuild_all()
+        with closing(self.vault._database().connect()) as conn:
+            row = conn.execute(
+                "SELECT workspace_entity_id FROM entities WHERE entity_id = ?", (project["entity_id"],)
+            ).fetchone()
+            self.assertEqual(ranq["entity_id"], row["workspace_entity_id"])
 
     def test_source_commit_survives_session_lifecycle_update_failure_and_retry(self) -> None:
         self.vault.append_turn(self.session["session_id"], "user", "Keep the immutable entry even if lifecycle metadata is unavailable.", recorded_at="2026-09-30T10:01:00+01:00")
