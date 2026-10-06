@@ -124,6 +124,26 @@ class ContextResolverTests(unittest.TestCase):
             {item["entity_id"] for item in result["project"]["candidates"]},
         )
 
+    def test_exact_project_limit_does_not_hide_ambiguity(self) -> None:
+        self.vault.upsert_entity(kind="project", canonical_name="Authentication")
+        self.vault.upsert_entity(kind="project", canonical_name="Authentication")
+        self._rebuild_indexes()
+
+        result = ContextResolver(self.vault).resolve_context(project_hint="Authentication", limit=1)
+
+        self.assertEqual("ambiguous", result["project"]["status"])
+        self.assertEqual(1, len(result["project"]["candidates"]))
+
+    def test_exact_workspace_limit_does_not_hide_ambiguity(self) -> None:
+        self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        self._rebuild_indexes()
+
+        result = ContextResolver(self.vault).resolve_context(workspace_hint="Ranq", limit=1)
+
+        self.assertEqual("ambiguous", result["workspace"]["status"])
+        self.assertEqual(1, len(result["workspace"]["candidates"]))
+
     def test_partial_projection_cannot_hide_authoritative_exact_ambiguity(self) -> None:
         first = self.vault.upsert_entity(kind="project", canonical_name="Authentication")
         second = self.vault.upsert_entity(kind="project", canonical_name="Authentication")
@@ -166,6 +186,26 @@ class ContextResolverTests(unittest.TestCase):
         self.assertEqual("resolved", result["project"]["status"])
         self.assertEqual(first["entity_id"], result["project"]["candidates"][0]["entity_id"])
         self.assertNotEqual(second["entity_id"], result["project"]["candidates"][0]["entity_id"])
+
+    def test_workspace_cooccurrence_disambiguates_before_output_limit(self) -> None:
+        workspace = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        first = self.vault.upsert_entity(kind="project", canonical_name="Authentication", aliases=["Auth"])
+        self.vault.upsert_entity(kind="project", canonical_name="Authentication Platform", aliases=["Auth"])
+        self._commit(
+            workspace_id=workspace["entity_id"], project_id=first["entity_id"],
+            summary="The authentication project used the existing Auth context.",
+            started_at="2026-05-01T10:00:00+01:00",
+        )
+        self._rebuild_indexes()
+
+        result = ContextResolver(self.vault).resolve_context(
+            workspace_hint="Ranq", project_hint="Auth", limit=1,
+        )
+
+        self.assertEqual("resolved", result["project"]["status"])
+        self.assertEqual([first["entity_id"]], [item["entity_id"] for item in result["project"]["candidates"]])
+        self.assertLessEqual(len(result["workspace"]["candidates"]), 1)
+        self.assertLessEqual(len(result["project"]["candidates"]), 1)
 
     def test_historical_unavailability_does_not_hide_exact_resolution(self) -> None:
         workspace = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")

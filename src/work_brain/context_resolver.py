@@ -41,18 +41,26 @@ class ContextResolver:
         result: dict[str, Any] = {}
         workspace_id: str | None = None
         if workspace_hint is not None:
-            candidates = self._exact_candidates("workspace", workspace_hint, limit)
+            candidates = self._exact_candidates("workspace", workspace_hint)
             status = "resolved" if len(candidates) == 1 else "ambiguous" if candidates else "unresolved"
             if status == "resolved":
                 workspace_id = candidates[0]["entity_id"]
-            result["workspace"] = {"input": workspace_hint, "status": status, "candidates": candidates}
+            result["workspace"] = {
+                "input": workspace_hint,
+                "status": status,
+                "candidates": candidates[:limit],
+            }
 
         if project_hint is not None:
             exact = self._scope_exact_projects(
-                self._exact_candidates("project", project_hint, limit), workspace_id, limit,
+                self._exact_candidates("project", project_hint), workspace_id,
             )
             if len(exact) == 1:
-                result["project"] = {"input": project_hint, "status": "resolved", "candidates": exact}
+                result["project"] = {
+                    "input": project_hint,
+                    "status": "resolved",
+                    "candidates": exact,
+                }
             elif exact:
                 historical = self._historical_projects(
                     project_hint, workspace_id=workspace_id, limit=limit,
@@ -60,7 +68,7 @@ class ContextResolver:
                 result["project"] = {
                     "input": project_hint,
                     "status": "ambiguous",
-                    "candidates": exact,
+                    "candidates": exact[:limit],
                     "historical_candidates": historical["candidates"],
                     "historical_status": historical.get("historical_status", "ok"),
                 }
@@ -92,7 +100,7 @@ class ContextResolver:
             return None
         return value
 
-    def _exact_candidates(self, kind: str, hint: str, limit: int) -> list[dict[str, Any]]:
+    def _exact_candidates(self, kind: str, hint: str) -> list[dict[str, Any]]:
         normalized = normalize_alias(hint)
         rows: list[Any] = []
         try:
@@ -134,7 +142,7 @@ class ContextResolver:
 
         candidates = list(candidates_by_id.values())
         candidates.sort(key=lambda item: (normalize_alias(item["canonical_name"]), item["entity_id"]))
-        return candidates[:limit]
+        return candidates
 
     @staticmethod
     def _source_exact_candidate(
@@ -160,7 +168,6 @@ class ContextResolver:
         self,
         candidates: list[dict[str, Any]],
         workspace_id: str | None,
-        limit: int,
     ) -> list[dict[str, Any]]:
         if workspace_id is None or len(candidates) <= 1:
             return candidates
@@ -182,7 +189,7 @@ class ContextResolver:
         scoped = candidate_ids & {row["project_entity_id"] for row in rows}
         if len(scoped) == 1:
             return [item for item in candidates if item["entity_id"] in scoped]
-        return candidates[:limit]
+        return candidates
 
     def _historical_projects(
         self,
