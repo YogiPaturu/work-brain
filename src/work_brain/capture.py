@@ -6,7 +6,7 @@ import re
 from typing import Any, Mapping
 
 from .errors import ValidationError
-from .fsutil import append_jsonl, atomic_replace_json, ensure_private_file, read_json
+from .fsutil import atomic_replace_json, ensure_private_file, read_json
 from .lifecycle import CaptureLifecycle, CommitLifecycle, normalize_runtime, transition
 from .routing import PromptRoute, route_prompt, select_workflow
 from .timeutil import date_for_timestamp, parse_timestamp, timestamp_now
@@ -169,18 +169,12 @@ def normalize_capture_event(host: str, payload: Mapping[str, Any]) -> CaptureEve
 
 def record_capture_hook_failure(vault: Any, *, host: str, category: str, error: Exception) -> None:
     """Record non-sensitive hook health without making the host hook fail."""
-    vault.initialize_source_store()
-    message = " ".join(str(error).split())[:240]
-    append_jsonl(
-        vault.root / "context/capture-hook-health.jsonl",
-        {
-            "recorded_at": timestamp_now(),
-            "host": host,
-            "category": category,
-            "error_type": type(error).__name__,
-            "message": message,
-        },
-    )
+    vault.record_capture_hook_failure(host=host, category=category, error=error)
+
+
+def record_capture_hook_success(vault: Any, *, host: str) -> None:
+    """Record successful completion without adding to failure history."""
+    vault.record_capture_hook_success(host=host)
 
 
 class HarnessCaptureService:

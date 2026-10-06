@@ -1078,11 +1078,105 @@ class Vault:
     def capture_hook_health_path(self) -> Path:
         return self.root / "context/capture-hook-health.jsonl"
 
+    @property
+    def capture_hook_status_path(self) -> Path:
+        return self.root / "context/capture-hook-status.json"
+
+    def _read_capture_hook_status(self) -> dict[str, dict[str, Any]]:
+        if not self.capture_hook_status_path.exists():
+            return {}
+        value = read_json(self.capture_hook_status_path)
+        if not isinstance(value, dict):
+            raise IntegrityError("capture hook status must be a JSON object")
+        status: dict[str, dict[str, Any]] = {}
+        for host, item in value.items():
+            if isinstance(host, str) and isinstance(item, dict):
+                status[host] = dict(item)
+        return status
+
+    def _write_capture_hook_status(self, value: dict[str, dict[str, Any]]) -> None:
+        atomic_replace_json(self.capture_hook_status_path, value)
+
+    def record_capture_hook_failure(self, *, host: str, category: str, error: Exception) -> None:
+        """Append failure evidence and mark only this host as unhealthy."""
+        if not isinstance(host, str) or not host.strip():
+            raise ValidationError("capture hook host must be a non-empty string")
+        self.initialize_source_store()
+        recorded_at = timestamp_now()
+        message = " ".join(str(error).split())[:240]
+        failure = {
+            "recorded_at": recorded_at,
+            "host": host,
+            "category": category,
+            "error_type": type(error).__name__,
+            "message": message,
+        }
+        with self.write_lock():
+            status = self._read_capture_hook_status()
+            append_jsonl(self.capture_hook_health_path, failure)
+            previous = status.get(host, {})
+            status[host] = {
+                "status": "failed",
+                **({"last_success_at": previous["last_success_at"]} if isinstance(previous.get("last_success_at"), str) else {}),
+                "last_failure_at": recorded_at,
+                "last_failure": {
+                    "category": category,
+                    "error_type": type(error).__name__,
+                    "message": message,
+                },
+            }
+            self._write_capture_hook_status(status)
+
+    def record_capture_hook_success(self, *, host: str) -> None:
+        """Mark one host healthy while retaining its previous failure context."""
+        if not isinstance(host, str) or not host.strip():
+            raise ValidationError("capture hook host must be a non-empty string")
+        self.initialize_source_store()
+        with self.write_lock():
+            status = self._read_capture_hook_status()
+            previous = status.get(host, {})
+            current: dict[str, Any] = {
+                "status": "healthy",
+                "last_success_at": timestamp_now(),
+            }
+            if isinstance(previous.get("last_failure_at"), str):
+                current["last_failure_at"] = previous["last_failure_at"]
+            if isinstance(previous.get("last_failure"), dict):
+                current["last_failure"] = dict(previous["last_failure"])
+            status[host] = current
+            self._write_capture_hook_status(status)
+
     def capture_hook_health(self, *, limit: int = 5) -> list[dict[str, Any]]:
-        if not self.capture_hook_health_path.exists():
+        if limit <= 0:
             return []
         records, _ = read_jsonl_with_recovery(self.capture_hook_health_path)
-        return records[-limit:]
+        historical: dict[str, dict[str, Any]] = {}
+        historical_order: dict[str, int] = {}
+        for index, record in enumerate(records):
+            host = record.get("host")
+            if isinstance(host, str) and host:
+                historical[host] = record
+                historical_order[host] = index
+
+        status = self._read_capture_hook_status()
+        unresolved: list[tuple[str, int, dict[str, Any]]] = []
+        for host in set(historical) | set(status):
+            current = status.get(host, {})
+            if current.get("status") == "healthy":
+                continue
+            failure = current.get("last_failure")
+            historical_record = historical.get(host)
+            if not isinstance(failure, dict):
+                failure = historical_record
+            if not isinstance(failure, dict):
+                continue
+            item = dict(failure)
+            item["host"] = host
+            if not isinstance(item.get("recorded_at"), str):
+                item["recorded_at"] = current.get("last_failure_at")
+            unresolved.append((str(item.get("recorded_at") or ""), historical_order.get(host, -1), item))
+        unresolved.sort(key=lambda item: (item[0], item[1], item[2]["host"]))
+        return [item[2] for item in unresolved[-limit:]]
 
     def _database(self) -> Database:
         return Database(self.database_path, self.migration_dir)
@@ -1260,7 +1354,7 @@ class Vault:
             diagnostics.append(f"projection integrity error: {exc}")
         hook_failures = self.capture_hook_health()
         if hook_failures:
-            diagnostics.append(f"capture hook has {len(hook_failures)} recorded recent failure(s)")
+            diagnostics.append(f"capture hook has {len(hook_failures)} unresolved failure(s)")
         try:
             conn = self._database().connect()
             try:

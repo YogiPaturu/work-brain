@@ -12,7 +12,12 @@ import json
 import sys
 from typing import Any
 
-from .capture import HarnessCaptureService, normalize_capture_event, record_capture_hook_failure
+from .capture import (
+    HarnessCaptureService,
+    normalize_capture_event,
+    record_capture_hook_failure,
+    record_capture_hook_success,
+)
 from .capture_status import live_status, status_text
 from .config import resolve_vault_path
 from .vault import Vault
@@ -55,8 +60,16 @@ def process(vault: Vault, host: str, payload: dict[str, Any]) -> dict[str, Any]:
     event = normalize_capture_event(host, payload)
     result = HarnessCaptureService(vault).handle(event)
     if host == "codex":
-        return {"_hook_output": codex_output(vault, event, result)}
-    return result
+        output = {"_hook_output": codex_output(vault, event, result)}
+    else:
+        output = result
+    try:
+        record_capture_hook_success(vault, host=host)
+    except Exception:
+        # Operational health must not become a new host-hook failure after
+        # the capture event and required output have already succeeded.
+        pass
+    return output
 
 
 def _record_failure(explicit_vault: str | None, config: str | None, host: str, error: Exception) -> None:

@@ -25,8 +25,9 @@ from work_brain import (
     select_workflow,
 )
 from work_brain.model import ModelResponse
-from work_brain.capture import HarnessCaptureService, normalize_capture_event
+from work_brain.capture import HarnessCaptureService, normalize_capture_event, record_capture_hook_failure
 from work_brain.cli import main
+from work_brain.fsutil import append_jsonl
 
 
 def draft(*, workflow: str = "think", bad_runtime_field: bool = False) -> dict:
@@ -221,6 +222,67 @@ class RuntimeTests(unittest.TestCase):
         health = self.vault.capture_hook_health()
         self.assertEqual("codex", health[-1]["host"])
         self.assertEqual("capture_hook_failure", health[-1]["category"])
+
+    def test_capture_hook_success_recovers_same_host_without_erasing_history(self) -> None:
+        record_capture_hook_failure(self.vault, host="codex", category="capture_hook_failure", error=ValueError("old failure"))
+        history_path = self.vault.root / "context/capture-hook-health.jsonl"
+        history_before = history_path.read_text(encoding="utf-8")
+        self.assertEqual(["codex"], [item["host"] for item in self.vault.capture_hook_health()])
+
+        with patch("sys.stdin", StringIO(json.dumps({"event": "SessionStart", "session_id": "healthy-codex"}))), redirect_stdout(StringIO()):
+            self.assertEqual(0, main(["--vault", str(self.vault.root), "capture-hook", "--host", "codex"]))
+
+        self.assertEqual([], self.vault.capture_hook_health())
+        self.assertEqual(history_before, history_path.read_text(encoding="utf-8"))
+        status = json.loads((self.vault.root / "context/capture-hook-status.json").read_text(encoding="utf-8"))
+        self.assertEqual("healthy", status["codex"]["status"])
+        self.assertIn("last_failure", status["codex"])
+
+    def test_capture_hook_health_is_independent_per_host_and_reopens_on_new_failure(self) -> None:
+        record_capture_hook_failure(self.vault, host="codex", category="capture_hook_failure", error=ValueError("codex failure"))
+        with patch("sys.stdin", StringIO(json.dumps({"event": "SessionStart", "session_id": "healthy-claude"}))), redirect_stdout(StringIO()):
+            self.assertEqual(0, main(["--vault", str(self.vault.root), "capture-hook", "--host", "claude-code"]))
+        self.assertEqual(["codex"], [item["host"] for item in self.vault.capture_hook_health()])
+
+        with patch("sys.stdin", StringIO(json.dumps({"event": "SessionStart", "session_id": "healthy-codex"}))), redirect_stdout(StringIO()):
+            self.assertEqual(0, main(["--vault", str(self.vault.root), "capture-hook", "--host", "codex"]))
+        self.assertEqual([], self.vault.capture_hook_health())
+
+        record_capture_hook_failure(self.vault, host="codex", category="capture_hook_failure", error=ValueError("new failure"))
+        self.assertEqual(["codex"], [item["host"] for item in self.vault.capture_hook_health()])
+
+    def test_legacy_failure_history_is_unresolved_until_same_host_succeeds(self) -> None:
+        history_path = self.vault.root / "context/capture-hook-health.jsonl"
+        append_jsonl(history_path, {
+            "recorded_at": "2026-10-06T17:14:03+01:00",
+            "host": "codex",
+            "category": "capture_hook_failure",
+            "error_type": "ValueError",
+            "message": "legacy failure",
+        })
+        self.assertFalse((self.vault.root / "context/capture-hook-status.json").exists())
+        self.assertEqual(["codex"], [item["host"] for item in self.vault.capture_hook_health()])
+
+        with patch("sys.stdin", StringIO(json.dumps({"event": "SessionStart", "session_id": "legacy-recovered"}))), redirect_stdout(StringIO()):
+            self.assertEqual(0, main(["--vault", str(self.vault.root), "capture-hook", "--host", "codex"]))
+        self.assertEqual([], self.vault.capture_hook_health())
+        self.assertEqual(1, len(history_path.read_text(encoding="utf-8").splitlines()))
+
+    def test_status_and_doctor_report_only_unresolved_capture_hook_failures(self) -> None:
+        record_capture_hook_failure(self.vault, host="codex", category="capture_hook_failure", error=ValueError("failure"))
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(0, main(["--vault", str(self.vault.root), "status", "--json"]))
+        self.assertEqual(1, len(json.loads(output.getvalue())["capture_hook_health"]))
+        self.assertTrue(any("unresolved failure" in item for item in self.vault.doctor()))
+
+        with patch("sys.stdin", StringIO(json.dumps({"event": "SessionStart", "session_id": "doctor-recovered"}))), redirect_stdout(StringIO()):
+            self.assertEqual(0, main(["--vault", str(self.vault.root), "capture-hook", "--host", "codex"]))
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(0, main(["--vault", str(self.vault.root), "status", "--json"]))
+        self.assertEqual([], json.loads(output.getvalue())["capture_hook_health"])
+        self.assertFalse(any("capture hook has" in item for item in self.vault.doctor()))
 
     def test_doctor_distinguishes_corrupt_derived_database(self) -> None:
         broken = Vault(Path(self.tempdir.name) / "broken-doctor").initialize()

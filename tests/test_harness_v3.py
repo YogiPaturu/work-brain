@@ -12,7 +12,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-from work_brain.capture import HarnessCaptureService, normalize_capture_event
+from work_brain.capture import HarnessCaptureService, normalize_capture_event, record_capture_hook_failure
 from work_brain.cli import main
 from work_brain.config import resolve_vault_path, set_vault_path
 from work_brain.setup import HarnessSetup
@@ -310,6 +310,23 @@ class HarnessV3Tests(unittest.TestCase):
                 ]))
         self.assertEqual({}, json.loads(output.getvalue()))
         self.assertEqual(before_health, self.vault.capture_hook_health())
+        self.assertEqual("closed", self.vault.read_session(session_id)["runtime"]["capture_status"])
+
+    def test_codex_hook_late_end_recovers_previous_failure(self) -> None:
+        session_id = self._stale_mapped_session(
+            capture=CaptureLifecycle.CLOSED,
+            commit=CommitLifecycle.COMMITTED,
+            host_session_id="closed-hook-recovery",
+        )
+        record_capture_hook_failure(self.vault, host="codex", category="capture_hook_failure", error=ValueError("old lifecycle failure"))
+        output = StringIO()
+        with redirect_stdout(output):
+            with patch("sys.stdin", StringIO(json.dumps({
+                "hook_event_name": "SessionEnd", "session_id": "closed-hook-recovery",
+            }))):
+                self.assertEqual(0, main(["--vault", str(self.vault.root), "capture-hook", "--host", "codex"]))
+        self.assertEqual({}, json.loads(output.getvalue()))
+        self.assertEqual([], self.vault.capture_hook_health())
         self.assertEqual("closed", self.vault.read_session(session_id)["runtime"]["capture_status"])
 
     def test_lifecycle_rejects_closed_to_recoverable_transition(self) -> None:
