@@ -1,6 +1,6 @@
 ---
 name: work-brain
-description: Use when recovering work context, reasoning through professional decisions, preserving exact work evidence, starting or closing a work day, updating work state, drafting from relevant private work context, or practising interview and career stories. Work Brain uses explicit activation and bounded sessions; ordinary coding chats remain outside durable capture.
+description: Use only when the user explicitly invokes Work Brain (for example, a prompt beginning with "work brain") or uses a documented Work Brain activation alias such as "start my day", "open my work journal", "start work brain", "capture this", or "journal this". Also use to continue an already-active Work Brain session and to handle its lifecycle commands such as "close my day" or "stop Work Brain". Supports bounded professional reasoning, work-state recovery, communication drafting from private work context, historical backfill, and career/interview practice. Do not use for ordinary coding or professional chats, or for Work Brain development, unless the user explicitly activates Work Brain.
 ---
 
 WORK-BRAIN-SKILL v2
