@@ -125,9 +125,12 @@ publishes metadata revisions without rewriting older evidence.
 
 When deciding whether an entry may continue an existing Experience, use
 `experience related --entry-id ENTRY_ID --limit 8` first. Treat its entries as
-candidates only; inspect or hydrate the evidence as needed, and use explicit
-association only when the grouping is sufficiently clear. If uncertain, leave
-the entry unassigned so its evidence remains searchable and durable.
+candidates only, then load `references/experience-review.md` and inspect or
+hydrate bounded evidence as needed. Use explicit association only when the
+grouping is sufficiently clear and the user has approved the post-hoc change.
+If uncertain, leave the entry unassigned so its evidence remains searchable
+and durable. The review reference defines the same-Experience criteria; it does
+not add an automatic grouping operation.
 
 The existing `ToolRegistry` and bounded standalone model/tool loop remain
 available for provider-free tests and future standalone mode. They are not a

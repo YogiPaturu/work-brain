@@ -49,6 +49,11 @@ recall and check duplication, not to overwrite the user’s account silently.
 - You SHOULD identify the source or basis of important claims.
 - You MUST preserve uncertainty around causality, metrics, ownership, and outcomes.
 
+When historical evidence may continue an existing Experience, use bounded
+related-entry discovery and load `references/experience-review.md` before
+grouping it. Do not merge or associate entries automatically; leave them
+unassigned when the relationship is uncertain.
+
 ### 3. Reconstruct the Evidence Shape
 
 Capture context, observations, significance, contribution, reasoning, evidence,

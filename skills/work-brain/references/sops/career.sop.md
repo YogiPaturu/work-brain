@@ -69,6 +69,10 @@ candidates before the user answers unless they explicitly ask for help.
   gap.
 - You MUST treat unavailable retrieval as an explicit limitation, not as evidence that no story exists.
 
+When several entries may form one interview-relevant Experience, use bounded
+related-entry discovery and load `references/experience-review.md` to review
+the causal/goal boundary. Do not group or associate entries automatically.
+
 #### Domain tags for career evidence
 
 When career evidence is committed, follow the loaded

@@ -65,7 +65,10 @@ warn_unused_ignores = true
   "skills/work-brain/references/probes/strategy.md",
 ]
 "share/work-brain/skills/work-brain/references/schemas" = ["skills/work-brain/references/schemas/commit-draft.md"]
-"share/work-brain/skills/work-brain/references" = ["skills/work-brain/references/domain-tags.md"]
+"share/work-brain/skills/work-brain/references" = [
+  "skills/work-brain/references/domain-tags.md",
+  "skills/work-brain/references/experience-review.md",
+]
 "share/work-brain/skills/work-brain/references/sops" = [
   "skills/work-brain/references/sops/backfill.sop.md",
   "skills/work-brain/references/sops/career.sop.md",

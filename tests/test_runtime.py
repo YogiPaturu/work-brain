@@ -90,6 +90,46 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("## Development / authoring boundary", skill)
         self.assertIn("Skill discovery or loading is not activation", skill)
 
+    def test_experience_review_is_progressive_and_packaged(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        skill = (root / "skills/work-brain/SKILL.md").read_text(encoding="utf-8")
+        review = (root / "skills/work-brain/references/experience-review.md").read_text(encoding="utf-8")
+        agent_tools = (root / "skills/work-brain/references/tools/agent-tools.md").read_text(encoding="utf-8")
+        cli_reference = (root / "skills/work-brain/references/tools/work-brain-cli.md").read_text(encoding="utf-8")
+        package = (root / "pyproject.toml").read_text(encoding="utf-8")
+
+        self.assertIn("references/experience-review.md` only when evaluating", skill)
+        self.assertNotIn("WORK-BRAIN-EXPERIENCE-REVIEW", SkillLoader().load("think").text)
+        for phrase in (
+            "bounded human/model review",
+            "`experience related --entry-id ENTRY_ID --limit 8`",
+            "bounded recall candidates",
+            "same exact current",
+            "Time proximity, topic or technology similarity",
+            "INCLUDE`, `EXCLUDE`, or `UNCERTAIN",
+            "sharing a Project",
+            "without a causal",
+            "False merges are worse",
+            "experience get",
+            "already in another coherent Experience",
+            "require explicit user intent",
+            "neutral, durable title",
+            "interview question",
+            "lightweight CommitDraft",
+            "leave the entry unassigned",
+            "Retrieval degradation or incomplete results",
+            "Do not invent confidence or similarity scores",
+            "scan hundreds of entries",
+            "Do not add merge or split behavior",
+        ):
+            self.assertIn(phrase, review)
+        self.assertIn("load `references/experience-review.md`", agent_tools)
+        self.assertIn("load `references/experience-review.md`", cli_reference)
+        for workflow in ("think", "backfill", "career"):
+            workflow_sop = (root / f"skills/work-brain/references/sops/{workflow}.sop.md").read_text(encoding="utf-8")
+            self.assertIn("references/experience-review.md", workflow_sop)
+        self.assertIn("skills/work-brain/references/experience-review.md", package)
+
     def test_sops_follow_agent_sop_structure_and_are_versioned(self) -> None:
         sop_dir = Path(__file__).resolve().parents[1] / "skills/work-brain/references/sops"
         sop_files = sorted(sop_dir.glob("*.sop.md"))

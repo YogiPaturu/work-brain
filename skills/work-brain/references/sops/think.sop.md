@@ -51,6 +51,11 @@ user’s mind. Use bounded evidence retrieval when relevant.
 - You MUST NOT treat a missing retrieval result as proof that no evidence exists.
 - You MUST NOT be contrarian for its own sake; challenge a claim only when it could change the decision.
 
+When the current work may continue a prior Experience, use the bounded related
+entry operation and load `references/experience-review.md` for grouping review.
+Candidate discovery is not an automatic association; leave the evidence
+unassigned when the causal or goal continuity is uncertain.
+
 ### 3. Compare Options and Trade-offs
 
 Present the meaningful alternatives and their consequences, including the cost

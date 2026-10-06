@@ -130,5 +130,7 @@ Resources:
 - zero, one, or two files under `references/probes/`
 - `references/schemas/commit-draft.md` when producing a commit
 - `references/domain-tags.md` when producing a commit
+- `references/experience-review.md` only when evaluating whether entries belong
+  to one durable Experience
 - `references/tools/agent-tools.md` when using application tools
 - `references/tools/work-brain-cli.md` when executing Work Brain operations

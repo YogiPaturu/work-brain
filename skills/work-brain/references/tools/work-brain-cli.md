@@ -95,7 +95,9 @@ anchor entry's deterministic structured text with existing hybrid retrieval,
 then revalidates candidates against the anchor's exact current
 workspace/project tuple. It does not create or associate Experiences. Use it
 before `experience associate` when an entry may continue an existing
-Experience; leave the entry unassigned when the evidence remains uncertain.
+Experience, and load `references/experience-review.md` for the bounded
+include/exclude/uncertain review. Candidate recall is not a grouping decision;
+leave the entry unassigned when the evidence remains uncertain.
 
 ## Capture and mutation
 
