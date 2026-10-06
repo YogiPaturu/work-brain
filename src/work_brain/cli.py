@@ -169,6 +169,9 @@ def _parser() -> argparse.ArgumentParser:
     experience_search.add_argument("--cursor")
     experience_get = experience_sub.add_parser("get")
     experience_get.add_argument("--experience-id", required=True)
+    experience_related = experience_sub.add_parser("related", help="find bounded evidence related to one entry")
+    experience_related.add_argument("--entry-id", required=True)
+    experience_related.add_argument("--limit", type=int, default=8)
     experience_hydrate = experience_sub.add_parser("hydrate")
     experience_hydrate.add_argument("--experience-id", required=True)
     experience_hydrate.add_argument("--file", help="JSON object with optional refs; omit or use - to read stdin")
@@ -607,6 +610,8 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
             return service.search(args.query, filters=filters, page_size=args.page_size, cursor=args.cursor), True
         if args.experience_command == "get":
             return service.get(args.experience_id), True
+        if args.experience_command == "related":
+            return service.related(args.entry_id, limit=args.limit), True
         if args.experience_command == "associate":
             if args.remove and (args.experience_id or args.experience_name):
                 raise ValidationError("--remove cannot be combined with an Experience target")

@@ -16,6 +16,8 @@ commands through the harness's existing shell capability:
 - `search_experiences`
 - `get_experience`
 - `hydrate_experience`
+- `find_related_experience_entries` for bounded read-only discovery of current
+  entries that may continue an anchor entry's Experience
 - `search_questions`
 - `get_question`
 - `choose_question`
@@ -120,6 +122,12 @@ over either a stable Experience or an individual entry and require explicit
 confirmation; a model suggestion alone must never persist one. Experience
 association is optional and can be added later with `experience associate`; it
 publishes metadata revisions without rewriting older evidence.
+
+When deciding whether an entry may continue an existing Experience, use
+`experience related --entry-id ENTRY_ID --limit 8` first. Treat its entries as
+candidates only; inspect or hydrate the evidence as needed, and use explicit
+association only when the grouping is sufficiently clear. If uncertain, leave
+the entry unassigned so its evidence remains searchable and durable.
 
 The existing `ToolRegistry` and bounded standalone model/tool loop remain
 available for provider-free tests and future standalone mode. They are not a

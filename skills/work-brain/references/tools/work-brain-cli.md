@@ -53,6 +53,7 @@ work-brain evidence hydrate < refs.json
 work-brain experience list --limit 8
 work-brain experience search --query "influenced the API decision" --page-size 8
 work-brain experience get --experience-id EXPERIENCE_ID
+work-brain experience related --entry-id ENTRY_ID --limit 8
 work-brain experience hydrate --experience-id EXPERIENCE_ID
 work-brain recoverable
 work-brain status
@@ -88,6 +89,13 @@ optional; unassigned entries remain available through `evidence search` and
 career preparation. Use `experiences` in evidence filters to scope a project,
 communication request, or interview search to one or more Experience IDs or
 aliases.
+
+`experience related` is a read-only candidate-discovery operation. It uses the
+anchor entry's deterministic structured text with existing hybrid retrieval,
+then revalidates candidates against the anchor's exact current
+workspace/project tuple. It does not create or associate Experiences. Use it
+before `experience associate` when an entry may continue an existing
+Experience; leave the entry unassigned when the evidence remains uncertain.
 
 ## Capture and mutation
 

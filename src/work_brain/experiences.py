@@ -21,6 +21,8 @@ from .services import ProjectionMaintenance
 
 MAX_EXPERIENCE_CARD_REFS = 12
 MAX_EXPERIENCE_RESULTS = 20
+MAX_RELATED_RESULTS = 20
+MAX_RELATED_QUERY_CHARS = 1000
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,83 @@ class ExperienceService:
             "next_cursor": evidence.get("next_cursor"),
             "embedding": evidence.get("embedding"),
         }
+
+    def related(self, entry_id: str, *, limit: int = 8) -> dict[str, Any]:
+        """Find bounded, source-verified evidence related to one current entry.
+
+        Retrieval supplies the ranking, while source entry records remain
+        authoritative for current revisions, context eligibility, and
+        Experience links. This operation never publishes an association.
+        """
+        if not isinstance(limit, int) or not 1 <= limit <= MAX_RELATED_RESULTS:
+            raise ValidationError(f"limit must be between 1 and {MAX_RELATED_RESULTS}")
+        anchor = self._current_entry_including_archived(entry_id)
+        workspace = self._context_descriptor(anchor, "workspace_entity_id", "workspace")
+        project = self._context_descriptor(anchor, "project_entity_id", "project")
+        experience_ids = self._experience_ids(anchor)
+
+        filters: dict[str, list[str]] = {}
+        if anchor.workspace_entity_id is not None:
+            filters["workspaces"] = [anchor.workspace_entity_id]
+        if anchor.project_entity_id is not None:
+            filters["projects"] = [anchor.project_entity_id]
+        evidence = self.retriever.search(
+            self._related_query(anchor),
+            filters=filters,
+            page_size=MAX_RELATED_RESULTS,
+        )
+        current = {
+            entry.entry_id: entry
+            for entry in self.vault.all_current_entries(include_archived=True)
+        }
+        candidates: list[dict[str, Any]] = []
+        anchor_context = (anchor.workspace_entity_id, anchor.project_entity_id)
+        for card in evidence.get("cards", []):
+            if not isinstance(card, Mapping):
+                continue
+            ref = card.get("ref")
+            if not isinstance(ref, Mapping) or not isinstance(ref.get("entry_id"), str):
+                continue
+            candidate = current.get(ref["entry_id"])
+            if candidate is None or candidate.entry_id == anchor.entry_id:
+                continue
+            if (candidate.workspace_entity_id, candidate.project_entity_id) != anchor_context:
+                continue
+            candidate_experience_ids = self._experience_ids(candidate)
+            experience_descriptors = [
+                self._experience_descriptor(experience_id)
+                for experience_id in candidate_experience_ids
+            ]
+            candidates.append({
+                "candidate_type": "experience_member" if experience_descriptors else "ungrouped_entry",
+                "entry_ref": {"entry_id": candidate.entry_id, "revision": candidate.revision},
+                "title": candidate.title,
+                "when": candidate.occurrence.to_dict(),
+                "matched_evidence": dict(card.get("match", {})) if isinstance(card.get("match", {}), Mapping) else {},
+                "experience": experience_descriptors[0] if len(experience_descriptors) == 1 else None,
+                "experiences": experience_descriptors,
+            })
+            if len(candidates) >= limit:
+                break
+
+        result: dict[str, Any] = {
+            "status": evidence.get("status", "ok"),
+            "anchor": {
+                "entry_id": anchor.entry_id,
+                "revision": anchor.revision,
+                "title": anchor.title,
+                "workspace": workspace,
+                "project": project,
+                "experience_ids": experience_ids,
+            },
+            "candidates": candidates,
+            "degraded_components": list(evidence.get("degraded_components", [])),
+            "incomplete": bool(evidence.get("incomplete", False)),
+            "embedding": evidence.get("embedding"),
+        }
+        if "omitted_stale_entries" in evidence:
+            result["omitted_stale_entries"] = evidence["omitted_stale_entries"]
+        return result
 
     def get(self, experience_id: str) -> dict[str, Any]:
         experience_id = validate_uuid7(experience_id, "experience_id")
@@ -241,6 +320,45 @@ class ExperienceService:
         public_experiences = [{key: value for key, value in item.items() if key != "_best_rank"} for item in experiences]
         public_ungrouped = [{key: value for key, value in item.items() if key != "_best_rank"} for item in ungrouped]
         return {"experiences": public_experiences, "ungrouped": public_ungrouped, "ordered": ordered}
+
+    def _current_entry_including_archived(self, entry_id: str) -> SessionEntry:
+        entry_id = validate_uuid7(entry_id, "entry_id")
+        for entry in self.vault.all_current_entries(include_archived=True):
+            if entry.entry_id == entry_id:
+                return entry
+        raise FileNotFoundError(f"entry not found: {entry_id}")
+
+    def _context_descriptor(self, entry: SessionEntry, field: str, kind: str) -> dict[str, str] | None:
+        entity_id = getattr(entry, field)
+        if entity_id is None:
+            return None
+        path = self.vault.root / "catalog/entities" / f"{entity_id}.json"
+        if not path.exists():
+            raise IntegrityError(f"missing {kind} entity: {entity_id}")
+        entity = read_json(path)
+        if entity.get("kind") != kind:
+            raise IntegrityError(f"entry context is not a {kind} entity: {entity_id}")
+        return {"entity_id": entity["entity_id"], "name": entity["canonical_name"]}
+
+    def _experience_descriptor(self, experience_id: str) -> dict[str, str]:
+        path = self.vault.root / "catalog/entities" / f"{experience_id}.json"
+        if not path.exists():
+            raise IntegrityError(f"missing experience entity: {experience_id}")
+        entity = read_json(path)
+        if entity.get("kind") != "experience":
+            raise IntegrityError(f"entry relation points to a non-experience entity: {experience_id}")
+        return {"experience_id": experience_id, "title": entity["canonical_name"]}
+
+    def _related_query(self, entry: SessionEntry) -> str:
+        parts = [entry.title, entry.summary]
+        for section in ("context", "reasoning", "contribution", "decisions_actions", "outcomes"):
+            statements = entry.sections.get(section, [])
+            if statements:
+                text = statements[0].text.strip()
+                if text:
+                    parts.append(text[:240])
+        query = " ".join(part.strip() for part in parts if part and part.strip())
+        return query[:MAX_RELATED_QUERY_CHARS]
 
     def _groups(self, *, filters: Mapping[str, Any] | None = None) -> dict[str, list[SessionEntry]]:
         groups: dict[str, list[SessionEntry]] = {}

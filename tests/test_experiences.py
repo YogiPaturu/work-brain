@@ -8,7 +8,7 @@ from io import StringIO
 import json
 from unittest.mock import patch
 
-from work_brain import EvidenceRetriever, ExperienceService, ValidationError, Vault, new_uuid7
+from work_brain import EvidenceRetriever, ExperienceService, LocalHashEmbeddingProvider, ValidationError, Vault, new_uuid7
 
 
 SECTIONS = (
@@ -74,6 +74,28 @@ class ExperienceTests(unittest.TestCase):
         )
         raw["entity_refs"] = []
         return self.vault.commit_entry(session["session_id"], raw, refresh_projections=False)
+
+    def _commit_context(self, when: str, *, workspace_id: str, project_id: str, title: str, summary: str | None = None, experience_id: str | None = None):
+        session = self.vault.create_session(started_at=when)
+        self.vault.append_turn(session["session_id"], "user", title)
+        raw = payload(
+            session,
+            workspace_id=workspace_id,
+            project_id=project_id,
+            experience_id=experience_id or self.architecture["entity_id"],
+            title=title,
+            summary=summary or title,
+            started_at=when,
+            tags=["engineering"],
+        )
+        raw["entity_refs"] = ([{"entity_id": experience_id, "relation": "experience"}] if experience_id else [])
+        return self.vault.commit_entry(session["session_id"], raw, refresh_projections=False)
+
+    def _related_service(self) -> ExperienceService:
+        self.vault.reconcile_database()
+        retriever = EvidenceRetriever(self.vault, LocalHashEmbeddingProvider())
+        retriever.reindex()
+        return ExperienceService(self.vault, retriever=retriever)
 
     def test_experience_spans_entries_and_keeps_stable_source_refs(self) -> None:
         first = self._commit("2026-10-01T10:00:00+01:00", self.architecture, title="Architecture options", tags=["architecture"])
@@ -181,6 +203,130 @@ class ExperienceTests(unittest.TestCase):
             self.assertEqual(0, main(["--vault", str(self.vault.root), "experience", "list"]))
         value = json.loads(output.getvalue())
         self.assertEqual(self.architecture["entity_id"], value["experiences"][0]["experience_id"])
+
+    def test_related_excludes_anchor_and_returns_same_context_candidates(self) -> None:
+        anchor = self._commit_context(
+            "2026-10-01T10:00:00+01:00",
+            workspace_id=self.workspace["entity_id"], project_id=self.project["entity_id"],
+            title="Authentication migration architecture", summary="Authentication migration architecture decision",
+        )
+        related = self._commit_context(
+            "2026-10-03T10:00:00+01:00",
+            workspace_id=self.workspace["entity_id"], project_id=self.project["entity_id"],
+            title="Authentication migration rollout", summary="Authentication migration rollout decision",
+        )
+        self._commit_context(
+            "2026-10-04T10:00:00+01:00",
+            workspace_id=self.workspace["entity_id"], project_id=self.project["entity_id"],
+            title="Database cleanup", summary="Unrelated database cleanup",
+        )
+
+        result = self._related_service().related(anchor.entry_id, limit=5)
+
+        self.assertEqual(anchor.entry_id, result["anchor"]["entry_id"])
+        self.assertEqual(1, result["anchor"]["revision"])
+        self.assertNotIn(anchor.entry_id, {item["entry_ref"]["entry_id"] for item in result["candidates"]})
+        self.assertIn(related.entry_id, {item["entry_ref"]["entry_id"] for item in result["candidates"]})
+        self.assertEqual("ungrouped_entry", next(item for item in result["candidates"] if item["entry_ref"]["entry_id"] == related.entry_id)["candidate_type"])
+
+    def test_related_enforces_exact_workspace_project_tuple(self) -> None:
+        other_workspace = self.vault.upsert_entity(kind="workspace", canonical_name="Personal")
+        other_project = self.vault.upsert_entity(kind="project", canonical_name="Website", workspace_entity_id=other_workspace["entity_id"])
+        other_same_project = self.vault.upsert_entity(kind="project", canonical_name="Authentication Personal")
+        anchor = self._commit_context(
+            "2026-10-01T10:00:00+01:00", workspace_id=self.workspace["entity_id"], project_id=self.project["entity_id"],
+            title="Authentication migration", summary="Authentication migration decision",
+        )
+        same_context = self._commit_context(
+            "2026-10-02T10:00:00+01:00", workspace_id=self.workspace["entity_id"], project_id=self.project["entity_id"],
+            title="Authentication migration rollout", summary="Authentication migration rollout",
+        )
+        wrong_workspace = self._commit_context(
+            "2026-10-03T10:00:00+01:00", workspace_id=other_workspace["entity_id"], project_id=other_project["entity_id"],
+            title="Authentication migration rollout", summary="Authentication migration rollout",
+        )
+        wrong_project = self._commit_context(
+            "2026-10-04T10:00:00+01:00", workspace_id=self.workspace["entity_id"], project_id=other_same_project["entity_id"],
+            title="Authentication migration rollout", summary="Authentication migration rollout",
+        )
+
+        result = self._related_service().related(anchor.entry_id, limit=8)
+        ids = {item["entry_ref"]["entry_id"] for item in result["candidates"]}
+        self.assertIn(same_context.entry_id, ids)
+        self.assertNotIn(wrong_workspace.entry_id, ids)
+        self.assertNotIn(wrong_project.entry_id, ids)
+
+    def test_related_exposes_experience_members_and_anchor_experience(self) -> None:
+        anchor = self._commit_context(
+            "2026-10-01T10:00:00+01:00", workspace_id=self.workspace["entity_id"], project_id=self.project["entity_id"],
+            title="Migration architecture", experience_id=self.architecture["entity_id"],
+        )
+        member = self._commit_context(
+            "2026-10-02T10:00:00+01:00", workspace_id=self.workspace["entity_id"], project_id=self.project["entity_id"],
+            title="Migration architecture rollout", experience_id=self.architecture["entity_id"],
+        )
+        ungrouped = self._commit_context(
+            "2026-10-03T10:00:00+01:00", workspace_id=self.workspace["entity_id"], project_id=self.project["entity_id"],
+            title="Migration architecture follow-up",
+        )
+
+        result = self._related_service().related(anchor.entry_id, limit=8)
+        member_result = next(item for item in result["candidates"] if item["entry_ref"]["entry_id"] == member.entry_id)
+        ungrouped_result = next(item for item in result["candidates"] if item["entry_ref"]["entry_id"] == ungrouped.entry_id)
+        self.assertEqual([self.architecture["entity_id"]], result["anchor"]["experience_ids"])
+        self.assertEqual("experience_member", member_result["candidate_type"])
+        self.assertEqual(self.architecture["entity_id"], member_result["experience"]["experience_id"])
+        self.assertEqual("ungrouped_entry", ungrouped_result["candidate_type"])
+        self.assertIsNone(ungrouped_result["experience"])
+
+    def test_related_propagates_degraded_state_and_is_read_only(self) -> None:
+        anchor = self._commit_context(
+            "2026-10-01T10:00:00+01:00", workspace_id=self.workspace["entity_id"], project_id=self.project["entity_id"],
+            title="Degraded retrieval anchor",
+        )
+        related = self._commit_context(
+            "2026-10-02T10:00:00+01:00", workspace_id=self.workspace["entity_id"], project_id=self.project["entity_id"],
+            title="Degraded retrieval continuation",
+        )
+        before_entries = [(entry.entry_id, entry.revision, entry.entity_refs) for entry in self.vault.all_current_entries()]
+        before_entities = sorted(path.read_text(encoding="utf-8") for path in (self.vault.root / "catalog/entities").glob("*.json"))
+
+        class DegradedRetriever:
+            def search(self, query: str, *, filters: dict[str, list[str]], page_size: int) -> dict:
+                self.query = query
+                self.filters = filters
+                self.page_size = page_size
+                return {
+                    "status": "degraded", "degraded_components": ["semantic"], "incomplete": True,
+                    "omitted_stale_entries": 1,
+                    "cards": [{"ref": {"entry_id": related.entry_id, "revision": 1}, "match": {"signals": ["lexical"], "snippets": ["continuation"]}}],
+                    "embedding": {"status": "degraded"},
+                }
+
+        result = ExperienceService(self.vault, retriever=DegradedRetriever()).related(anchor.entry_id, limit=1)
+        self.assertEqual("degraded", result["status"])
+        self.assertTrue(result["incomplete"])
+        self.assertEqual(["semantic"], result["degraded_components"])
+        self.assertEqual(1, result["omitted_stale_entries"])
+        self.assertEqual(1, len(result["candidates"]))
+        self.assertEqual(before_entries, [(entry.entry_id, entry.revision, entry.entity_refs) for entry in self.vault.all_current_entries()])
+        self.assertEqual(before_entities, sorted(path.read_text(encoding="utf-8") for path in (self.vault.root / "catalog/entities").glob("*.json")))
+
+    def test_related_validates_limit_and_cli_returns_json(self) -> None:
+        anchor = self._commit_context(
+            "2026-10-01T10:00:00+01:00", workspace_id=self.workspace["entity_id"], project_id=self.project["entity_id"],
+            title="CLI related anchor",
+        )
+        with self.assertRaisesRegex(ValidationError, "limit"):
+            ExperienceService(self.vault).related(anchor.entry_id, limit=0)
+        self._related_service()
+        from work_brain.cli import main
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(0, main(["--vault", str(self.vault.root), "experience", "related", "--entry-id", anchor.entry_id, "--limit", "1"]))
+        value = json.loads(output.getvalue())
+        self.assertEqual(anchor.entry_id, value["anchor"]["entry_id"])
+        self.assertLessEqual(len(value["candidates"]), 1)
 
 
 if __name__ == "__main__":

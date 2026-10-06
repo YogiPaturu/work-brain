@@ -29,17 +29,17 @@ class ToolDefinition:
 
 
 PROFILES: dict[str, tuple[str, ...]] = {
-    "think": ("resolve_context", "search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "get_current_state"),
+    "think": ("resolve_context", "search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "find_related_experience_entries", "get_current_state"),
     "operate": ("resolve_context", "get_current_state", "get_recent_work", "search_evidence", "select_evidence", "hydrate_evidence", "list_work_item_communication_profiles"),
     "communicate": ("resolve_context", "get_current_state", "get_recent_work", "search_evidence", "select_evidence", "search_profile_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "get_communication_profile"),
     "career": (
         "resolve_context", "search_questions", "get_question", "choose_question",
-        "search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience",
+        "search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "find_related_experience_entries",
         "mark_interview_candidate", "unmark_interview_candidate", "list_interview_candidates", "associate_entry_experience",
     ),
     "open-day": ("resolve_context", "get_current_state", "get_recent_work"),
     "close-day": ("resolve_context", "get_current_state", "get_close_day_record", "list_post_close_communication_profiles"),
-    "backfill": ("resolve_context", "search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "associate_entry_experience"),
+    "backfill": ("resolve_context", "search_evidence", "select_evidence", "hydrate_evidence", "search_experiences", "get_experience", "hydrate_experience", "find_related_experience_entries", "associate_entry_experience"),
 }
 
 
@@ -61,6 +61,7 @@ class ToolRegistry:
         "search_experiences": ToolDefinition("search_experiences", "Search or list source-backed professional Experiences."),
         "get_experience": ToolDefinition("get_experience", "Read one bounded source-backed Experience card."),
         "hydrate_experience": ToolDefinition("hydrate_experience", "Hydrate an Experience and bounded supporting evidence."),
+        "find_related_experience_entries": ToolDefinition("find_related_experience_entries", "Find bounded source-backed entries related to an anchor entry without changing Experience associations."),
         "get_communication_profile": ToolDefinition("get_communication_profile", "Read one validated user-owned communication profile."),
         "list_post_close_communication_profiles": ToolDefinition("list_post_close_communication_profiles", "List user-owned communication profiles configured to be offered after close-day."),
         "list_work_item_communication_profiles": ToolDefinition("list_work_item_communication_profiles", "List user-owned communication profiles configured for meaningful work-item completion."),
@@ -214,7 +215,7 @@ class ToolRegistry:
                 return ToolResult(True, handler(**arguments))
             except (ValidationError, ValueError) as exc:
                 return ToolResult(False, error=str(exc))
-        if name in {"search_experiences", "get_experience", "hydrate_experience"}:
+        if name in {"search_experiences", "get_experience", "hydrate_experience", "find_related_experience_entries"}:
             try:
                 from .experiences import ExperienceService
                 service = ExperienceService(self.vault)
@@ -233,6 +234,8 @@ class ToolRegistry:
                     ))
                 if name == "get_experience":
                     return ToolResult(True, service.get(arguments["experience_id"]))
+                if name == "find_related_experience_entries":
+                    return ToolResult(True, service.related(arguments["entry_id"], limit=arguments.get("limit", 8)))
                 refs = arguments.get("refs")
                 return ToolResult(True, service.hydrate(arguments["experience_id"], refs=refs))
             except (ValidationError, ValueError, FileNotFoundError) as exc:
