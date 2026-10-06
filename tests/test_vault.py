@@ -250,6 +250,63 @@ class VaultTests(unittest.TestCase):
 
         self.assertTrue(any("entry context conflict" in diagnostic for diagnostic in diagnostics))
 
+    def test_doctor_ignores_superseded_entry_context_after_current_ownership_is_backfilled(self) -> None:
+        ranq = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        personal = self.vault.upsert_entity(kind="workspace", canonical_name="Personal")
+        project = self.vault.upsert_entity(kind="project", canonical_name="Website")
+        self.vault.append_turn(self.session["session_id"], "user", "Record the first Website context.", recorded_at="2026-09-30T10:01:00+01:00")
+        first_payload = entry_payload(self.session)
+        first_payload.update({
+            "workspace_entity_id": ranq["entity_id"],
+            "project_entity_id": project["entity_id"],
+        })
+        self.vault.commit_entry(self.session["session_id"], first_payload)
+
+        self.vault.append_turn(self.session["session_id"], "user", "Correct the Website context.", recorded_at="2026-09-30T10:02:00+01:00")
+        second_payload = entry_payload(self.session, reason="reextract", revision=2, supersedes=1)
+        second_payload.update({
+            "workspace_entity_id": personal["entity_id"],
+            "project_entity_id": project["entity_id"],
+        })
+        self.vault.commit_entry(self.session["session_id"], second_payload)
+        self.vault.backfill_project_workspace(project["entity_id"], personal["entity_id"])
+
+        revisions = self.vault.all_entry_revisions()
+        self.assertEqual(ranq["entity_id"], revisions[0][0].workspace_entity_id)
+        self.assertEqual(personal["entity_id"], revisions[1][0].workspace_entity_id)
+        self.assertEqual([], [diagnostic for diagnostic in self.vault.doctor() if "entry context conflict" in diagnostic])
+
+    def test_doctor_checks_archived_current_entry_context(self) -> None:
+        ranq = self.vault.upsert_entity(kind="workspace", canonical_name="Ranq")
+        personal = self.vault.upsert_entity(kind="workspace", canonical_name="Personal")
+        project = self.vault.upsert_entity(kind="project", canonical_name="Website")
+        self.vault.append_turn(self.session["session_id"], "user", "Record the archived Website context.", recorded_at="2026-09-30T10:01:00+01:00")
+        payload = entry_payload(self.session)
+        payload.update({
+            "workspace_entity_id": ranq["entity_id"],
+            "project_entity_id": project["entity_id"],
+        })
+        self.vault.commit_entry(self.session["session_id"], payload)
+        self.vault.backfill_project_workspace(project["entity_id"], personal["entity_id"])
+        self.vault.archive_session(self.session["session_id"], reason="test archived ownership diagnostic")
+
+        diagnostics = self.vault.doctor()
+
+        self.assertTrue(any("entry context conflict" in diagnostic for diagnostic in diagnostics))
+
+    def test_doctor_keeps_historical_revision_integrity_checks(self) -> None:
+        self.vault.append_turn(self.session["session_id"], "user", "Create a revision chain.", recorded_at="2026-09-30T10:01:00+01:00")
+        self.vault.commit_entry(self.session["session_id"], entry_payload(self.session))
+        second_payload = entry_payload(self.session, reason="reextract", revision=2, supersedes=1)
+        second_payload["commit_id"] = new_uuid7()
+        self.vault.commit_entry(self.session["session_id"], second_payload)
+        revision_path = self.vault.session_dir(self.session["session_id"]) / "entries/0002.json"
+        revision_path.rename(revision_path.with_name("0003.json"))
+
+        diagnostics = self.vault.doctor()
+
+        self.assertTrue(any("non-contiguous revision" in diagnostic for diagnostic in diagnostics))
+
     def test_source_commit_survives_session_lifecycle_update_failure_and_retry(self) -> None:
         self.vault.append_turn(self.session["session_id"], "user", "Keep the immutable entry even if lifecycle metadata is unavailable.", recorded_at="2026-09-30T10:01:00+01:00")
         payload = entry_payload(self.session)

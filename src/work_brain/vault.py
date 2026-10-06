@@ -1208,25 +1208,32 @@ class Vault:
                     if entry.commit_id in commits:
                         diagnostics.append(f"duplicate commit ID: {entry.commit_id}")
                     commits.add(entry.commit_id)
-                    if entry.workspace_entity_id is not None and entry.project_entity_id is not None:
-                        project_path = self.root / "catalog/entities" / f"{entry.project_entity_id}.json"
-                        if project_path.exists():
-                            project = read_json(project_path)
-                            project_workspace_id = project.get("workspace_entity_id")
-                            if (
-                                project.get("kind") == "project"
-                                and project_workspace_id is not None
-                                and project_workspace_id != entry.workspace_entity_id
-                            ):
-                                diagnostics.append(
-                                    "entry context conflict: "
-                                    f"{entry.entry_id} revision {entry.revision} has workspace "
-                                    f"{entry.workspace_entity_id} but project {entry.project_entity_id} "
-                                    f"is owned by workspace {project_workspace_id}"
-                                )
                     expected += 1
             except Exception as exc:
                 diagnostics.append(f"entry integrity {session['session_id']}: {exc}")
+        try:
+            current_entries = self.all_current_entries(include_archived=True)
+            for entry in current_entries:
+                if entry.workspace_entity_id is None or entry.project_entity_id is None:
+                    continue
+                project_path = self.root / "catalog/entities" / f"{entry.project_entity_id}.json"
+                if not project_path.exists():
+                    continue
+                project = read_json(project_path)
+                project_workspace_id = project.get("workspace_entity_id")
+                if (
+                    project.get("kind") == "project"
+                    and project_workspace_id is not None
+                    and project_workspace_id != entry.workspace_entity_id
+                ):
+                    diagnostics.append(
+                        "entry context conflict: "
+                        f"{entry.entry_id} revision {entry.revision} has workspace "
+                        f"{entry.workspace_entity_id} but project {entry.project_entity_id} "
+                        f"is owned by workspace {project_workspace_id}"
+                    )
+        except Exception as exc:
+            diagnostics.append(f"current entry context integrity error: {exc}")
         try:
             current = {entry.entry_id: entry for entry in self.all_current_entries()}
             entity_ids = {p.stem for p in (self.root / "catalog/entities").glob("*.json")}
