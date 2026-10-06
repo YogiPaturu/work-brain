@@ -216,13 +216,14 @@ class ExperienceService:
             entry for entry in self.vault.all_current_entries()
             if not self._experience_ids(entry) and self._matches(entry, normalized_filters)
         ]
-        anchors.sort(key=self._mining_key)
+        anchors.sort(key=self._mining_order_key)
         if continuation is not None:
             last_key = continuation["last_key"]
             last_entry_id = continuation["last_entry_id"]
+            last_order_key = (last_key, last_entry_id)
             anchors = [
                 entry for entry in anchors
-                if (self._mining_key(entry), entry.entry_id) > (last_key, last_entry_id)
+                if self._mining_order_key(entry) > last_order_key
             ]
 
         page = anchors[:page_size]
@@ -236,11 +237,12 @@ class ExperienceService:
         next_cursor = None
         if len(anchors) > len(page) and page:
             last = page[-1]
+            last_key, last_entry_id = self._mining_order_key(last)
             next_cursor = self._encode_mining_cursor({
                 "version": MINING_CURSOR_VERSION,
                 "filter_fingerprint": fingerprint,
-                "last_key": self._mining_key(last),
-                "last_entry_id": last.entry_id,
+                "last_key": last_key,
+                "last_entry_id": last_entry_id,
             })
         return {
             "status": "degraded" if incomplete else "ok",
@@ -452,6 +454,10 @@ class ExperienceService:
         if entry.occurrence.precision == "instant" or entry.occurrence.start is None:
             return parse_timestamp(value).astimezone(timezone.utc).isoformat()
         return value
+
+    @classmethod
+    def _mining_order_key(cls, entry: SessionEntry) -> tuple[str, str]:
+        return cls._mining_key(entry), entry.entry_id
 
     @staticmethod
     def _encode_mining_cursor(payload: Mapping[str, Any]) -> str:

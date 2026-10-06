@@ -394,6 +394,34 @@ class ExperienceTests(unittest.TestCase):
 
         self.assertEqual([entries[2].entry_id, entries[4].entry_id], [item["anchor"]["entry_id"] for item in second["items"]])
 
+    def test_mine_cursor_orders_entry_id_within_same_chronology_key(self) -> None:
+        entries = [
+            self._commit_unassigned(
+                "2026-09-01T10:00:00+01:00",
+                title=f"Tie anchor {index}",
+                tags=["engineering"],
+            )
+            for index in range(3)
+        ]
+        expected = sorted(entries, key=lambda entry: entry.entry_id)
+        source_order = [expected[2], expected[0], expected[1]]
+        service = self._related_service()
+
+        def enumerated_in_source_order(*, include_archived: bool = False):
+            return list(source_order)
+
+        with patch.object(self.vault, "all_current_entries", side_effect=enumerated_in_source_order):
+            cursor = None
+            actual = []
+            while True:
+                result = service.mine(page_size=1, related_limit=1, cursor=cursor)
+                actual.extend(item["anchor"]["entry_id"] for item in result["items"])
+                cursor = result["next_cursor"]
+                if cursor is None:
+                    break
+
+        self.assertEqual([entry.entry_id for entry in expected], actual)
+
     def test_mine_filters_and_rejects_changed_or_malformed_cursors(self) -> None:
         self._commit_unassigned("2026-10-01T10:00:00+01:00", title="Engineering anchor", tags=["engineering"])
         self._commit_unassigned("2026-10-02T10:00:00+01:00", title="Second engineering anchor", tags=["engineering"])
