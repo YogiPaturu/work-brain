@@ -6,6 +6,7 @@ from pathlib import Path
 import shlex
 import sys
 import sysconfig
+import tomllib
 from typing import Any, Iterable
 
 from .errors import IntegrityError, ValidationError
@@ -34,6 +35,7 @@ class SetupReport:
     settings_path: str
     changes: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    host_access: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -42,6 +44,7 @@ class SetupReport:
             "settings_path": self.settings_path,
             "changes": list(self.changes),
             "warnings": list(self.warnings),
+            "host_access": self.host_access,
         }
 
 
@@ -235,11 +238,71 @@ class HarnessSetup:
             return False
         return all((left / rel).read_bytes() == (right / rel).read_bytes() for rel in left_files)
 
-    def install(self, host: str, *, check: bool = False) -> SetupReport:
+    def _codex_vault_access(self, vault_path: Path | None) -> dict[str, Any]:
+        config = self.home / ".codex/config.toml"
+        result: dict[str, Any] = {"vault": str(vault_path) if vault_path else None, "config_path": str(config)}
+        if vault_path is None:
+            result["status"] = "missing_vault"
+            return result
+        vault = vault_path.expanduser().resolve(strict=False)
+        result["vault"] = str(vault)
+        if not config.exists():
+            result["status"] = "missing_config"
+            return result
+        try:
+            data = tomllib.loads(config.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError):
+            result["status"] = "unknown"
+            return result
+        if isinstance(data.get("default_permissions"), str) and data["default_permissions"].strip():
+            result["status"] = "unknown"
+            result["reason"] = "named_permissions"
+            return result
+        mode = data.get("sandbox_mode")
+        if mode == "danger-full-access":
+            result["status"] = "ready"
+        elif mode == "read-only":
+            result["status"] = "read_only"
+        elif mode == "workspace-write":
+            sandbox_config = data.get("sandbox_workspace_write", {})
+            roots = sandbox_config.get("writable_roots", []) if isinstance(sandbox_config, dict) else []
+            covered = False
+            if isinstance(roots, list):
+                for root in roots:
+                    if isinstance(root, str):
+                        normalized = Path(root).expanduser().resolve(strict=False)
+                        if vault == normalized or normalized in vault.parents:
+                            covered = True
+                            break
+            result["status"] = "ready" if covered else "missing_writable_root"
+        else:
+            result["status"] = "unknown"
+        return result
+
+    def install(self, host: str, *, check: bool = False, vault_path: str | Path | None = None) -> SetupReport:
         spec = self._host(host)
         target = self.home / spec.skill_relative
         settings = self.home / spec.settings_relative
         report = SetupReport(spec.name, str(target), str(settings))
+        if spec.name == "codex":
+            access = self._codex_vault_access(Path(vault_path) if vault_path is not None else None)
+            report.host_access = access
+            status = access["status"]
+            vault = access.get("vault")
+            messages = {
+                "missing_vault": "Work Brain has no configured private vault. Configure one with `work-brain config set-vault PATH`.",
+                "missing_config": ("Codex config is missing. Add this to ~/.codex/config.toml and restart Codex:\n"
+                                   'sandbox_mode = "workspace-write"\n\n[sandbox_workspace_write]\n'
+                                   f'writable_roots = [\n  "{vault}",\n]'),
+                "unknown": f"Work Brain could not validate Codex sandbox access to {vault}.",
+                "read_only": f"Codex is configured read-only; source commits cannot reliably write the vault at {vault}.",
+                "missing_writable_root": f"Add {vault} to [sandbox_workspace_write].writable_roots in ~/.codex/config.toml and restart Codex.",
+            }
+            if status in messages:
+                if status == "unknown" and access.get("reason") == "named_permissions":
+                    report.warnings.append(f"Codex uses a named permission profile. Work Brain cannot prove vault write access from legacy sandbox_workspace_write settings; ensure the active profile grants write access to {vault}.")
+                else:
+                    report.warnings.append(messages[status])
         if check:
             if not target.exists() or not self._same_tree(target, self.skill_source):
                 report.warnings.append(f"Skill is not exposed at {target}")

@@ -146,6 +146,15 @@ every structural key exactly as returned. The existing
 `work-brain commit-draft --session-id ... --workflow ... [--file ...]`
 invocation is unchanged.
 
+An `error.code` of `vault_access_denied` means the current host process cannot
+write the configured vault. It is not a CommitDraft/schema failure: do not
+retrieve the schema to repair it, rewrite the draft, alter workspace/project
+classification, create a replacement session, append synthetic turns, or move
+the vault under the repository. Preserve raw turns, explain the access problem,
+and after host access is repaired and restarted if needed, verify and retry the
+same session. The single schema repair retry is only for structural/schema
+`invalid_request` errors.
+
 `backfill-tags` is the documented historical-maintenance operation for adding
 domain tags to existing current entries. Its JSON input is an explicit mapping
 with optional `defaults.domain_tags` and per-entry `entries[ENTRY_ID].domain_tags`

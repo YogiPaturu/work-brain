@@ -230,6 +230,7 @@ apparent, close without asking it.
   workflow boundary.
 - Every non-empty statement and state change in a CommitDraft MUST include the exact persisted raw turn sequence numbers that support it. If the evidence is not in the captured turns, omit the claim or keep the session recoverable rather than guessing.
 - Each statement and state change MUST reference at least one user-authored source turn. An assistant-only or synthetic turn cannot support a durable entry.
+- If commit-draft returns `error.code = vault_access_denied`, classify it as a host/filesystem access failure, not CommitDraft validation. Do not retrieve the schema as repair, modify/re-extract the CommitDraft, change workspace/project classification, create another session, append synthetic turns, or switch the vault to the repository. Preserve the raw session, surface the access issue and required host configuration, then after access is repaired/restart if needed verify the same session and retry against it. The one schema repair retry applies only to structural/schema `invalid_request` errors.
 - Before emitting a CommitDraft, the agent MUST classify the bounded evidence
   with both required non-empty string fields: `workspace` and `project`. It SHOULD infer these from the
   user’s explicit words, the active work item, an active communication profile,

@@ -312,6 +312,13 @@ choice belongs in the Skill or a harness hook.
 - support `--check`;
 - refuse invalid or conflicting existing configuration rather than overwrite
   it wholesale.
+- require host write access to the private vault for source writes; the
+  `.vault.write.lock` permission failure is distinct from lock contention;
+- check Codex writable-root readiness and report the configured vault access
+  status without modifying user sandbox permissions automatically.
+- treat `vault_access_denied` as infrastructure failure: raw turns and the
+  uncommitted session remain intact, and this failure must not trigger
+  CommitDraft repair.
 
 User-level targets are:
 

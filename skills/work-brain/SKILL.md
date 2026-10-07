@@ -107,6 +107,15 @@ create a replacement session to work around a failure. Imported transcripts
 retain imported/reconstructed capture semantics and must not be presented as
 verbatim host capture.
 
+If `commit-draft` returns `error.code = vault_access_denied`, classify it as a
+host/filesystem access failure, not CommitDraft validation. Do not retrieve the
+schema as repair, modify or re-extract the draft, change workspace/project
+classification, create another session, append synthetic turns, or point the
+vault at the repository. Preserve the existing raw session, explain the access
+problem and required host configuration, then after access is repaired and the
+host restarted if needed, verify and retry against that same session. The one
+schema repair retry applies only to structural/schema `invalid_request` errors.
+
 Detailed session, revision, CommitDraft, import, recovery, and CLI mechanics
 are owned by the referenced core SOP, schema, and tool documentation below.
 

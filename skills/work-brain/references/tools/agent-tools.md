@@ -120,12 +120,14 @@ Raw-turn append is not exposed as a normal CLI operation. The internal append
 API is reserved for adapters, fixtures, and explicit integration tests. A
 hosted agent MUST NOT use it to append its own summary or manufacture missing
 conversation history. If a CommitDraft fails, classify the error. For
-structural/schema failures, retrieve the canonical schema again and make one
+structural/schema `invalid_request` failures, retrieve the canonical schema again and make one
 repair attempt against the same session; if it still fails, preserve the raw
 session and surface the error. For provenance/source-turn failures, inspect
 that exact session's persisted turns and repair the references. For
 semantic/context ambiguity, follow the normal clarification rules. Never
 create a replacement session or combine unrelated sessions.
+
+If the error code is `vault_access_denied`, this is a host/filesystem access failure, not CommitDraft validation. Do not retrieve the schema, rewrite or re-extract the draft, change workspace/project classification, create another session, append synthetic turns, or point Work Brain at the repository. Preserve the raw session, explain the vault access problem and host configuration needed, then verify and retry against the same session after access is repaired and the host restarted if needed. Schema repair is limited to structural/schema `invalid_request` errors.
 
 `session quarantine` is a narrowly scoped maintenance command requiring an
 explicit session ID and reason; it hides a known bad structured entry while

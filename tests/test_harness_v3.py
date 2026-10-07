@@ -398,13 +398,41 @@ class HarnessV3Tests(unittest.TestCase):
         self.assertEqual(1, len(value["hooks"]["UserPromptSubmit"]))
         self.assertTrue(first.changes)
         self.assertFalse(any("added UserPromptSubmit" in change for change in second.changes))
-        self.assertEqual([], setup.install("codex", check=True).warnings)
+        self.assertEqual("missing_vault", setup.install("codex", check=True).host_access["status"])
 
         cursor = setup.install("cursor")
         cursor_settings = json.loads((self.home / ".cursor/hooks.json").read_text(encoding="utf-8"))
         self.assertEqual(1, cursor_settings["version"])
         self.assertEqual("command", cursor_settings["hooks"]["afterAgentResponse"][0]["type"])
         self.assertTrue(cursor.changes)
+
+    def test_codex_vault_readiness_and_config_is_read_only(self) -> None:
+        setup = HarnessSetup(home=self.home, skill_source=self.skill_source, executable="/opt/work-brain")
+        vault = self.home / "private-vault"
+        config = self.home / ".codex/config.toml"
+        config.parent.mkdir(parents=True)
+        config.write_text('sandbox_mode = "workspace-write"\n[sandbox_workspace_write]\nwritable_roots = ["' + str(self.home) + '"]\n', encoding="utf-8")
+        before = config.read_bytes()
+        self.assertEqual("ready", setup.install("codex", check=True, vault_path=vault).host_access["status"])
+        self.assertEqual(before, config.read_bytes())
+        setup.install("codex", vault_path=vault)
+        self.assertEqual(before, config.read_bytes())
+        config.write_text('sandbox_mode = "read-only"\n', encoding="utf-8")
+        self.assertEqual("read_only", setup.install("codex", check=True, vault_path=vault).host_access["status"])
+        config.write_text('default_permissions = "locked"\nsandbox_mode = "workspace-write"\n[sandbox_workspace_write]\nwritable_roots = ["' + str(self.home) + '"]\n', encoding="utf-8")
+        self.assertEqual("unknown", setup.install("codex", check=True, vault_path=vault).host_access["status"])
+        self.assertTrue(any("named permission profile" in warning for warning in setup.install("codex", check=True, vault_path=vault).warnings))
+        config.write_text('sandbox_mode = "danger-full-access"\n', encoding="utf-8")
+        self.assertEqual("ready", setup.install("codex", check=True, vault_path=vault).host_access["status"])
+        config.write_text('sandbox_mode = "workspace-write"\n[sandbox_workspace_write]\nwritable_roots = ["/somewhere-else"]\n', encoding="utf-8")
+        self.assertEqual("missing_writable_root", setup.install("codex", check=True, vault_path=vault).host_access["status"])
+        self.assertTrue(any(str(vault.resolve()) in warning and "restart Codex" in warning for warning in setup.install("codex", check=True, vault_path=vault).warnings))
+        config.write_text("not valid = [", encoding="utf-8")
+        self.assertEqual("unknown", setup.install("codex", check=True, vault_path=vault).host_access["status"])
+        config.unlink()
+        self.assertEqual("missing_config", setup.install("codex", check=True, vault_path=vault).host_access["status"])
+        self.assertTrue(any("sandbox_mode = \"workspace-write\"" in warning for warning in setup.install("codex", check=True, vault_path=vault).warnings))
+        self.assertEqual("missing_vault", setup.install("codex", check=True).host_access["status"])
 
     def test_setup_accepts_equivalent_skill_link_from_another_install(self) -> None:
         target = self.home / ".agents/skills/work-brain"

@@ -507,6 +507,23 @@ overwrite it. Review the reported warning and resolve it manually.
 
 ## Using Work Brain with Codex
 
+The private vault intentionally lives outside the repository and must be
+writable by the Codex host. For `workspace-write`, add the vault to
+`~/.codex/config.toml`:
+
+```toml
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+writable_roots = [
+  "/absolute/path/to/work-brain-vault",
+]
+```
+
+Restart Codex after changing its sandbox configuration. `work-brain setup
+codex --check` reports whether the configured vault appears writable under
+these settings; it does not edit Codex configuration.
+
 1. Install Work Brain, configure/init the private vault, and run
    `work-brain setup codex`.
 2. The canonical Skill is exposed at `~/.agents/skills/work-brain` and hook

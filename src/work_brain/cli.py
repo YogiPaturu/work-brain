@@ -14,7 +14,7 @@ from .commit import CommitResolver, commit_draft_contract
 from .config import default_config_path, read_config, resolve_vault_path, set_vault_path
 from .context_resolver import ContextResolver
 from .domain import normalize_domain_tags
-from .errors import FeatureUnavailable, IntegrityError, LockError, PersistenceError, ValidationError
+from .errors import FeatureUnavailable, IntegrityError, LockError, PersistenceError, ValidationError, VaultAccessError
 from .experiences import ExperienceService
 from .fsutil import read_json
 from .hook import process as process_capture_hook
@@ -39,8 +39,11 @@ def _json_dump(value: Any, *, sort_keys: bool = True) -> None:
     print(json.dumps(value, ensure_ascii=False, sort_keys=sort_keys, separators=(",", ":")))
 
 
-def _error_payload(code: str, message: str) -> dict[str, Any]:
-    return {"ok": False, "error": {"code": code, "message": message}}
+def _error_payload(code: str, message: str, hint: str | None = None) -> dict[str, Any]:
+    error = {"code": code, "message": message}
+    if hint is not None:
+        error["hint"] = hint
+    return {"ok": False, "error": error}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -586,7 +589,11 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
             return store.get(args.profile_id).to_dict(), True
         return {"valid": True, "path": str(resolve_profiles_path(args.profiles, config_path=args.config)), "count": len(store.list())}, True
     if command == "setup":
-        report = HarnessSetup().install(args.host, check=args.check).to_dict()
+        try:
+            vault_path = resolve_vault_path(args.vault, config_path=args.config)
+        except ValidationError:
+            vault_path = None
+        report = HarnessSetup().install(args.host, check=args.check, vault_path=vault_path).to_dict()
         if args.vault:
             selected = set_vault_path(args.vault, args.config)
             report["configured_vault"] = str(selected)
@@ -851,6 +858,12 @@ def main(argv: list[str] | None = None) -> int:
         if isinstance(exc, LockError):
             _json_dump(_error_payload("lock_conflict", str(exc)))
             return EXIT_LOCK
+        if isinstance(exc, VaultAccessError):
+            hint = ("The configured Work Brain vault must be writable by the current host process. If using Codex workspace-write, "
+                    "add the vault to [sandbox_workspace_write].writable_roots in ~/.codex/config.toml, restart Codex, and retry "
+                    "the same Work Brain session. Do not modify the CommitDraft to repair this error.")
+            _json_dump(_error_payload("vault_access_denied", str(exc), hint))
+            return EXIT_PERSISTENCE
         if isinstance(exc, (ValidationError, ValueError)):
             _json_dump(_error_payload("invalid_request", str(exc)))
             return EXIT_VALIDATION

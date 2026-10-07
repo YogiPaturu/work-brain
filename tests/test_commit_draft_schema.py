@@ -12,7 +12,8 @@ from unittest.mock import patch
 from work_brain.cli import main
 from work_brain.commit import CommitDraftValidator, commit_draft_contract
 from work_brain.domain import ENTRY_SECTIONS
-from work_brain.errors import ValidationError
+from work_brain.errors import ValidationError, VaultAccessError
+from work_brain.cli import EXIT_PERSISTENCE
 from work_brain.vault import Vault
 
 
@@ -44,6 +45,23 @@ def populated_template() -> dict:
 
 
 class CommitDraftSchemaTests(unittest.TestCase):
+    def test_vault_access_failure_has_stable_cli_error(self) -> None:
+        output = StringIO()
+        with redirect_stdout(output), patch("work_brain.cli._run", side_effect=VaultAccessError("Work Brain cannot write the vault at /private/vault: denied")):
+            code = main(["--json", "init"])
+        payload = json.loads(output.getvalue())
+        self.assertEqual(EXIT_PERSISTENCE, code)
+        self.assertEqual("vault_access_denied", payload["error"]["code"])
+        self.assertIn("writable_roots", payload["error"]["hint"])
+        self.assertIn("Do not modify the CommitDraft", payload["error"]["hint"])
+
+    def test_skill_and_core_sop_distinguish_vault_access_from_schema_repair(self) -> None:
+        for relative in ("skills/work-brain/SKILL.md", "skills/work-brain/references/sops/core-conversation.sop.md"):
+            content = (ROOT / relative).read_text(encoding="utf-8")
+            self.assertIn("vault_access_denied", content)
+            self.assertIn("not CommitDraft validation", content)
+            self.assertIn("invalid_request", content)
+
     def test_cli_contract_is_deterministic_and_needs_no_vault(self) -> None:
         with patch("work_brain.cli._vault", side_effect=AssertionError("schema command must not resolve a vault")):
             first_code, first, first_json = read_cli_schema()

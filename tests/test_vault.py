@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import closing
 import json
+import errno
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,8 @@ from unittest.mock import patch
 
 from work_brain import IntegrityError, ValidationError, Vault, new_uuid7
 from work_brain.vault import atomic_replace_json
+from work_brain.errors import VaultAccessError, LockError
+from work_brain.lock import VaultLock
 
 
 def entry_payload(session: dict, *, commit_id: str | None = None, reason: str = "initial_commit", revision: int = 1, supersedes: int | None = None) -> dict:
@@ -36,6 +39,26 @@ class VaultTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tempdir.cleanup()
+
+    def test_lock_open_permission_failures_are_vault_access_errors(self) -> None:
+        for error_number in (errno.EPERM, errno.EACCES, errno.EROFS):
+            with self.subTest(errno=error_number), patch("builtins.open", side_effect=PermissionError(error_number, "denied")):
+                lock = VaultLock(self.vault.root / ".vault.write.lock")
+                with self.assertRaises(VaultAccessError):
+                    lock.acquire()
+                self.assertIsNone(lock.handle)
+
+    def test_lock_contention_remains_lock_error_and_closes_handle(self) -> None:
+        import fcntl
+        handle = patch("builtins.open").start()
+        self.addCleanup(patch.stopall)
+        mocked_file = handle.return_value
+        with patch.object(fcntl, "flock", side_effect=BlockingIOError()):
+            lock = VaultLock(self.vault.root / ".vault.write.lock")
+            with self.assertRaises(LockError):
+                lock.acquire()
+        mocked_file.close.assert_called_once()
+        self.assertIsNone(lock.handle)
 
     def test_raw_source_store_does_not_initialize_sqlite(self) -> None:
         source_only = Vault(Path(self.tempdir.name) / "source-only").initialize()
