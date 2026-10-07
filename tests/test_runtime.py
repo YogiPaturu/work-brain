@@ -63,7 +63,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_skill_loader_is_progressive_and_versioned(self) -> None:
         loaded = SkillLoader().load("think", ["engineering", "product", "leadership"])
-        self.assertEqual(["WORK-BRAIN-SKILL@2", "WORK-BRAIN-SOP-CORE@2", "WORK-BRAIN-SOP-THINK@2", "WORK-BRAIN-PROBE-ENGINEERING@2", "WORK-BRAIN-PROBE-PRODUCT@2"], loaded.identities)
+        self.assertEqual(["WORK-BRAIN-SKILL@2", "WORK-BRAIN-SOP-CORE@3", "WORK-BRAIN-SOP-THINK@3", "WORK-BRAIN-PROBE-ENGINEERING@2", "WORK-BRAIN-PROBE-PRODUCT@2"], loaded.identities)
         self.assertNotIn("WORK-BRAIN-PROBE-LEADERSHIP@2", loaded.identities)
 
     def test_commit_instruction_load_includes_schema_and_tag_reference(self) -> None:
@@ -139,13 +139,14 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(8, len(sop_files))
         for path in sop_files:
             text = path.read_text(encoding="utf-8")
-            self.assertRegex(text, r"(?m)^WORK-BRAIN-SOP-[A-Z0-9-]+ v2$")
+            self.assertRegex(text, r"(?m)^WORK-BRAIN-SOP-[A-Z0-9-]+ v3$")
             self.assertRegex(text, r"(?m)^# (?!#).+$")
             for section in ("Overview", "Parameters", "Steps", "Examples", "Troubleshooting"):
                 self.assertIn(f"## {section}", text, path.name)
             step_names = re.findall(r"(?m)^### \d+\. .+$", text)
             self.assertGreaterEqual(len(step_names), 2, path.name)
-            self.assertEqual(len(step_names), len(re.findall(r"(?m)^\*\*Constraints:\*\*$", text)), path.name)
+            expected_constraint_blocks = len(step_names) - (1 if path.name == "backfill.sop.md" else 0)
+            self.assertEqual(expected_constraint_blocks, len(re.findall(r"(?m)^\*\*Constraints:\*\*$", text)), path.name)
             self.assertRegex(text, r"(?m)^- \*\*[a-z][a-z0-9_]*\*\* \((required|optional)")
         core = (sop_dir / "core-conversation.sop.md").read_text(encoding="utf-8")
         self.assertIn("Ask the following memory-gap question only when that assessment identifies a", core)
@@ -169,7 +170,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(1, entry.revision)
         self.assertEqual(RuntimeState.COMMITTED, orchestrator.state)
         self.assertEqual(["respond", "commit_draft"], [call["kind"] for call in model.calls])
-        self.assertEqual(["WORK-BRAIN-SKILL@2", "WORK-BRAIN-SOP-CORE@2", "WORK-BRAIN-SOP-THINK@2", "WORK-BRAIN-SCHEMA-COMMIT-DRAFT@1", "WORK-BRAIN-DOMAIN-TAGS@1", "WORK-BRAIN-PROBE-ENGINEERING@2"], self.vault.read_session(session["session_id"])["runtime"]["sops"])
+        self.assertEqual(["WORK-BRAIN-SKILL@2", "WORK-BRAIN-SOP-CORE@3", "WORK-BRAIN-SOP-THINK@3", "WORK-BRAIN-SCHEMA-COMMIT-DRAFT@1", "WORK-BRAIN-DOMAIN-TAGS@1", "WORK-BRAIN-PROBE-ENGINEERING@2"], self.vault.read_session(session["session_id"])["runtime"]["sops"])
 
     def test_cli_commit_draft_finalizes_lifecycle_and_status_ignores_stale_pending_flag(self) -> None:
         session = self.vault.create_session(

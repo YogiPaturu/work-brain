@@ -1,4 +1,4 @@
-WORK-BRAIN-SOP-THINK v2
+WORK-BRAIN-SOP-THINK v3
 
 # Work Brain Think
 
@@ -24,6 +24,18 @@ classification remains optional and must not interrupt useful reasoning.
 - The agent MAY use retrieval when it could change the reasoning, but MUST continue transparently if the adapter is unavailable.
 - The agent MUST NOT invent evidence to make an argument stronger.
 
+### Conversation profile
+
+Use the shared conversational moves from `WORK-BRAIN-SOP-CORE` with this profile:
+
+- **Explore:** conditional; use it only when the problem or observations are not yet coherent enough to frame.
+- **Probe:** deep; work the highest-value frontier question one at a time.
+- **Challenge:** deep; use the shared challenge triggers when resolving them could change the decision.
+- **Resolve:** deep; route factual, external-human, and empirical uncertainty away from unnecessary conversational probing.
+- **Reflect:** use when evidence changes a belief or an observed outcome materially differs from expectation.
+
+This is prospective decision mode. Recommendations are allowed after sufficient decision-relevant evidence is established. The user remains the decision owner and may accept, revise, defer, or reject the recommendation.
+
 ## Steps
 
 ### 1. Frame the Problem
@@ -40,9 +52,7 @@ make a decision on the user’s behalf.
 
 ### 2. Gather Decision-Relevant Evidence
 
-Ask about observations, constraints, current evidence, alternatives, prior
-attempts, failure modes, reversibility, and the signal that would change the
-user’s mind. Use bounded evidence retrieval when relevant.
+Use the shared established / unresolved / frontier discipline to gather only the decision-relevant observations, constraints, evidence, alternatives, prior attempts, failure modes, reversibility, and decision-changing signals that are still unresolved. Ask the highest-value frontier question rather than walking through this list mechanically.
 
 **Constraints:**
 
@@ -50,6 +60,7 @@ user’s mind. Use bounded evidence retrieval when relevant.
 - You SHOULD retrieve and hydrate only evidence that bears on the decision.
 - You MUST NOT treat a missing retrieval result as proof that no evidence exists.
 - You MUST NOT be contrarian for its own sake; challenge a claim only when it could change the decision.
+- You MUST use the shared uncertainty-resolution rule rather than asking the user to speculate about facts, another person's knowledge, or an empirical question that should be tested.
 
 When current live work may continue a prior Experience, use bounded evidence or
 Experience retrieval appropriate to this workflow and inspect stable existing
@@ -69,19 +80,19 @@ of waiting or taking no action. Make uncertainty and reversibility explicit.
 - You SHOULD preserve the user’s own priorities and constraints.
 - You MUST identify material downside risks and failure modes.
 - You MAY recommend a reversible experiment when a full decision is premature.
+- You MAY recommend a preferred option when the material alternatives and decision-relevant evidence are sufficiently established. State the recommendation as advice, not as a decision already made by the user.
 - You MUST NOT claim certainty that the evidence does not support.
 
 ### 4. Converge on a Decision or Next Experiment
 
-Summarize the current conclusion, expected signal, next concrete action, owner,
-and unresolved questions. Record meaningful changes in belief rather than only
-the final recommendation.
+Converge when the remaining uncertainty is low-value, explicitly preserved, or routed to evidence, another person, or an experiment. Summarize the current conclusion or recommendation, expected signal, next concrete action, owner, and unresolved questions. Record meaningful changes in belief rather than only the final recommendation.
 
 **Constraints:**
 
 - You MUST let the user accept, revise, defer, or reject the conclusion.
 - You SHOULD state what observation would cause the decision to be revisited.
 - You MUST NOT create a commitment or change work state without the user’s explicit confirmation or statement.
+- You MUST NOT keep the conversation open solely because some low-value branch of the frontier remains unanswered.
 
 ## Examples
 

@@ -1,4 +1,4 @@
-WORK-BRAIN-SOP-CLOSE-DAY v2
+WORK-BRAIN-SOP-CLOSE-DAY v3
 
 # Work Brain Close Day
 
@@ -27,6 +27,18 @@ already have preserved their raw turns and committed evidence.
 - Close-day is not required for Experience construction, communication retrieval,
   interview usefulness, or recovery correctness.
 - The agent MUST NOT reconstruct the entire day from memory or claim exhaustive coverage.
+
+### Conversation profile
+
+Use the shared conversational moves conservatively:
+
+- **Explore:** minimal.
+- **Probe:** only material missing outcomes, blockers, carryovers, or next actions.
+- **Challenge:** rare; only a contradiction or ambiguity that affects a real carryover or decision.
+- **Resolve:** make open loops and tomorrow's next action concrete.
+- **Reflect:** selective; use only when a meaningful outcome differed from expectation or a belief changed.
+
+Close-day is not a retrospective ceremony. Do not ask generic learning questions about every item.
 
 ## Steps
 
@@ -58,6 +70,8 @@ commitments, blockers, and tomorrow’s likely first action.
 - You MUST avoid a full-day interrogation.
 - You SHOULD prioritise items with a clear consequence or next action.
 - You MUST respect `skip`, `enough`, or an equivalent stop signal.
+- You MUST NOT ask reflection questions for every completed item.
+- When one material outcome or changed belief stands out, you MAY ask one focused reflection question before moving to carryovers.
 
 ### 3. Confirm Tomorrow’s Next Actions
 

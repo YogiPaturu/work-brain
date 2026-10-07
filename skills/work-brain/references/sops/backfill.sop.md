@@ -1,4 +1,4 @@
-WORK-BRAIN-SOP-BACKFILL v2
+WORK-BRAIN-SOP-BACKFILL v3
 
 # Work Brain Backfill
 
@@ -24,12 +24,23 @@ the historical story is distinct; leave it unassigned when uncertain.
 - The agent MUST treat this as one coherent historical experience.
 - The agent MUST retrieve related evidence when available to reduce accidental duplication, but MUST continue transparently if retrieval is unavailable.
 
+### Conversation profile
+
+Use the shared conversational moves with this profile:
+
+- **Explore:** deep; allow partial, nonlinear recollection before forcing an evidence structure.
+- **Probe:** deep; ask the highest-value historical frontier question one at a time.
+- **Challenge:** evidence-focused; use the shared triggers for ambiguous ownership, unsupported causality, vague outcome, contradiction, or unclear terminology.
+- **Resolve:** prefer source-backed artifacts or Work Brain retrieval over asking the user to guess.
+- **Reflect:** only after contemporaneous facts and hindsight have been separated.
+
+This workflow is historical evidence mode. Do not suggest what the user's remembered fact, motive, metric, ownership, sequence, or outcome probably was.
+
 ## Steps
 
 ### 1. Bound the Historical Experience
 
-Identify the one experience being reconstructed, its approximate occurrence, the
-user’s role at the time, and the precision that can honestly be supported.
+Bound the reconstruction to one coherent historical experience and establish the best-supported occurrence precision and role context. Do not force the user to provide the full structure immediately; allow useful partial recollections to emerge when they help establish the boundary.
 
 **Constraints:**
 
@@ -39,15 +50,16 @@ user’s role at the time, and the precision that can honestly be supported.
 
 ### 2. Separate Time-of-Event Knowledge from Hindsight
 
-Explore what the user observed, believed, decided, and did then, followed by
-what later evidence or hindsight changed. Use related evidence only to prompt
-recall and check duplication, not to overwrite the user’s account silently.
+Explore what the user remembers observing, believing, deciding, and doing at the time before imposing a complete evidence structure. Use the shared frontier to probe the highest-value unresolved historical question. Only after contemporaneous evidence is distinguished should you examine what later evidence or hindsight changed.
 
 **Constraints:**
 
 - You MUST distinguish contemporaneous belief from later interpretation.
 - You SHOULD identify the source or basis of important claims.
 - You MUST preserve uncertainty around causality, metrics, ownership, and outcomes.
+- You MUST ask historical questions in a non-leading form.
+- You MUST NOT offer a plausible remembered answer for the user to approve.
+- You MAY present source-backed evidence candidates when retrieval or an artifact supplies them, but you MUST distinguish those candidates from the user's memory.
 
 When historical evidence may continue an existing Experience, use bounded
 related-entry discovery and load `references/experience-review.md` before
@@ -63,18 +75,20 @@ batch as automatic clustering.
 
 ### 3. Reconstruct the Evidence Shape
 
-Capture context, observations, significance, contribution, reasoning, evidence,
-alternatives and trade-offs, decisions and actions, expectations, outcomes,
-learning, and open questions as supported. Leave unsupported sections empty or
-explicitly uncertain rather than filling them with plausible detail.
+Use the existing evidence dimensions as a reconstruction map, not a completeness checklist. Capture context, observations, significance, contribution, reasoning, evidence, alternatives and trade-offs, decisions and actions, expectations, outcomes, learning, and open questions only as supported. Prioritize gaps that materially affect the coherence or evidentiary value of the reconstructed experience.
 
 **Constraints:**
 
 - You MUST preserve the user’s actual contribution without inflating it.
 - You MUST NOT convert a later outcome into a fact known at the time.
 - You SHOULD attach artifacts or related-entry references only when the user or configured tool provides stable references.
+- You MUST NOT continue probing only to fill every evidence section.
 
-### 4. Confirm Scope and Commit as Reconstructed
+### 4. Reflection Boundary
+
+When the later outcome or hindsight materially changed the user's belief, you MAY reflect on what changed and what the user would repeat or change now. Keep this reflection explicitly separate from what was known or believed at the time.
+
+### 5. Confirm Scope and Commit as Reconstructed
 
 Summarize the reconstructed experience, its uncertainty, and any missing
 evidence. Ask the user to correct it before producing the CommitDraft.
@@ -93,7 +107,7 @@ evidence. Ask the user to correct it before producing the CommitDraft.
 
 ### Example Response
 
-`Let’s keep this to one incident review. What do you remember being known at the time, and which parts are clearer only in hindsight?`
+`Let's keep this to that incident review. Start with whatever you remember most clearly from the time—what was happening, what you believed, or what you did. We can structure it after the reliable pieces emerge.`
 
 ## Troubleshooting
 

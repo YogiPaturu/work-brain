@@ -4,6 +4,9 @@ import json
 from pathlib import Path
 import unittest
 
+from work_brain.domain import ENTRY_SECTIONS
+from work_brain.instructions import SkillLoader
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,7 +21,14 @@ class BehavioralEvalContractTests(unittest.TestCase):
 
     def test_transcript_fixtures_cover_the_high_value_behaviors(self) -> None:
         fixtures = json.loads((ROOT / "tests/fixtures/behavioral_scenarios.json").read_text(encoding="utf-8"))
-        self.assertEqual(6, len(fixtures))
+        self.assertEqual(12, len(fixtures))
+        self.assertEqual({
+            "think_architecture", "operate_explicit_state", "communicate_scoped_draft",
+            "career_multiple_candidates", "backfill_uncertain_date", "close_day_without_new_evidence",
+            "frontier_prerequisite_order", "challenge_ambiguous_ownership",
+            "challenge_unsupported_causality", "resolve_external_human",
+            "resolve_empirical_uncertainty", "stop_on_enough",
+        }, {item["id"] for item in fixtures})
         self.assertEqual({"think", "operate", "communicate", "career", "backfill", "close-day"},
                          {item["workflow"] for item in fixtures})
         for item in fixtures:
@@ -41,6 +51,54 @@ class BehavioralEvalContractTests(unittest.TestCase):
         self.assertIn("uncertain", backfill.casefold())
         self.assertIn("without manufacturing", close_day.casefold())
         self.assertIn("close-day", close_day.casefold())
+
+    def test_core_synthesis_contract_is_present(self) -> None:
+        core = (ROOT / "skills/work-brain/references/sops/core-conversation.sop.md").read_text(encoding="utf-8")
+        for phrase in (
+            "Established:", "Unresolved:", "Frontier:", "Explore:", "Probe:",
+            "Challenge:", "Resolve:", "Reflect:", "Ambiguous ownership",
+            "Unsupported causality", "Vague outcome", "Hidden assumption",
+            "Missing meaningful alternative", "Prospective versus historical evidence",
+            "Another person owns the missing knowledge", "inherently empirical",
+            "MUST default to one high-value question at a time",
+        ):
+            self.assertIn(phrase.casefold(), core.casefold())
+
+    def test_workflow_synthesis_contract_is_present(self) -> None:
+        def read(name: str) -> str:
+            return (ROOT / f"skills/work-brain/references/sops/{name}.sop.md").read_text(encoding="utf-8").casefold()
+
+        think = read("think")
+        operate = read("operate")
+        backfill = read("backfill")
+        career = read("career")
+        close_day = read("close-day")
+        open_day = read("open-day")
+        communicate = read("communicate")
+        self.assertIn("this is prospective decision mode", think)
+        self.assertIn("recommendations are allowed", think)
+        self.assertIn("an explicit state update is already evidence", operate)
+        self.assertIn("substantive trade-off or decision", operate)
+        self.assertIn("historical evidence mode", backfill)
+        self.assertIn("must not offer a plausible remembered answer", backfill)
+        self.assertIn("evidence problem from a presentation problem", career)
+        self.assertIn("first loop is `question → answer`", career)
+        self.assertIn("not a retrospective ceremony", close_day)
+        self.assertIn("orientation, not a morning interview", open_day)
+        self.assertIn("primarily consumes established evidence", communicate)
+
+    def test_evidence_persistence_shape_is_unchanged(self) -> None:
+        self.assertEqual((
+            "context", "observations", "significance", "contribution", "reasoning",
+            "evidence", "alternatives_tradeoffs", "decisions_actions", "expectations",
+            "outcomes", "learning", "open_questions",
+        ), ENTRY_SECTIONS)
+
+    def test_think_loader_adds_no_primitive_resource(self) -> None:
+        loaded = SkillLoader().load("think")
+        self.assertEqual([
+            "WORK-BRAIN-SKILL@2", "WORK-BRAIN-SOP-CORE@3", "WORK-BRAIN-SOP-THINK@3",
+        ], loaded.identities)
 
     def test_live_experience_continuity_contract_is_bounded_and_optional(self) -> None:
         review = (ROOT / "skills/work-brain/references/experience-review.md").read_text(encoding="utf-8")

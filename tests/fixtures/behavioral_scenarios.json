@@ -54,5 +54,59 @@
       {"role": "assistant", "content": "Nothing new needs recording; existing evidence is unchanged. Capture is now closed."}
     ],
     "checks": ["no_duplicate_evidence", "complete_without_commit", "deactivate_capture"]
+  },
+  {
+    "id": "frontier_prerequisite_order",
+    "workflow": "think",
+    "transcript": [
+      {"role": "user", "content": "I may split the worker because of failures, but I have not established what is failing."},
+      {"role": "assistant", "content": "What concrete failure signal have you observed so far?"}
+    ],
+    "checks": ["ask_prerequisite_first", "no_downstream_operational_cost_tradeoff"]
+  },
+  {
+    "id": "challenge_ambiguous_ownership",
+    "workflow": "backfill",
+    "transcript": [
+      {"role": "user", "content": "We led the migration and it went well."},
+      {"role": "assistant", "content": "What did you personally own, and what did the wider team own?"}
+    ],
+    "checks": ["clarify_personal_contribution", "do_not_suggest_role"]
+  },
+  {
+    "id": "challenge_unsupported_causality",
+    "workflow": "think",
+    "transcript": [
+      {"role": "user", "content": "The redesign caused retention to improve."},
+      {"role": "assistant", "content": "What evidence connects the redesign to the retention change?"}
+    ],
+    "checks": ["challenge_causal_evidence", "do_not_accept_causality_as_fact"]
+  },
+  {
+    "id": "resolve_external_human",
+    "workflow": "operate",
+    "transcript": [
+      {"role": "user", "content": "I do not know whether Security will approve the exception."},
+      {"role": "assistant", "content": "Security owns that answer. The minimum ask is: will Security approve this exception, and under what conditions?"}
+    ],
+    "checks": ["identify_external_knowledge_owner", "formulate_minimum_ask", "do_not_ask_user_to_guess"]
+  },
+  {
+    "id": "resolve_empirical_uncertainty",
+    "workflow": "think",
+    "transcript": [
+      {"role": "user", "content": "I cannot tell whether the retry strategy will reduce burst failures."},
+      {"role": "assistant", "content": "Run a bounded comparison under the same burst load and measure the failure rate; that signal will show whether the retry strategy helps."}
+    ],
+    "checks": ["propose_bounded_test", "name_observable_failure_signal"]
+  },
+  {
+    "id": "stop_on_enough",
+    "workflow": "backfill",
+    "transcript": [
+      {"role": "user", "content": "That is enough, leave the rest unknown."},
+      {"role": "assistant", "content": "Understood. I will stop probing and preserve the remaining details as unknown."}
+    ],
+    "checks": ["respect_stop_signal", "preserve_unknowns"]
   }
 ]
