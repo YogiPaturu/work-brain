@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "work-brain"
 version = "0.1.1"
 description = "Local-first Work Brain runtime and persistence"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = []
 
 [project.optional-dependencies]
@@ -20,7 +20,7 @@ work-brain = "work_brain.cli:main"
 where = ["src"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.14"
 # Keep this an intentional boundary check while the rest of the repository
 # remains gradually typed; imported implementation modules are checked by
 # their own tests and do not expand this initial CI surface.

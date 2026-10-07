@@ -220,7 +220,7 @@ views are rebuildable projections over that source.
 
 ## Install
 
-Work Brain requires Python 3.11+ and SQLite. The base install has no runtime
+Work Brain requires Python 3.14+ and SQLite. The base install has no runtime
 dependencies and uses a deterministic local hash fallback for semantic
 retrieval. Install the optional `semantic` extra to use FastEmbed/BGE locally.
 The recommended user installation is:
