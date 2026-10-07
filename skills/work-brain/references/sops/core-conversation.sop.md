@@ -177,6 +177,12 @@ apparent, close without asking it.
   known, rely on that ownership for exact project resolution; legacy unparented
   projects remain a compatibility fallback and projects owned by another
   workspace must not be reused.
+- Before CommitDraft publication in live `think` or `operate`, the agent MAY do
+  a bounded Experience continuity lookup when current work plausibly continues
+  prior work. Reuse a clear existing Experience by stable ID; routine or
+  uncertain work stays unassigned. Historical `experience mine` and its cursor
+  are not part of normal live commits. Follow
+  `references/experience-review.md` for the decision rules.
 - If workspace or project classification is materially ambiguous, the agent
   MUST ask one concise clarification question before committing. It MUST always
   emit both required names in the final draft. Missing, empty, or null values

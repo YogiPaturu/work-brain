@@ -2,9 +2,9 @@ WORK-BRAIN-EXPERIENCE-REVIEW v1
 
 # Experience Review
 
-Load this reference only when deciding whether related SessionEntries belong to
-one durable Experience. This is a bounded human/model review, not automatic
-clustering.
+Load this reference for bounded human/model review when deciding whether live
+work continues a durable Experience or when reviewing related SessionEntries.
+Both paths use source-backed judgment, not automatic clustering.
 
 ## What an Experience means
 
@@ -78,10 +78,59 @@ new Experience is not clear, omit the association and keep the evidence fully
 searchable and durable.
 
 Retrieval degradation or incomplete results are limitations, not evidence that
-no relationship exists. Do not invent confidence or similarity scores. This
-review defines bounded selection semantics for future historical mining; do not
-scan hundreds of entries, add a background miner, or automatically create,
-merge, split, or associate Experiences.
+no relationship exists. Do not invent confidence or similarity scores. These
+rules define bounded selection semantics; do not scan hundreds of entries or
+add a background miner, or automatically create, merge, split, or associate
+Experiences.
+
+## LIVE Experience continuity
+
+For live `think` and `operate` work, check continuity before CommitDraft
+publication only when the current bounded work plausibly continues a durable
+professional arc. Signals include an explicit follow-up, implementation of a
+captured design or decision, an outcome following an earlier action, or another
+phase of the same migration, incident, launch, negotiation, experiment, or
+initiative. Routine state updates, generic planning, simple communication
+drafting, and unrelated day opening or closing do not require Experience
+retrieval. Backfill and career keep their own Experience semantics.
+
+First resolve the exact current workspace and project context. Never cross the
+exact `(workspace_entity_id, project_entity_id)` boundary; if it cannot be
+established safely, do not attach an Experience. In `operate`, prefer the
+existing bounded path: resolve context, search a compact query within that
+context, inspect the returned EvidenceCards and their `experiences`, then
+hydrate only selected evidence if the boundary is unclear. `think` may use the
+existing bounded Experience search/get/hydrate operations when cleaner. Keep
+result counts small; never scan broad history or call `experience mine` for a
+live session.
+
+Reuse one existing Experience only when exact context matches and source-backed
+evidence shows the same causal or goal-directed arc. Put its stable entity ID
+in the CommitDraft Experience entity candidate. For example, continuing the
+Ranq workspace authorization design may reuse “Ranq authentication and
+authorization design” when prior evidence clearly supports that arc; an
+unrelated OAuth cleanup does not join solely because it concerns
+authentication. “Start LLD2 implementation” may reuse “Ranq Auth
+implementation” when exact context and prior LLD work establish that sequence.
+
+If live work clearly forms a durable arc but no existing Experience is a clear
+match, the existing CommitDraft behavior may propose a neutral durable title.
+Do not create one merely because retrieval failed. If several Experiences are
+plausible, continuity is only topical, context is ambiguous, or retrieval is
+degraded/incomplete, leave the entry unassigned; missing candidates do not
+prove no Experience exists. Surface material retrieval limitations. Unassigned
+work remains searchable and historical mining may revisit it later.
+
+Clear live continuity needs no second approval ceremony: the current session
+provides its evidence and normal CommitDraft publication owns the reference.
+Explicit user approval remains required for post-hoc historical changes through
+`experience associate`. Do not repair a committed entry with automatic
+post-commit lookup or association.
+
+The opaque cursor belongs only to explicit historical `experience mine`
+backfill traversal. Never use or persist it in open-day, operate, think,
+communicate, close-day, or normal CommitDraft publication. Historical mining
+is cleanup, not part of the daily live lifecycle.
 
 ## Historical mining batches
 

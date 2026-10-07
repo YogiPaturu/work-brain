@@ -74,6 +74,13 @@ confirmed the facts.
 - You MUST NOT invent task IDs, timestamps, or completion evidence.
 - You MUST keep the raw conversation as the source even if a state mutation is later corrected.
 
+When the selected task clearly continues prior work, first resolve the exact
+workspace/project context and use a small, context-scoped evidence search before
+commit. Reuse a clearly matching existing Experience identity from relevant
+EvidenceCards in the CommitDraft. This check is optional: routine state updates
+do not require Experience retrieval, and unclear or degraded results stay
+unassigned. See `references/experience-review.md` for the decision rules.
+
 ## Examples
 
 ### Example Input

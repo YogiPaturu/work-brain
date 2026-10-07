@@ -61,6 +61,11 @@ internal persistence operations as part of its supported application
 interface. Retrieval implementation belongs behind the application adapter
 and retrieval contract.
 
+`search_evidence` returns EvidenceCards that include existing Experience
+identities with stable entity IDs. In live `think` or `operate`, relevant cards
+may support a bounded continuity decision before commit; see
+`references/experience-review.md` for its limits.
+
 For context classification, the model calls `resolve_context`; it never
 constructs SQL. The application may use SQLite entity and retrieval indexes
 internally, but source catalog entities remain authoritative and resolution is
