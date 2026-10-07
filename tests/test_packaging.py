@@ -19,8 +19,7 @@ class DistributionResourceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             wheel_dir = Path(temporary)
             subprocess.run(
-                [sys.executable, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation",
-                 "--wheel-dir", str(wheel_dir), str(ROOT)],
+                [sys.executable, "-m", "pip", "wheel", "--no-deps", "--wheel-dir", str(wheel_dir), str(ROOT)],
                 check=True,
                 capture_output=True,
                 text=True,
