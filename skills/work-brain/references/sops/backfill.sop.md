@@ -99,6 +99,24 @@ evidence. Ask the user to correct it before producing the CommitDraft.
 - You MUST NOT mix unrelated current work into this entry.
 - You MUST use the configured CommitDraft shape; the application owns IDs, timestamps, revisions, and persistence.
 
+### Historical Challenge Examples
+
+Do not lead with a proposed historical cause or inflate the user's role.
+
+Avoid:
+
+```text
+Was the incident caused by queue saturation?
+Did you lead the mitigation?
+```
+
+Prefer:
+
+```text
+What evidence, if any, connected the incident to queue saturation at the time?
+What did you personally do, and what was done by the broader team?
+```
+
 ## Examples
 
 ### Example Input

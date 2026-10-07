@@ -81,6 +81,8 @@ class BehavioralEvalContractTests(unittest.TestCase):
         self.assertIn("substantive trade-off or decision", operate)
         self.assertIn("historical evidence mode", backfill)
         self.assertIn("must not offer a plausible remembered answer", backfill)
+        self.assertIn("what evidence, if any, connected the incident to queue saturation at the time?", backfill)
+        self.assertIn("what did you personally do, and what was done by the broader team?", backfill)
         self.assertIn("evidence problem from a presentation problem", career)
         self.assertIn("first loop is `question → answer`", career)
         self.assertIn("not a retrospective ceremony", close_day)
