@@ -335,10 +335,13 @@ class ExperienceService:
                         excluding_entry_id=entry.entry_id,
                     )
             experience_id = resolved_experience_id
+        # Once a name has been resolved, pass only the stable ID downstream.
+        # The vault rejects requests that specify both target forms.
+        target_name = experience_name if remove else None
         updated = [self.associate(
             entry_id,
             experience_id=experience_id,
-            experience_name=experience_name,
+            experience_name=target_name,
             remove=remove,
             move=move,
             _maintain=False,

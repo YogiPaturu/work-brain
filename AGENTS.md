@@ -23,7 +23,7 @@ Run:
 PYTHONPATH=src python3 -m unittest discover -s tests -q
 PYTHONPATH=src python3 -m compileall -q src examples
 git diff --check
-python3 -m mypy
+.venv/bin/python -m mypy
 ```
 
 The type-check command covers the lifecycle, source/derived coordination, and

@@ -99,6 +99,14 @@ class ExperienceTests(unittest.TestCase):
         retriever.reindex()
         return ExperienceService(self.vault, retriever=retriever)
 
+    def _experience_entities(self) -> dict[str, dict]:
+        entities = {}
+        for path in (self.vault.root / "catalog" / "entities").glob("*.json"):
+            entity = json.loads(path.read_text(encoding="utf-8"))
+            if entity.get("kind") == "experience":
+                entities[entity["entity_id"]] = entity
+        return entities
+
     def test_experience_spans_entries_and_keeps_stable_source_refs(self) -> None:
         first = self._commit("2026-10-01T10:00:00+01:00", self.architecture, title="Architecture options", tags=["architecture"])
         second = self._commit("2026-10-03T10:00:00+01:00", self.architecture, title="Architecture decision", tags=["authentication", "security"], outcome=True)
@@ -140,6 +148,110 @@ class ExperienceTests(unittest.TestCase):
                 [self.architecture["entity_id"]],
                 [ref["entity_id"] for ref in updated.entity_refs if ref["relation"] == "experience"],
             )
+
+    def test_batch_association_by_new_name_creates_one_experience_and_links_all_entries(self) -> None:
+        first = self._commit_unassigned("2026-10-04T10:00:00+01:00", title="First new arc entry", tags=["engineering"])
+        second = self._commit_unassigned("2026-10-04T11:00:00+01:00", title="Second new arc entry", tags=["engineering"])
+        before = self._experience_entities()
+
+        result = ExperienceService(self.vault).associate_entries(
+            [first.entry_id, second.entry_id], experience_name="New Experience"
+        )
+
+        after = self._experience_entities()
+        created = set(after) - set(before)
+        self.assertEqual("committed", result["source_status"])
+        self.assertEqual(2, result["count"])
+        self.assertEqual(1, len(created))
+        experience_id = created.pop()
+        self.assertEqual("New Experience", after[experience_id]["canonical_name"])
+        for entry_id in (first.entry_id, second.entry_id):
+            updated = self.vault.get_current_entry(entry_id)
+            self.assertEqual(2, updated.revision)
+            self.assertEqual(
+                [experience_id],
+                [ref["entity_id"] for ref in updated.entity_refs if ref["relation"] == "experience"],
+            )
+
+    def test_cli_batch_association_by_new_name_returns_machine_readable_output(self) -> None:
+        first = self._commit_unassigned("2026-10-04T10:00:00+01:00", title="CLI first entry", tags=["engineering"])
+        second = self._commit_unassigned("2026-10-04T11:00:00+01:00", title="CLI second entry", tags=["engineering"])
+        from work_brain.cli import main
+        output = StringIO()
+
+        with redirect_stdout(output):
+            exit_code = main([
+                "--vault", str(self.vault.root), "experience", "associate",
+                "--entry-id", first.entry_id, "--entry-id", second.entry_id,
+                "--experience-name", "New Experience", "--json",
+            ])
+
+        self.assertEqual(0, exit_code)
+        value = json.loads(output.getvalue())
+        self.assertEqual("committed", value["source_status"])
+        self.assertEqual(2, value["count"])
+        created = set(self._experience_entities()) - {
+            self.architecture["entity_id"], self.influence["entity_id"]
+        }
+        self.assertEqual(1, len(created))
+        experience_id = created.pop()
+        self.assertEqual(
+            {experience_id},
+            {item["experience_ids"][0] for item in value["updated"]},
+        )
+
+    def test_batch_association_by_existing_name_reuses_stable_experience_id(self) -> None:
+        first = self._commit_unassigned("2026-10-04T10:00:00+01:00", title="Existing name first", tags=["engineering"])
+        second = self._commit_unassigned("2026-10-04T11:00:00+01:00", title="Existing name second", tags=["engineering"])
+        before = self._experience_entities()
+
+        result = ExperienceService(self.vault).associate_entries(
+            [first.entry_id, second.entry_id], experience_name="Choosing the migration architecture"
+        )
+
+        self.assertEqual("committed", result["source_status"])
+        self.assertEqual(set(before), set(self._experience_entities()))
+        for entry_id in (first.entry_id, second.entry_id):
+            self.assertEqual(
+                [self.architecture["entity_id"]],
+                [ref["entity_id"] for ref in self.vault.get_current_entry(entry_id).entity_refs if ref["relation"] == "experience"],
+            )
+
+    def test_new_name_batch_with_mixed_context_fails_before_creating_experience(self) -> None:
+        other_project = self.vault.upsert_entity(kind="project", canonical_name="Search")
+        first = self._commit_unassigned("2026-10-04T10:00:00+01:00", title="Payments context", tags=["engineering"])
+        second = self._commit_context(
+            "2026-10-04T11:00:00+01:00", workspace_id=self.workspace["entity_id"],
+            project_id=other_project["entity_id"], title="Search context",
+        )
+        before = self._experience_entities()
+
+        with self.assertRaisesRegex(ValidationError, "all entries in one Experience association"):
+            ExperienceService(self.vault).associate_entries(
+                [first.entry_id, second.entry_id], experience_name="New Experience"
+            )
+
+        self.assertEqual(set(before), set(self._experience_entities()))
+        self.assertEqual([], self.vault.get_current_entry(first.entry_id).entity_refs)
+        self.assertEqual([], self.vault.get_current_entry(second.entry_id).entity_refs)
+
+    def test_batch_association_by_incompatible_existing_name_fails_without_duplicate(self) -> None:
+        other_workspace = self.vault.upsert_entity(kind="workspace", canonical_name="Other")
+        other_project = self.vault.upsert_entity(kind="project", canonical_name="Other project")
+        existing_member = self._commit_context(
+            "2026-10-03T10:00:00+01:00", workspace_id=other_workspace["entity_id"],
+            project_id=other_project["entity_id"], title="Existing experience member",
+        )
+        service = ExperienceService(self.vault)
+        service.associate_entries([existing_member.entry_id], experience_id=self.influence["entity_id"])
+        candidate = self._commit_unassigned("2026-10-04T10:00:00+01:00", title="Current context candidate", tags=["engineering"])
+        before = self._experience_entities()
+
+        with self.assertRaisesRegex(ValidationError, "does not match"):
+            service.associate_entries([candidate.entry_id], experience_name="Persuading the API team")
+
+        self.assertEqual(set(before), set(self._experience_entities()))
+        self.assertEqual([], self.vault.get_current_entry(candidate.entry_id).entity_refs)
 
     def test_hydration_accepts_only_exact_card_revisions(self) -> None:
         entry = self._commit("2026-10-01T10:00:00+01:00", self.architecture, title="Architecture", tags=["architecture"])
