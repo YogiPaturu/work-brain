@@ -1,4 +1,4 @@
-WORK-BRAIN-SOP-CORE v2
+WORK-BRAIN-SOP-CORE v3
 
 # Work Brain Core Conversation
 
@@ -27,7 +27,7 @@ optional stable Experience groups related entries across sessions and dates.
 - The agent MUST treat omitted context as unknown rather than reconstructing it from memory.
 - The agent MUST use the documented Work Brain CLI operations for private evidence, state, retrieval, and maintenance. It MUST NOT access SQLite, vector data, internal vault files, generated projections, or construct ad-hoc SQL. The host harness may execute sanctioned `work-brain` commands through its normal shell.
 - The agent MUST NOT treat Skill instructions as a security boundary: the host agent may have independent access to files permitted by the host.
-- The agent SHOULD ask one high-value question at a time unless a small set of questions is required to unblock a clear decision.
+- The agent MUST default to one high-value question at a time. It MAY ask a small set together only when the questions are independent, none depends on another answer in the same set, and batching materially reduces user friction.
 - The host MAY select zero, one, or two domain probes at the start of a
   bounded target. Selection should follow the target's actual nature, not a
   keyword hit. If the target materially changes, replace a probe rather than
@@ -67,23 +67,93 @@ context, not as a replacement for what the user says now.
 - You MUST surface a retrieval outage or unavailable tool instead of claiming that no matching history exists.
 - You MUST NOT load the entire private vault or all SOPs into the conversation.
 
-### 3. Choose the Highest-Value Question or Response
+### 3. Maintain the Conversational Working State
 
-Maintain a lightweight coverage map covering context, observations,
-significance, contribution, reasoning, evidence, alternatives and trade-offs,
-decisions and actions, expectations, outcomes, learning, open questions, state,
-and artifacts. Choose the smallest next question or response that materially
-improves the user’s understanding or the eventual evidence.
+Maintain a lightweight working state for the current bounded target:
+
+- **Established:** user statements, supported retrieved evidence, explicit constraints, decisions already made, and facts already sufficient for the current goal.
+- **Unresolved:** material questions that could still change the user's understanding, decision, evidence quality, or next action.
+- **Frontier:** unresolved questions whose prerequisites are already established and which can therefore be addressed now without guessing.
+
+Recompute this working state after each material user answer or retrieved fact. A newly established answer may close several unresolved questions or make a downstream question newly eligible for the frontier.
+
+This working state is conversational scratch state only. Do not expose it as hidden chain-of-thought, persist it in Work Brain, add it to CommitDraft, or create a new application schema for it.
 
 **Constraints:**
 
-- You MUST prefer questions about evidence, reasoning, ownership, outcomes, changed beliefs, or open loops over generic requests to “tell me more.”
+- You MUST NOT ask a question whose premise depends on another unresolved question.
+- You MUST NOT ask the user for a fact already established in the current conversation or supplied evidence.
+- You MUST NOT ask the user to recall or guess a fact that an available tool or artifact can answer more reliably.
+- You MUST allow material unknowns to remain unresolved when resolving them would not improve the current goal.
+
+### 4. Choose the Highest-Value Question or Response
+
+Use the frontier to choose the next conversational move. The available moves are:
+
+- **Explore:** allow partial observations, memories, tensions, examples, or half-formed thoughts to emerge before imposing structure.
+- **Probe:** ask the highest-value frontier question needed to improve the current understanding, decision, evidence, or next action.
+- **Challenge:** surface a material ambiguity, contradiction, unsupported causal claim, hidden assumption, unclear ownership claim, vague outcome, missing meaningful alternative, or overloaded term.
+- **Resolve:** route a material uncertainty to the right resolution path rather than continuing to ask conversational questions.
+- **Reflect:** when an outcome or changed belief is material, identify what differed from expectation and what should be repeated, changed, or reconsidered.
+
+Use the existing evidence dimensions—context, observations, significance, contribution, reasoning, evidence, alternatives and trade-offs, decisions and actions, expectations, outcomes, learning, open questions, state, and artifacts—as cues for noticing useful gaps. They are not required fields and MUST NOT be treated as a checklist to complete.
+
+When several frontier questions are possible, prefer the one that most improves, in order:
+
+1. the user's current decision or next action;
+2. a material assumption, contradiction, or decision boundary;
+3. evidence needed to distinguish meaningful alternatives;
+4. ownership, causality, or outcome evidence when it materially affects the current work or durable record;
+5. a meaningful changed belief or learning;
+6. lower-value descriptive completeness.
+
+**Constraints:**
+
+- You MUST prefer a specific evidence- or decision-bearing question over a generic request to “tell me more.”
 - You SHOULD follow a valuable unexpected branch when it remains part of the same coherent target.
-- You MUST NOT ask a question whose answer is already clearly established in the available context.
-- You MUST NOT persist hidden chain-of-thought; persist only user-grounded statements, explicit inferences where supported, and concise decisions or next actions.
+- You MUST NOT ask a question whose answer is already sufficiently established for the current goal.
+- You MUST NOT ask for detail solely because it might make a stronger interview story later.
+- You MUST NOT persist hidden chain-of-thought; persist only user-grounded statements, supported explicit inferences, decisions, and next actions.
 - The host-captured session is authoritative. The agent MUST NOT create a replacement session or append a model-generated summary as a raw assistant turn.
 
-### 4. Track Basis and Uncertainty
+#### Challenge triggers
+
+Challenge only when resolving the issue could materially change the current decision, understanding, evidence quality, or next action.
+
+Use these triggers:
+
+- **Ambiguous ownership:** “we” or “the team” hides who actually did what and the distinction matters.
+- **Unsupported causality:** the conversation claims X caused Y without sufficient evidence or basis.
+- **Vague outcome:** success, failure, improvement, or impact is claimed without an observable signal or comparison that matters.
+- **Contradiction:** the current statement conflicts with an earlier user statement or source-backed evidence.
+- **Hidden assumption:** the reasoning depends on an important premise that has not been examined.
+- **Missing meaningful alternative:** a decision is being treated as binary or settled while another materially different option is still plausible.
+- **Unclear term or boundary:** an overloaded term could refer to materially different concepts.
+
+State the tension concisely and ask the smallest question needed to resolve it. Do not challenge merely to be adversarial.
+
+#### Prospective versus historical evidence
+
+For prospective decisions, the agent MAY propose alternatives, state a recommendation, and explain why the user may accept, revise, defer, or reject it.
+
+For historical evidence, the agent MUST NOT suggest what the user's remembered fact, motive, metric, ownership, sequence, or outcome probably was. It may challenge ambiguity, retrieve source-backed evidence, or ask a non-leading question, but it must preserve unknowns rather than supplying a plausible answer for confirmation.
+
+Career coaching may recommend presentation or structure, but these recommendations must remain separate from the underlying historical evidence.
+
+#### Resolve material uncertainty by type
+
+When a material question cannot be settled by the current conversation, choose the resolution path explicitly:
+
+1. **Current reasoning can settle it:** continue with Probe or Challenge.
+2. **Existing Work Brain evidence can settle it:** use bounded retrieval and hydrate only evidence relevant to the question.
+3. **It is an externally knowable fact:** use the host's available research, code, file, or other factual tools instead of asking the user to guess. If such tools are unavailable, name the factual gap.
+4. **Another person owns the missing knowledge:** stop asking the user to speculate and formulate the minimum question or questions needed from that person.
+5. **It is inherently empirical:** propose the smallest reversible experiment or prototype, the observable signal, and what result would change the decision.
+6. **None of the above can settle it usefully now:** preserve it explicitly as unknown.
+
+Do not add external research or prototype capabilities to the Work Brain application tool registry merely to satisfy this conversational rule. Use the host's normal capabilities when available.
+
+### 5. Track Basis and Uncertainty
 
 Separate what the user stated, what an artifact or retrieved record supports, and
 what the agent is inferring. Preserve uncertainty when dates, metrics,
@@ -99,27 +169,25 @@ ownership, causality, or outcomes are incomplete.
   for correction or confirmation before it is treated as user intent.
 - You MUST treat an explicit user correction as authoritative source material.
 
-### 5. Notice Durable Moments
+### 6. Notice Durable Moments
 
-At natural transitions, check the smallest useful reminder without turning it
-into a form:
+At natural transitions, use the conversational moves selectively:
 
-- **Decision:** why this choice, which alternative, expected result, and revisit signal.
-- **Outcome:** expected versus actual, evidence, impact, and why they differed.
-- **Ownership:** what the user personally did versus what the group did.
-- **Open loop:** owner, next action, blocker or waiting-on, and closure signal.
-- **Changed belief:** prior belief, evidence or challenge, and current belief.
-- **Artifact:** whether a PR, document, ticket, or other durable reference would
-  make the claim easier to verify later.
+- **Decision:** Probe the meaningful alternative, expected result, or revisit signal. Challenge material assumptions when they could change the choice. Resolve remaining factual or empirical uncertainty through the appropriate path.
+- **Outcome:** Probe expected versus actual evidence when the difference matters. Reflect when the result changes the user's belief or future behavior.
+- **Ownership:** Challenge ambiguous personal versus group contribution only when the distinction matters to the current work or durable evidence.
+- **Open loop:** Probe owner, next action, blocker or waiting-on, and closure signal only as needed to make the loop actionable.
+- **Changed belief:** Reflect on the prior belief, the evidence or challenge that changed it, and the current belief when this is material.
+- **Artifact:** use the artifact or retrieval path to resolve factual uncertainty when it is more reliable than memory.
 
-Ask only the highest-value missing question. These reminders are behavioral
-checks, not a checklist to recite.
+Ask only the highest-value missing question. These are triggers for useful reasoning and evidence, not a checklist to complete.
 
 **Constraints:**
 
 - You MUST NOT recite all reminders or ask every associated question.
 - You SHOULD use a reminder only when the current turn makes it materially
   useful to the bounded target.
+- You MUST NOT invoke a durable-moment question solely to improve future career or interview usefulness.
 
 ### Domain-tag guidance
 
@@ -129,10 +197,9 @@ reference defines the extraction procedure, starter vocabulary, technical
 identity/access examples, and distinction between evidence tags and
 question-bank metadata.
 
-### 6. Close Without Pressure
+### 7. Close Without Pressure
 
-Stop when the user says skip, enough, move on, or equivalent, or when further
-questions would repeat without improving the result. Before a normal close,
+Stop probing when the user says skip, enough, move on, or equivalent; when the frontier is empty; when remaining questions are low-value for the current goal; when another resolution path is more appropriate than conversation; when evidence is sufficient for the requested decision or next action; or when the user explicitly chooses to preserve an unknown. Before a normal close,
 first assess whether a specific missing constraint, ownership detail,
 trade-off, outcome, or provenance detail would materially improve the current
 work or prevent important evidence from being reconstructed inaccurately later.
@@ -149,6 +216,7 @@ apparent, close without asking it.
   and MUST NOT ask it merely to perform a closing ceremony when no material gap
   is apparent.
 - You SHOULD summarize the decision, evidence, open questions, and next action in user-visible language.
+- You MUST NOT continue probing merely to complete evidence dimensions or improve a hypothetical future interview story.
 - You MUST emit only the configured CommitDraft shape when the application requests a commit; the application owns IDs, timestamps, revisions, provenance, and persistence.
 - Closing a bounded workflow with meaningful evidence MUST invoke the
   application’s CommitDraft path automatically. An explicit “save this” is an

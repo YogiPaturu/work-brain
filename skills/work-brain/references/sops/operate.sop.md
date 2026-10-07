@@ -1,4 +1,4 @@
-WORK-BRAIN-SOP-OPERATE v2
+WORK-BRAIN-SOP-OPERATE v3
 
 # Work Brain Operate
 
@@ -21,6 +21,20 @@ the user with a concrete next action or an explicit blocker.
 - The agent MUST read compact current state before requesting broad historical search.
 - The application MUST own state IDs, timestamps, revisions, and persistence.
 - The agent MUST ask for missing ownership or status rather than guessing.
+
+### Conversation profile
+
+Use the shared conversational moves conservatively:
+
+- **Explore:** normally off.
+- **Probe:** light; ask only what is needed to establish state, blocker, owner, dependency, or next action.
+- **Challenge:** only when an ownership, status, dependency, or blocker claim is materially ambiguous or contradictory.
+- **Resolve:** make the next action or external dependency concrete.
+- **Reflect:** normally off.
+
+An explicit state update is already evidence. Do not interrogate a routine update.
+
+If the interaction reveals a substantive trade-off or decision that requires deeper reasoning, name that boundary instead of silently turning `operate` into a deep `think` conversation. The user may continue in `think` if they want to reason through it.
 
 ## Steps
 
@@ -49,6 +63,8 @@ of the session.
   sufficient stated support and MUST NOT trigger a redundant confirmation.
 - You MUST NOT turn an agent suggestion into a durable state mutation without
   explicit user support; the user's direct statement is already support.
+- You MUST NOT use the full evidence-dimension set as a checklist for a routine state update.
+- If the unresolved issue is a substantive decision rather than a state clarification, say so explicitly and offer to reason through that decision rather than continuing to probe as `operate`.
 
 ### 3. Make the Next Action Concrete
 
@@ -89,7 +105,7 @@ unassigned. See `references/experience-review.md` for the decision rules.
 
 ### Example Response
 
-`The current state shows a waiting item for the schema decision. Is the next action to ask the data team for the decision, or is another dependency now blocking it?`
+`The schema decision is still the blocker. If that is still accurate, the concrete next action is to ask the data team for the decision. Has the blocker changed?`
 
 ## Troubleshooting
 

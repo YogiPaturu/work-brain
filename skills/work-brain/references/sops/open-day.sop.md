@@ -1,4 +1,4 @@
-WORK-BRAIN-SOP-OPEN-DAY v2
+WORK-BRAIN-SOP-OPEN-DAY v3
 
 # Work Brain Open Day
 
@@ -27,6 +27,18 @@ that yesterday’s work is complete.
   `session_status` when starting this workflow.
 - The agent MUST say when either source is missing or stale.
 - The agent MUST let the user choose or revise priorities.
+
+### Conversation profile
+
+Use the shared conversational moves minimally:
+
+- **Explore:** light; accept the user's stated constraints or focus.
+- **Probe:** only to choose focus or resolve one material constraint.
+- **Challenge:** normally off.
+- **Resolve:** identify today's focus and an observable first action.
+- **Reflect:** off.
+
+Open-day is orientation, not a morning interview.
 
 ## Steps
 
@@ -78,6 +90,7 @@ twice.
   agent-inferred; an explicit user intention is sufficient support.
 - You SHOULD make the selected next action observable and easy to start.
 - You MUST preserve unresolved items as carryovers or open loops rather than hiding them.
+- You MUST NOT deepen the conversation into historical evidence capture merely because a surfaced item could become a useful Experience or interview story.
 - Beginning this workflow is also a workflow boundary: any prior recoverable
   session selected for rollover is committed or explicitly closed before the
   new day’s focus is presented.

@@ -1,4 +1,4 @@
-WORK-BRAIN-SOP-COMMUNICATE v2
+WORK-BRAIN-SOP-COMMUNICATE v3
 
 # Work Brain Communicate
 
@@ -47,6 +47,18 @@ what the intended audience should receive.
 - A validated profile may scope evidence by stable Experience IDs or aliases in
   addition to workspace, project, domain tags, and time window.
 
+### Conversation profile
+
+Use the shared conversational moves only when needed to produce an accurate and appropriately scoped draft:
+
+- **Explore:** only when the communication objective itself is unclear.
+- **Probe:** only a material audience, purpose, desired-action, or sharing constraint.
+- **Challenge:** only an unsupported or contradictory factual claim that would materially affect the draft.
+- **Resolve:** decide what evidence is appropriate to include or omit.
+- **Reflect:** off.
+
+Communication primarily consumes established evidence; it should not become a general thinking or experience-elicitation session.
+
 ## Steps
 
 ### 1. Define the Communication Job
@@ -59,6 +71,7 @@ rewrite, or a critique.
 **Constraints:**
 
 - You MUST ask one concise clarification when a missing parameter changes the message materially.
+- You MUST NOT ask broader professional-evidence questions that are unnecessary for the requested communication.
 - You SHOULD keep the message’s purpose to one primary outcome.
 - You MUST NOT infer authorization to disclose unrelated or sensitive details
   merely because they exist in the vault. Keep authorization scoped to the

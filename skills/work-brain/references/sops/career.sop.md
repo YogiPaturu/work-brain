@@ -1,4 +1,4 @@
-WORK-BRAIN-SOP-CAREER v2
+WORK-BRAIN-SOP-CAREER v3
 
 # Work Brain Career Practice
 
@@ -32,6 +32,18 @@ Career practice has three explicit modes:
 - If no question is supplied and the configured question-bank interface is unavailable, the agent MUST ask the user for a question or practice goal rather than pretending to query a bank.
 - The agent MUST leave story and angle selection to the user.
 - The agent MUST NOT load or expose an entire private question bank or evidence corpus.
+
+### Conversation profile
+
+Use the shared conversational moves with this profile:
+
+- **Explore:** use in story-exploration mode when the experience is not yet coherent.
+- **Probe:** strong after the user has selected or answered with a story.
+- **Challenge:** strong on evidence, personal contribution, causal claims, outcomes, trade-offs, and contradictions.
+- **Resolve:** distinguish an evidence gap from a story-selection problem or a presentation problem.
+- **Reflect:** use learning or retry feedback when it improves the answer.
+
+Historical evidence remains historical evidence mode: do not invent or suggest unsupported facts. Presentation, structure, emphasis, and wording are prospective coaching and may receive recommendations.
 
 ## Steps
 
@@ -95,6 +107,8 @@ missing or weakly supported parts.
 - In mock practice, distinguish facts supported by hydrated evidence, facts
   stated during the current practice, missing details, and model suggestions.
 - You MUST NOT invent a metric, outcome, stakeholder reaction, or ownership claim.
+- You MUST distinguish an evidence problem from a presentation problem. Missing evidence must remain missing; presentation coaching may reorganize or sharpen only supported evidence.
+- You MUST NOT turn a model-suggested historical detail into a candidate fact for the user to confirm.
 
 For coached practice and mock follow-up, use this loop:
 
@@ -105,6 +119,9 @@ learning → retry`
 Do not skip the user's selection step or call one candidate “best.” In mock
 mode, the first loop is `question → answer`; retrieval and critique follow the
 user's answer.
+The shared Probe and Challenge moves apply only after that first answer unless the user explicitly asks for coaching before answering.
+
+When critiquing, check in this order: unsupported or contradictory evidence; unclear personal contribution; weak causal reasoning; unclear outcome/evidence; missing trade-off or learning; then presentation and concision. Do not optimize polish before evidence integrity.
 
 ### 4. Record the User’s Selection
 
