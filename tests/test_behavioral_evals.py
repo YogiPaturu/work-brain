@@ -74,6 +74,15 @@ class BehavioralEvalContractTests(unittest.TestCase):
         self.assertIn("routine state updates do not require Experience retrieval", operate)
         self.assertIn("EvidenceCards that include existing Experience identities with stable entity IDs", tools)
 
+    def test_think_live_continuity_does_not_require_a_committed_related_anchor(self) -> None:
+        think = (ROOT / "skills/work-brain/references/sops/think.sop.md").read_text(encoding="utf-8")
+        think = " ".join(think.split())
+        self.assertIn("When current live work may continue a prior Experience, use bounded evidence or Experience retrieval", think)
+        self.assertIn("inspect stable existing Experience identities", think)
+        self.assertIn("Use `experience related` only when reviewing an existing committed anchor SessionEntry with its `entry_id`", think)
+        self.assertIn("Load `references/experience-review.md` for the continuity decision", think)
+        self.assertIn("Leave the work unassigned when causal or goal continuity is uncertain", think)
+
     def test_live_and_post_hoc_experience_confirmation_are_distinct(self) -> None:
         review = (ROOT / "skills/work-brain/references/experience-review.md").read_text(encoding="utf-8")
         review = " ".join(review.split())
