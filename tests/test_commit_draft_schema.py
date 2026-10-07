@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import tempfile
 import unittest
+import builtins
 from unittest.mock import patch
 
 from work_brain.cli import main
@@ -54,6 +55,43 @@ class CommitDraftSchemaTests(unittest.TestCase):
         self.assertEqual("vault_access_denied", payload["error"]["code"])
         self.assertIn("writable_roots", payload["error"]["hint"])
         self.assertIn("Do not modify the CommitDraft", payload["error"]["hint"])
+
+    def test_commit_draft_lock_denial_preserves_recoverable_captured_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            vault = Vault(Path(temporary) / "vault").initialize()
+            session = vault.create_session(modes=["think"], runtime={"workflow": "think"})
+            vault.append_turn(session["session_id"], "user", "Preserve this captured turn if publication is denied.")
+            original_session = vault.read_session(session["session_id"])
+            original_turns = vault.list_turns(session["session_id"])
+            draft_path = Path(temporary) / "draft.json"
+            draft_path.write_text(json.dumps(populated_template()), encoding="utf-8")
+            real_open = builtins.open
+
+            def deny_writer_lock(path, *args, **kwargs):
+                if Path(path) == vault.root / ".vault.write.lock":
+                    raise PermissionError(1, "operation not permitted", str(path))
+                return real_open(path, *args, **kwargs)
+
+            output = StringIO()
+            with patch("builtins.open", side_effect=deny_writer_lock), redirect_stdout(output):
+                code = main([
+                    "--vault", str(vault.root), "--json", "commit-draft",
+                    "--session-id", session["session_id"], "--file", str(draft_path),
+                    "--workflow", "think",
+                ])
+
+            payload = json.loads(output.getvalue())
+            self.assertEqual(EXIT_PERSISTENCE, code)
+            self.assertEqual("vault_access_denied", payload["error"]["code"])
+            self.assertEqual(original_session, vault.read_session(session["session_id"]))
+            self.assertEqual(original_turns, vault.list_turns(session["session_id"]))
+            self.assertEqual([], vault.all_entry_revisions())
+            self.assertEqual([session["session_id"]], [item["session_id"] for item in vault.all_sessions()])
+            recoverable_output = StringIO()
+            with redirect_stdout(recoverable_output):
+                self.assertEqual(0, main(["--vault", str(vault.root), "--json", "recoverable"]))
+            recoverable = json.loads(recoverable_output.getvalue())
+            self.assertEqual([session["session_id"]], [item["session_id"] for item in recoverable])
 
     def test_skill_and_core_sop_distinguish_vault_access_from_schema_repair(self) -> None:
         for relative in ("skills/work-brain/SKILL.md", "skills/work-brain/references/sops/core-conversation.sop.md"):
