@@ -48,6 +48,7 @@ warn_unused_ignores = true
   "migrations/004_workspace_context.sql",
   "migrations/005_domain_tags.sql",
   "migrations/006_experience_reverse_lookup.sql",
+  "migrations/007_project_workspace.sql",
 ]
 "share/work-brain/skills/work-brain" = ["skills/work-brain/SKILL.md"]
 "share/work-brain/skills/work-brain/agents" = ["skills/work-brain/agents/openai.yaml"]

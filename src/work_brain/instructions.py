@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import os
 import re
+import sysconfig
 from typing import Iterable
 
 from .errors import ValidationError
@@ -53,7 +54,11 @@ class SkillLoader:
     """Loads the smallest useful public Skill/SOP/probe set for a session."""
 
     def __init__(self, skills_root: str | Path | None = None):
-        default_candidates = [Path(__file__).resolve().parents[2] / "skills", Path.cwd() / "skills"]
+        default_candidates = [
+            Path(__file__).resolve().parents[2] / "skills",
+            Path.cwd() / "skills",
+            Path(sysconfig.get_path("data")) / "share/work-brain/skills",
+        ]
         configured = skills_root or os.environ.get("WORK_BRAIN_SKILLS")
         self.skills_root = Path(configured) if configured else next(
             (candidate for candidate in default_candidates if candidate.exists()), default_candidates[0]
