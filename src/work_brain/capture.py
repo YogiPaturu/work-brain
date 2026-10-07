@@ -272,7 +272,13 @@ class HarnessCaptureService:
             for session in self.vault.all_sessions():
                 if session["session_id"] in mapped_ids:
                     continue
-                runtime = dict(session.get("runtime") or {})
+                runtime, lifecycle_state = normalize_runtime(
+                    session.get("runtime"),
+                    ended_at=session.get("ended_at"),
+                    has_entry=False,
+                )
+                if lifecycle_state.capture != CaptureLifecycle.RECOVERABLE:
+                    continue
                 if runtime.get("commit_status") not in {"pending_auto_commit", "auto_commit_failed"}:
                     continue
                 age_days = (reference_date - date.fromisoformat(session["local_date"])).days

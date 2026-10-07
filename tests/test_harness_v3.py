@@ -580,6 +580,49 @@ class HarnessV3Tests(unittest.TestCase):
         self.assertEqual("work brain: old decision", self.vault.list_turns(old["session_id"])[0]["content"])
         self.assertEqual("recoverable", self.vault.read_session(yesterday["session_id"])["runtime"]["capture_status"])
 
+    def test_codex_activation_skips_closed_pending_sessions_during_rollover(self) -> None:
+        service = HarnessCaptureService(self.vault)
+        for index, commit in enumerate((CommitLifecycle.PENDING, CommitLifecycle.FAILED)):
+            host_session_id = f"closed-pending-{index}"
+            old = self.vault.create_session(
+                started_at="2026-09-29T10:00:00+01:00",
+                runtime={"host": "codex", "host_session_id": host_session_id, "capture_status": "active"},
+            )
+            self.vault.append_turn(old["session_id"], "user", "Preserve this closed raw evidence.")
+            runtime, _ = transition(
+                old["runtime"],
+                capture=CaptureLifecycle.CLOSED,
+                commit=CommitLifecycle.PENDING,
+                ended_at="2026-09-29T10:01:00+01:00",
+            )
+            if commit == CommitLifecycle.FAILED:
+                runtime, _ = transition(runtime, commit=CommitLifecycle.FAILED)
+            runtime["capture_boundary"] = "closed"
+            runtime["commit_status"] = "auto_commit_failed" if commit == CommitLifecycle.FAILED else "pending_auto_commit"
+            old["runtime"] = runtime
+            old["ended_at"] = "2026-09-29T10:01:00+01:00"
+            self.vault.update_session_metadata(old["session_id"], old)
+            old_turns = self.vault.list_turns(old["session_id"])
+
+            started = service.handle(normalize_capture_event("codex", {
+                "event": "UserPromptSubmit",
+                "session_id": f"new-host-{index}",
+                "prompt": "capture this",
+                "recorded_at": "2026-10-03T10:00:00+01:00",
+            }))
+
+            self.assertTrue(started["captured"])
+            self.assertEqual("active", started["status"])
+            self.assertNotEqual(old["session_id"], started["session_id"])
+            mappings = json.loads((self.vault.root / "context/capture-mappings.json").read_text(encoding="utf-8"))
+            self.assertEqual(started["session_id"], mappings[f"codex:new-host-{index}"]["session_id"])
+            preserved = self.vault.read_session(old["session_id"])
+            self.assertEqual("closed", preserved["runtime"]["lifecycle"]["capture"])
+            self.assertEqual("closed", preserved["runtime"]["capture_status"])
+            self.assertEqual("auto_commit_failed" if commit == CommitLifecycle.FAILED else "pending_auto_commit", preserved["runtime"]["commit_status"])
+            self.assertNotIn("rollover_at", preserved["runtime"])
+            self.assertEqual(old_turns, self.vault.list_turns(old["session_id"]))
+
     def test_codex_capture_hook_emits_only_valid_host_output(self) -> None:
         payloads = (
             {"hook_event_name": "SessionStart", "session_id": "hook-session", "source": "startup"},
