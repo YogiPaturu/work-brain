@@ -218,6 +218,11 @@ apparent, close without asking it.
 - You SHOULD summarize the decision, evidence, open questions, and next action in user-visible language.
 - You MUST NOT continue probing merely to complete evidence dimensions or improve a hypothetical future interview story.
 - You MUST emit only the configured CommitDraft shape when the application requests a commit; the application owns IDs, timestamps, revisions, provenance, and persistence.
+- At the commit boundary, after verifying the exact session and persisted
+  turns, you MUST obtain `work-brain schema commit-draft --json` and populate
+  its template. Treat it as the canonical structural contract: never invent,
+  rename, pluralize, omit, or move structural keys. Do not retrieve it during
+  ordinary conversation turns.
 - Closing a bounded workflow with meaningful evidence MUST invoke the
   application’s CommitDraft path automatically. An explicit “save this” is an
   optional early commit, not a prerequisite. If the host/model is already
@@ -256,7 +261,14 @@ apparent, close without asking it.
   emit both required names in the final draft. Missing, empty, or null values
   are invalid.
 - A revision is allowed only for additional evidence in the same bounded session. Evidence from another session must be committed as a separate entry, optionally linked with `source_entry_refs`.
-- If validation rejects a draft, inspect the target session and repair the source references. Do not create a new session or use the low-level `turn` command as a workaround.
+- If validation rejects a draft, classify the failure. For structural/schema
+  failures, retrieve the canonical contract again, repair against it, and retry
+  at most once on the same target session; if it still fails, preserve the raw
+  session and surface the error. For provenance/source-turn failures, inspect
+  the same session's persisted turns and repair references. For semantic or
+  context ambiguity, use the normal clarification/resolution rules. Never
+  create a replacement session or use the low-level `turn` command as a
+  workaround.
 - Explicit lifecycle phrases have distinct meanings: “finish this,” “that’s
   enough,” or “save this” finish the bounded session and keep host capture
   active; “stop Work Brain” and “close my day” finish and deactivate capture.

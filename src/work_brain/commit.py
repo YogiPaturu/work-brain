@@ -5,7 +5,11 @@ import hashlib
 from typing import Any, Mapping
 import json
 
-from .domain import ENTRY_SECTIONS, ENTITY_KINDS, STATE_KINDS, MUTATION_OPS, Occurrence, Statement, normalize_alias, normalize_domain_tags
+from .domain import (
+    ENTRY_SECTIONS, ENTITY_KINDS, MUTATION_OPS, OCCURRENCE_PRECISIONS,
+    STATE_CHANGE_FIELDS, STATE_KINDS, STATE_STATUSES, Occurrence, Statement,
+    normalize_alias, normalize_domain_tags,
+)
 from .errors import IntegrityError, ValidationError
 from .fsutil import canonical_json_bytes, read_json
 from .ids import new_uuid7, validate_uuid7
@@ -18,6 +22,65 @@ FORBIDDEN_DRAFT_FIELDS = {
     "revision_reason", "provenance_kind", "runtime", "model_id", "sops", "occurrence", "source_fingerprint",
 }
 FORBIDDEN_PERSISTED_CONTEXT_FIELDS = {"workspace_entity_id", "project_entity_id"}
+
+
+def commit_draft_contract() -> dict[str, Any]:
+    """Return the deterministic, machine-readable structure accepted by CommitDraftValidator."""
+    return {
+        "schema": "commit-draft",
+        "version": 1,
+        "section_names": list(ENTRY_SECTIONS),
+        "statement_shape": {
+            "text": "string",
+            "basis": {"type": "string", "enum": ["stated", "inferred"]},
+            "source_turns": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+        },
+        "historical_occurrence_shape": {
+            "start": "date or timestamp, or null when precision is unknown",
+            "end": "date or timestamp, or null",
+            "precision": {"type": "string", "enum": sorted(OCCURRENCE_PRECISIONS)},
+            "label": "string or null",
+        },
+        "state_change_shape": {
+            "operation": {"type": "string", "enum": sorted(MUTATION_OPS)},
+            "target_state_item_id": "existing state item ID or null",
+            "kind": {"type": "string", "enum": sorted(STATE_KINDS)},
+            "fields": {name: "value" for name in STATE_CHANGE_FIELDS},
+            "source_turns": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+        },
+        "entity_candidate_shape": {
+            "entity_id": "existing entity ID or null",
+            "kind": {"type": "string", "enum": sorted(ENTITY_KINDS)},
+            "canonical_name": "string",
+            "aliases": {"type": "array", "items": "string"},
+            "description": "string or null",
+            "relation": "string; experience candidates require relation=experience",
+        },
+        "artifact_candidate_shape": {
+            "artifact_id": "existing artifact ID or null",
+            "kind": "string",
+            "label": "string",
+            "locator": "string",
+            "external_id": "string or null",
+            "notes": "string or null",
+            "relation": "string; defaults to supports",
+        },
+        "source_entry_ref_shape": {"entry_id": "existing entry ID", "revision": "positive integer"},
+        "optional_fields": ["workspace_ref", "project_ref"],
+        "template": {
+            "title": "",
+            "summary": "",
+            "historical_occurrence": None,
+            "domain_tags": [],
+            "workspace": "",
+            "project": "",
+            "sections": {name: [] for name in ENTRY_SECTIONS},
+            "state_changes": [],
+            "entity_candidates": [],
+            "artifact_candidates": [],
+            "source_entry_refs": [],
+        },
+    }
 
 
 @dataclass(frozen=True)
@@ -169,11 +232,11 @@ class CommitDraftValidator:
             raise ValidationError("state_changes.fields must be an object")
         if operation == "create" and (kind is None or not isinstance(fields.get("title"), str) or not fields["title"]):
             raise ValidationError("create state changes require kind and fields.title")
-        allowed_fields = {"title", "status", "project_entity_id", "details", "next_action", "waiting_on", "due_at", "updated_at", "closed_at"}
+        allowed_fields = set(STATE_CHANGE_FIELDS)
         unsupported = sorted(set(fields) - allowed_fields)
         if unsupported:
             raise ValidationError(f"state_changes.fields contains unsupported fields: {', '.join(unsupported)}")
-        if "status" in fields and fields["status"] not in {"active", "waiting", "done", "dropped"}:
+        if "status" in fields and fields["status"] not in STATE_STATUSES:
             raise ValidationError("state_changes.fields.status is invalid")
         if "project_entity_id" in fields and fields["project_entity_id"] is not None:
             validate_uuid7(fields["project_entity_id"], "state_changes.fields.project_entity_id")

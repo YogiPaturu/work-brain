@@ -17,6 +17,10 @@ PROVENANCE_KINDS = {"contemporaneous", "reconstructed"}
 OCCURRENCE_PRECISIONS = {"instant", "day", "month", "quarter", "year", "range", "unknown"}
 STATE_KINDS = {"task", "open_loop", "commitment", "project_state"}
 STATE_STATUSES = {"active", "waiting", "done", "dropped"}
+STATE_CHANGE_FIELDS = (
+    "title", "status", "project_entity_id", "details", "next_action", "waiting_on",
+    "due_at", "updated_at", "closed_at",
+)
 MUTATION_OPS = {"create", "update", "close", "reopen"}
 ENTITY_KINDS = {
     "workspace", "project", "experience", "person", "organization",

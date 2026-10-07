@@ -10,7 +10,7 @@ from typing import Any
 from .capture import HarnessCaptureService, record_capture_hook_failure
 from .career import CareerService, QuestionBank, QuestionFilters, QuestionRef
 from .capture_status import live_status as build_live_status, session_status as build_session_status, status_text
-from .commit import CommitResolver
+from .commit import CommitResolver, commit_draft_contract
 from .config import default_config_path, read_config, resolve_vault_path, set_vault_path
 from .context_resolver import ContextResolver
 from .domain import normalize_domain_tags
@@ -35,8 +35,8 @@ EXIT_LOCK = 5
 EXIT_UNAVAILABLE = 6
 
 
-def _json_dump(value: Any) -> None:
-    print(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+def _json_dump(value: Any, *, sort_keys: bool = True) -> None:
+    print(json.dumps(value, ensure_ascii=False, sort_keys=sort_keys, separators=(",", ":")))
 
 
 def _error_payload(code: str, message: str) -> dict[str, Any]:
@@ -114,6 +114,9 @@ def _parser() -> argparse.ArgumentParser:
     draft.add_argument("--session-id", required=True)
     draft.add_argument("--workflow", help="workflow; defaults to the session's active workflow")
     draft.add_argument("--file", help="JSON file; omit or use - to read CommitDraft from stdin")
+    schema = sub.add_parser("schema", help="show machine-readable application schemas")
+    schema_sub = schema.add_subparsers(dest="schema_command", required=True)
+    schema_sub.add_parser("commit-draft", help="show the canonical CommitDraft contract and template")
     skills = sub.add_parser("skills", help="show progressively loaded Skill/SOP resources")
     skills.add_argument("--workflow", default="think")
     skills.add_argument("--domain-tag", action="append", default=[])
@@ -563,7 +566,7 @@ def _question_ref(value: str | None) -> QuestionRef | None:
 
 def _run(args: argparse.Namespace) -> tuple[Any, bool]:
     command = args.command
-    machine = bool(args.json or command in {"state", "work", "evidence", "context", "experience", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session", "profiles", "backfill-context", "backfill-tags", "backfill-project-workspaces", "migrate-domain-tags"})
+    machine = bool(args.json or command in {"state", "work", "evidence", "context", "experience", "career", "capture-hook", "capture-stop", "recoverable", "skills", "session-start", "commit", "commit-draft", "setup", "reindex", "session", "profiles", "backfill-context", "backfill-tags", "backfill-project-workspaces", "migrate-domain-tags", "schema"})
     if command == "status":
         snapshot = build_live_status(_vault(args))
         return snapshot, bool(args.json)
@@ -593,6 +596,8 @@ def _run(args: argparse.Namespace) -> tuple[Any, bool]:
         return process_capture_hook(vault, args.host, _read_payload("-")), True
     if command == "capture-stop":
         return HarnessCaptureService(_vault(args)).stop(host=args.host, host_session_id=args.host_session_id, session_id=args.session_id), True
+    if command == "schema" and args.schema_command == "commit-draft":
+        return commit_draft_contract(), True
 
     vault = _vault(args)
     if command == "context" and args.context_command == "resolve":
@@ -811,7 +816,7 @@ def main(argv: list[str] | None = None) -> int:
             # is intentionally a JSON no-op.
             _json_dump(value.get("_hook_output", {}))
         elif machine:
-            _json_dump(value)
+            _json_dump(value, sort_keys=args.command != "schema")
         elif args.command == "init":
             print(f"initialized {value['vault']}")
         elif args.command == "rebuild":

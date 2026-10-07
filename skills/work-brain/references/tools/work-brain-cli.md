@@ -64,7 +64,12 @@ work-brain session turns --session-id SESSION_ID
 work-brain session turns --session-id SESSION_ID --offset 0 --limit 100
 work-brain session status --session-id SESSION_ID
 work-brain session import --file transcript.json
+work-brain schema commit-draft --json
 ```
+
+`schema commit-draft --json` is read-only, does not require an initialized
+vault, and returns the canonical CommitDraft structure and template. Its section
+names are generated from the same `ENTRY_SECTIONS` constant used by validation.
 
 `context resolve` is the read-only application operation for resolving existing
 workspace/project identities from canonical names, aliases, or bounded
@@ -134,6 +139,12 @@ project, preserve its canonical name in `workspace`/`project` and its returned
 ID in `workspace_ref`/`project_ref`; the application verifies the ref against
 the source catalog. Do not invent refs or emit persisted fields such as
 `workspace_entity_id` or `project_entity_id` in a CommitDraft.
+
+At a commit boundary, verify the exact target session and persisted turns, then
+retrieve `work-brain schema commit-draft --json` and fill its template. Keep
+every structural key exactly as returned. The existing
+`work-brain commit-draft --session-id ... --workflow ... [--file ...]`
+invocation is unchanged.
 
 `backfill-tags` is the documented historical-maintenance operation for adding
 domain tags to existing current entries. Its JSON input is an explicit mapping
@@ -213,9 +224,13 @@ session. It preserves the supplied turn text exactly, marks the capture as
 per-turn timestamps are recorded at import time rather than fabricated as
 historical event times.
 
-If `commit-draft` returns a validation error, do not append a turn to add a
-summary. Correct the draft's exact `source_turns` for the selected session, or
-leave that session recoverable for a later workflow boundary. A same-session
+If `commit-draft` returns a validation error, classify it. For structural/schema
+errors, retrieve the canonical schema again and repair against that structure,
+then retry at most once on the same session. For provenance/source-turn errors,
+inspect the exact persisted turns and repair references. For semantic/context
+ambiguity, follow the normal clarification rules. If the deterministic repair
+still fails, leave raw turns preserved and surface the error. Do not append a
+turn to repair a draft or create a replacement session. A same-session
 follow-up may create a revision; evidence from a different session creates a
 new entry and may use `source_entry_refs` to link the earlier entry.
 

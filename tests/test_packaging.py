@@ -47,6 +47,7 @@ class DistributionResourceTests(unittest.TestCase):
                 "share/work-brain/skills/work-brain/references/schemas/commit-draft.md",
                 "share/work-brain/skills/work-brain/references/probes/engineering.md",
                 "share/work-brain/skills/work-brain/references/tools/agent-tools.md",
+                "share/work-brain/skills/work-brain/references/tools/work-brain-cli.md",
             }
             self.assertTrue(required_resources <= installed_files)
 
@@ -68,10 +69,12 @@ class DistributionResourceTests(unittest.TestCase):
             ):
                 think = SkillLoader().load("think")
                 backfill = SkillLoader().load("backfill")
+                committing = SkillLoader().load("think", include_commit_schema=True)
 
             self.assertEqual("WORK-BRAIN-SKILL", think.skill.resource_id)
             self.assertTrue(any(resource.path.name == "think.sop.md" for resource in think.resources))
             self.assertTrue(any(resource.path.name == "backfill.sop.md" for resource in backfill.resources))
+            self.assertTrue(any(resource.path.name == "commit-draft.md" for resource in committing.resources))
 
 
 if __name__ == "__main__":

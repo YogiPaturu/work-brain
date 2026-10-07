@@ -29,6 +29,8 @@ commands through the harness's existing shell capability:
 - `list_interview_candidates`
 - `associate_entry_experience` for explicit post-hoc Experience association
 - `commit-draft` through stdin or a bounded file during the committing phase
+- `schema commit-draft` for the canonical machine-readable draft structure,
+  retrieved only at the commit boundary
 - `session status` for read-only capture health and lifecycle inspection
 - `status` for the auto-detected lifecycle dashboard at Work Brain boundaries
 
@@ -96,11 +98,16 @@ work-brain career prepare --question-text "Tell me about a difficult decision"
 work-brain career mock --question-text "Tell me about a difficult decision"
 ```
 
-Structured CommitDraft input MAY be an object on stdin or a JSON file. The
-application validates the request, applies the active workflow contract, and
-returns a compact JSON result. Unknown, malformed, or failed calls become
-stable structured errors; they MUST NOT mutate the vault. Tool payloads and
-host shell details are not appended to the raw visible-turn transcript.
+At a commit boundary, first verify the exact target session and inspect its
+persisted turns, then run `work-brain schema commit-draft --json`. Populate that
+returned template without adding, removing, renaming, pluralizing, or moving
+structural keys, and publish it with `work-brain commit-draft`. Do not retrieve
+the schema during ordinary conversation turns. Structured input MAY be supplied
+on stdin or in a JSON file. The application validates the request, applies the
+active workflow contract, and returns a compact JSON result. Unknown, malformed,
+or failed calls become stable structured errors; they MUST NOT mutate the vault.
+Tool payloads and host shell details are not appended to the raw visible-turn
+transcript.
 
 When `resolve_context` returns a deterministic existing workspace or project,
 the model may copy its `entity_id` as `workspace_ref` or `project_ref` while
@@ -112,9 +119,13 @@ CommitDraft inputs.
 Raw-turn append is not exposed as a normal CLI operation. The internal append
 API is reserved for adapters, fixtures, and explicit integration tests. A
 hosted agent MUST NOT use it to append its own summary or manufacture missing
-conversation history. If a CommitDraft fails because of provenance, inspect
-`session turns` and repair the draft; do not create a replacement session or
-combine unrelated sessions.
+conversation history. If a CommitDraft fails, classify the error. For
+structural/schema failures, retrieve the canonical schema again and make one
+repair attempt against the same session; if it still fails, preserve the raw
+session and surface the error. For provenance/source-turn failures, inspect
+that exact session's persisted turns and repair the references. For
+semantic/context ambiguity, follow the normal clarification rules. Never
+create a replacement session or combine unrelated sessions.
 
 `session quarantine` is a narrowly scoped maintenance command requiring an
 explicit session ID and reason; it hides a known bad structured entry while

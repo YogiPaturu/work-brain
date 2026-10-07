@@ -25,16 +25,14 @@ from work_brain import (
     select_workflow,
 )
 from work_brain.model import ModelResponse
+from work_brain.domain import ENTRY_SECTIONS
 from work_brain.capture import HarnessCaptureService, normalize_capture_event, record_capture_hook_failure
 from work_brain.cli import main
 from work_brain.fsutil import append_jsonl
 
 
 def draft(*, workflow: str = "think", bad_runtime_field: bool = False) -> dict:
-    sections = {name: [] for name in (
-        "context", "observations", "significance", "contribution", "reasoning", "evidence",
-        "alternatives_tradeoffs", "decisions_actions", "expectations", "outcomes", "learning", "open_questions",
-    )}
+    sections = {name: [] for name in ENTRY_SECTIONS}
     sections["context"] = [{"text": "We examined the import boundary.", "basis": "stated", "source_turns": [1]}]
     value = {
         "title": "Import boundary decision",

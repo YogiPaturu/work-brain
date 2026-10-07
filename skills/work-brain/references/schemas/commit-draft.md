@@ -19,7 +19,8 @@ The model emits only semantic fields:
   `Auth implementation` or `Billing Right Code`.
 - `project_ref`: optional existing project entity ID returned by the
   read-only `resolve_context` operation. Never invent this ID.
-- `sections`: exactly the supported entry section names; each statement has `text`,
+- `sections`: exactly the canonical section names returned by
+  `work-brain schema commit-draft --json`; each statement has `text`,
   `basis` (`stated` or `inferred`), and one or more exact `source_turns` from the
   persisted raw conversation. Every statement must identify the raw turn numbers
   that support it; do not leave this list empty. Each statement must include at
@@ -27,6 +28,40 @@ The model emits only semantic fields:
   qualify as durable evidence.
 - `state_changes`, `entity_candidates`, `artifact_candidates`, and
   `source_entry_refs`.
+
+## Application-owned structure
+
+At commit time, after verifying the target session and its persisted turns, run:
+
+```sh
+work-brain schema commit-draft --json
+```
+
+The CLI result is the runtime authority for CommitDraft field names and the
+section scaffold. Populate its `template`; do not construct a replacement shape
+from this prose or memory. The existing validator remains the final gate. On a
+structural validation error, retrieve the contract again and make one repair
+attempt against the same session. Do not query the contract during ordinary
+conversation turns.
+
+The following section list is duplicated for human readability. A regression
+test keeps it identical to `ENTRY_SECTIONS`; the CLI output remains authoritative.
+
+<!-- COMMIT-DRAFT-SECTION-NAMES -->
+```text
+context
+observations
+significance
+contribution
+reasoning
+evidence
+alternatives_tradeoffs
+decisions_actions
+expectations
+outcomes
+learning
+open_questions
+```
 
 When a bounded conversation clearly continues an existing professional
 Experience, `entity_candidates` may include its stable entity ID or an alias

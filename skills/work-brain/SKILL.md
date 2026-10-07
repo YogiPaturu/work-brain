@@ -90,10 +90,22 @@ source turns from that target session, including at least one user-authored
 turn. Evidence from another session requires a separate linked entry, not a
 revision of the current entry.
 
-If validation fails, repair provenance against the same target session and retry
-the canonical workflow; never create a replacement session to work around the
-error. Imported transcripts retain imported/reconstructed capture semantics and
-must not be presented as verbatim host capture.
+At the commit boundary, after verifying the exact session and reviewing its
+persisted turns, obtain the application-owned structure with
+`work-brain schema commit-draft --json`. Fill its template with semantic
+content and exact source-turn evidence. Use its keys exactly: never invent,
+rename, pluralize, omit, or move structural fields. Do not query this contract
+during ordinary conversation turns.
+
+If publication validation fails, classify the failure. For a structural/schema
+failure, retrieve the canonical contract again, repair against it, and make at
+most one retry on the same target session. If that retry fails, preserve the raw
+session and surface the error. For a provenance/source-turn failure, inspect
+that same session's persisted turns and repair the references. For a semantic
+or context ambiguity, follow the normal clarification/resolution rules. Never
+create a replacement session to work around a failure. Imported transcripts
+retain imported/reconstructed capture semantics and must not be presented as
+verbatim host capture.
 
 Detailed session, revision, CommitDraft, import, recovery, and CLI mechanics
 are owned by the referenced core SOP, schema, and tool documentation below.
